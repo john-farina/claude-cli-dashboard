@@ -185,6 +185,20 @@ To push an update: just push to `main`. That's it. The update button appears aut
 
 **Optional: GitHub Releases** — If you create a GitHub Release (with a tag like `v0.3.0`), its release notes body will show in the hover tooltip alongside commit summaries. This is purely cosmetic — updates are triggered by commits, not releases.
 
+## Contributing a PR
+
+When a user asks to create a PR (e.g. "make a PR for my changes", "submit this as a PR"), handle the entire workflow automatically:
+
+1. **Create a feature branch** off the current branch: `git checkout -b <descriptive-branch-name>` (e.g. `fix-version-manager-loading`, `add-dark-mode-toggle`). Use lowercase kebab-case.
+2. **Stage and commit** the relevant changes with a clear commit message summarizing what changed and why.
+3. **Push** the branch: `git push -u origin <branch-name>`
+4. **Create the PR** with `gh pr create --base main`:
+   - **Title**: Short, clean, imperative (e.g. "Fix version list failing to load on first open"). Under 70 chars.
+   - **Body**: Summary of what changed and why, formatted with `## Summary` and `## Test plan` sections.
+5. Return the PR URL to the user.
+
+If the user is on `main`, create the branch first. If they're already on a feature branch, use it directly (or create a new one off it if the changes are unrelated to the branch name). Never push directly to `main`.
+
 ## Common Tasks
 
 ### Change CEO agent instructions
