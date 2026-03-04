@@ -18,7 +18,15 @@ const sessionDeselect = document.getElementById("session-deselect");
 const promptLabel = document.getElementById("prompt-label");
 
 const ansiUp = new AnsiUp();
-marked.use({ gfm: true, breaks: true });
+marked.use({
+  gfm: true, breaks: true,
+  renderer: {
+    html(token) {
+      const text = typeof token === 'string' ? token : (token.raw || token.text || '');
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+  }
+});
 
 // Clean up any old theme data
 localStorage.removeItem("ceo-theme");
