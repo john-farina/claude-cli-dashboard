@@ -1717,6 +1717,371 @@ header h1 {
   color: var(--text);
 }
 
+/* ═══════════════════════════════════════════════════
+   CODE DIFF VIEWER
+   ═══════════════════════════════════════════════════ */
+.diff-modal {
+  width: 90vw;
+  max-width: 1200px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  background: var(--modal-bg);
+  padding: 0;
+}
+.diff-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  gap: 16px;
+}
+.diff-modal-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  overflow: hidden;
+}
+.diff-modal-title-row h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+}
+.diff-agent-name {
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.diff-workdir {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.diff-modal-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Toggle tab group */
+.diff-tab-group {
+  display: flex;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.diff-tab {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.diff-tab:hover {
+  color: var(--text);
+}
+.diff-tab.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* Icon buttons (refresh, close) */
+.diff-icon-btn {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 16px;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  line-height: 1;
+}
+.diff-icon-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--border);
+}
+.diff-close-btn:hover {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.08);
+  border-color: transparent;
+}
+
+/* Content area */
+.diff-content {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+/* State screens (empty, loading, error) */
+.diff-empty, .diff-loading, .diff-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px;
+  gap: 8px;
+  text-align: center;
+}
+.diff-empty.hidden, .diff-loading.hidden, .diff-error.hidden {
+  display: none;
+}
+.diff-state-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.diff-empty .diff-state-icon {
+  background: rgba(92, 184, 92, 0.1);
+  color: var(--green);
+  border: 1px solid rgba(92, 184, 92, 0.2);
+}
+.diff-error .diff-state-icon {
+  background: rgba(217, 83, 79, 0.1);
+  color: var(--red);
+  border: 1px solid rgba(217, 83, 79, 0.2);
+}
+.diff-state-text {
+  font-size: 14px;
+  color: var(--text);
+  font-weight: 500;
+}
+.diff-state-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.diff-error .diff-state-text {
+  color: var(--text-dim);
+}
+.diff-retry-btn {
+  margin-top: 8px;
+  font-size: 12px !important;
+  padding: 6px 14px !important;
+}
+
+/* Spinner */
+.diff-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: diffSpin 0.7s linear infinite;
+  margin-bottom: 8px;
+}
+@keyframes diffSpin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── diff2html dark theme overrides ── */
+
+/* Hide the built-in "Viewed" checkbox — not useful here */
+.diff-modal .d2h-file-collapse,
+.diff-modal .d2h-file-switch {
+  display: none;
+}
+
+/* File list summary */
+.diff-modal .d2h-file-list-wrapper {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  margin-bottom: 0;
+  padding: 12px 24px;
+}
+.diff-modal .d2h-file-list-title {
+  display: none;
+}
+.diff-modal .d2h-file-list-line {
+  padding: 3px 0;
+}
+.diff-modal .d2h-file-list-wrapper .d2h-file-list-line a {
+  color: var(--text);
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+.diff-modal .d2h-file-list-wrapper .d2h-file-list-line a:hover {
+  color: var(--accent);
+}
+.diff-modal .d2h-file-list-wrapper .d2h-file-stats {
+  font-size: 11px;
+}
+
+/* Wrapper & diff blocks */
+.diff-modal .d2h-wrapper {
+  background: transparent;
+  padding: 0;
+}
+.diff-modal .d2h-file-wrapper {
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  margin-bottom: 0;
+}
+.diff-modal .d2h-file-wrapper:last-child {
+  border-bottom: none;
+}
+.diff-modal .d2h-file-header {
+  background: var(--surface);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 24px;
+}
+.diff-modal .d2h-file-name-wrapper {
+  font-size: 13px;
+}
+.diff-modal .d2h-file-name {
+  color: var(--text);
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+}
+.diff-modal .d2h-tag {
+  background: rgba(201, 168, 76, 0.12);
+  color: var(--accent);
+  border: none;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 2px 6px;
+}
+
+/* Table layout */
+.diff-modal .d2h-diff-table {
+  border-color: var(--border);
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 12px;
+}
+.diff-modal .d2h-diff-tbody tr {
+  border-color: var(--border);
+}
+
+/* Code lines */
+.diff-modal .d2h-code-line,
+.diff-modal .d2h-code-side-line {
+  background: var(--terminal-bg);
+  color: var(--text);
+  width: 100%;
+  padding: 0 12px;
+}
+
+/* Line numbers */
+.diff-modal .d2h-code-linenumber {
+  background: var(--surface);
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.diff-modal .d2h-code-linenumber::after {
+  border-color: var(--border);
+}
+
+/* Deletions */
+.diff-modal .d2h-del {
+  background: rgba(248, 81, 73, 0.1);
+  border-color: rgba(248, 81, 73, 0.2);
+}
+.diff-modal .d2h-del .d2h-code-line,
+.diff-modal .d2h-del .d2h-code-side-line {
+  background: transparent;
+}
+.diff-modal .d2h-del .d2h-code-line-ctn del {
+  background: rgba(248, 81, 73, 0.25);
+  text-decoration: none;
+}
+.diff-modal .d2h-del .d2h-code-linenumber {
+  background: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.2);
+}
+
+/* Insertions */
+.diff-modal .d2h-ins {
+  background: rgba(63, 185, 80, 0.1);
+  border-color: rgba(63, 185, 80, 0.2);
+}
+.diff-modal .d2h-ins .d2h-code-line,
+.diff-modal .d2h-ins .d2h-code-side-line {
+  background: transparent;
+}
+.diff-modal .d2h-ins .d2h-code-line-ctn ins {
+  background: rgba(63, 185, 80, 0.25);
+  text-decoration: none;
+}
+.diff-modal .d2h-ins .d2h-code-linenumber {
+  background: rgba(63, 185, 80, 0.12);
+  border-color: rgba(63, 185, 80, 0.2);
+}
+
+/* Hunk info row (@@ ... @@) */
+.diff-modal .d2h-info {
+  background: var(--surface);
+  color: var(--text-dim);
+  border-color: var(--border);
+  font-style: normal;
+}
+
+/* Empty placeholders (side-by-side) */
+.diff-modal .d2h-emptyplaceholder {
+  background: rgba(255, 255, 255, 0.02);
+  border-color: var(--border);
+}
+
+/* Side-by-side layout */
+.diff-modal .d2h-file-diff {
+  border-color: var(--border);
+}
+.diff-modal .d2h-file-side-diff {
+  border-color: var(--border);
+}
+
+/* Scrollbar */
+.diff-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.diff-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+.diff-content::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+.diff-content::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+}
+
 
 /* ═══════════════════════════════════════════════════
    SESSION PICKER
@@ -4470,6 +4835,44 @@ header .btn-secondary kbd {
     height: 28px;
   }
   .todo-delete-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  /* Diff modal — fullscreen on mobile */
+  .diff-modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    height: 100dvh;
+    max-height: 100dvh;
+    border-radius: 0;
+  }
+  .diff-modal-header {
+    padding: 12px 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .diff-modal-controls {
+    min-height: 36px;
+  }
+  .diff-icon-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  .diff-tab {
+    padding: 6px 14px;
+    font-size: 13px;
+  }
+  .diff-workdir {
+    display: none;
+  }
+  .diff-modal .d2h-file-list-wrapper {
+    padding: 10px 16px;
+  }
+  .diff-modal .d2h-file-header {
+    padding: 10px 16px;
+  }
+  .diff-modal-controls button {
     min-width: 36px;
     min-height: 36px;
   }
