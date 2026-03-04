@@ -48,6 +48,9 @@ try {
 }
 
 const PORT = userConfig.port || 9145;
+// Bind to localhost only by default — prevents other devices on the same WiFi from accessing.
+// Users who want remote access (phone, Tailscale) can set "bindHost": "0.0.0.0" in config.json.
+const BIND_HOST = userConfig.bindHost || "127.0.0.1";
 
 // Route CLI browser opens (gt submit, gh auth, etc.) to the in-app browser overlay
 process.env.BROWSER = path.join(__dirname, "open-url.sh");
@@ -3363,15 +3366,15 @@ server.on("error", (err) => {
         execSync(`echo "${pids}" | xargs kill -9 2>/dev/null`);
       }
     } catch {}
-    setTimeout(() => server.listen(PORT), 1000);
+    setTimeout(() => server.listen(PORT, BIND_HOST), 1000);
   } else {
     console.error("Server error:", err);
     process.exit(1);
   }
 });
 
-server.listen(PORT, () => {
-  console.log(`CEO Dashboard running at http://localhost:${PORT}`);
+server.listen(PORT, BIND_HOST, () => {
+  console.log(`CEO Dashboard running at http://${BIND_HOST}:${PORT}`);
   // Ensure required directories exist (covers users who skipped setup or had partial setup)
   for (const dir of [path.join(__dirname, "docs"), path.join(os.homedir(), ".claude", "docs")]) {
     try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch {}

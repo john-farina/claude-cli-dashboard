@@ -302,7 +302,7 @@ header h1 {
 .update-tooltip {
   display: none;
   position: absolute;
-  top: calc(100% + 10px);
+  top: 100%;
   right: 0;
   width: 340px;
   max-height: 300px;
@@ -311,6 +311,7 @@ header h1 {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 16px;
+  padding-top: 26px;
   z-index: 200;
   box-shadow: 0 8px 32px rgba(0,0,0,0.5);
   font-size: 12.5px;
@@ -318,6 +319,18 @@ header h1 {
   color: var(--text);
   text-align: left;
   font-weight: normal;
+  /* Bridge the gap so mouse can travel from button to tooltip */
+  margin-top: 0;
+  clip-path: inset(-1px -1px -1px -1px); /* keep box-shadow visible */
+}
+.update-tooltip::before {
+  /* Invisible hover bridge above the tooltip */
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 0;
+  right: 0;
+  height: 10px;
 }
 .update-wrapper:hover .update-tooltip:not(:empty) {
   display: block;
