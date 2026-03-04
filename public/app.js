@@ -915,7 +915,6 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           <div class="more-menu-wrap">
             <button class="more-btn" tabindex="-1" title="More actions">&hellip;</button>
             <div class="more-menu">
-              <button class="more-menu-item" data-action="view-diff">View Diff</button>
               <button class="more-menu-item" data-action="rename">Rename</button>
               <button class="more-menu-item" data-action="header-color">Header Color</button>
               <div class="header-color-picker" style="display:none;">
@@ -930,6 +929,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
                   <button class="header-color-swatch" data-color="#6bb5a0" title="Teal" style="--swatch:#6bb5a0;"></button>
                 </div>
               </div>
+              <button class="more-menu-item" data-action="view-diff">View Diff</button>
               <button class="more-menu-item" data-action="save-memory">Save Memory</button>
               <button class="more-menu-item" data-action="update-memory">Update Memory</button>
               <button class="more-menu-item more-menu-danger" data-action="clear-memory">Clear Memory</button>

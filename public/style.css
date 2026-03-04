@@ -1830,7 +1830,7 @@ header h1 {
 /* Hide the built-in "Viewed" checkbox — not useful here */
 .diff-modal .d2h-file-collapse,
 .diff-modal .d2h-file-switch {
-  display: none !important;
+  display: none;
 }
 
 /* File list summary */
