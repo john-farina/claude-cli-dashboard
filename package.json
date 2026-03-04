@@ -1,0 +1,21 @@
+{
+  "name": "claude-cli-dashboard",
+  "version": "0.1.0",
+  "description": "Multi-agent management UI for Claude Code",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/john-farina/claude-cli-dashboard.git"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "setup": "node setup.js",
+    "setup:sandbox": "node setup.js --sandbox /tmp/ceo-test",
+    "setup:clean": "node setup.js --clean-sandbox /tmp/ceo-test"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  }
+}

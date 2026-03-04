@@ -1,0 +1,8 @@
+node_modules/
+config.json
+sessions.json
+todos.json
+docs/
+firebase-debug.log
+*.log
+.DS_Store

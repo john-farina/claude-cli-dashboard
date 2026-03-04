@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+  <title>CEO Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+</head>
+<body>
+  <!-- Full-page loading overlay — visible until agents are laid out -->
+  <div id="page-loader" class="page-loader">
+    <div class="loading-claude">
+      <div class="loading-ring"></div>
+      <div class="loading-ring loading-ring-2"></div>
+      <div class="loading-ring loading-ring-3"></div>
+      <div class="loading-orb loading-orb-1"></div>
+      <div class="loading-orb loading-orb-2"></div>
+      <div class="loading-orb loading-orb-3"></div>
+      <div class="loading-orb loading-orb-4"></div>
+      <div class="loading-orb loading-orb-5"></div>
+      <div class="loading-orb loading-orb-6"></div>
+      <img src="claude-symbol.svg" class="loading-logo" alt="">
+    </div>
+    <span class="page-loader-text">Loading Dashboard<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></span>
+  </div>
+  <header>
+    <div class="header-left">
+      <img src="claude-symbol.svg" alt="" class="header-logo">
+      <h1>CEO Dashboard</h1>
+      <span id="connection-dot" class="dot offline" title="Disconnected"></span>
+      <span class="contribute-info" tabindex="0">
+        &#x24D8;
+        <div class="contribute-tooltip">
+          <strong>Contributing</strong>
+          <p>Setup created a personal branch for you off <code>main</code>. Your changes live there and won't conflict with upstream updates.</p>
+          <p><strong>To contribute back:</strong></p>
+          <ol>
+            <li>Make your changes on your branch</li>
+            <li>Keep each PR focused — one feature or fix per PR</li>
+            <li>Push your branch: <code>git push -u origin your-branch</code></li>
+            <li>Open a pull request on GitHub against <code>main</code></li>
+          </ol>
+        </div>
+      </span>
+    </div>
+    <div class="header-right">
+      <button id="settings-btn" class="settings-icon-btn" tabindex="0" title="Settings (S)"><span class="gear-icon">&#x2699;</span><kbd>S</kbd></button>
+      <button id="restart-server-btn" class="btn-secondary" tabindex="0">&#x21bb; Refresh <kbd>R</kbd></button>
+      <button id="ceo-md-btn" class="btn-secondary" tabindex="0">CEO.md <kbd>C</kbd></button>
+      <button id="files-btn" class="btn-secondary" tabindex="0">.claude <kbd>F</kbd></button>
+      <button id="todo-btn" class="btn-secondary" tabindex="0">&#x2611; Notes <kbd>D</kbd></button>
+      <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
+    </div>
+  </header>
+
+  <div id="minimized-bar" class="minimized-bar"></div>
+
+  <main id="agents-grid" class="agents-grid">
+    <div id="empty-state" class="empty-state">
+      <p>No agents running. Click <strong>+ New Agent</strong> to start one.</p>
+    </div>
+  </main>
+
+  <!-- Todo View -->
+  <section id="todo-view" class="todo-view hidden">
+    <div class="todo-header">
+      <button id="todo-back" class="btn-secondary todo-back-btn">&larr; Agents</button>
+      <h2>Notes</h2>
+      <button id="todo-new" class="btn-primary">+ New List</button>
+    </div>
+    <div id="todo-dots" class="todo-dots"></div>
+    <div id="todo-content" class="todo-content">
+      <div class="todo-empty-state">
+        <p>No lists yet. Click <strong>+ New List</strong> to create one.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Todo Color Settings Modal -->
+  <div id="todo-settings-overlay" class="modal-overlay hidden">
+    <div class="modal todo-settings-modal">
+      <h2>Color Palette</h2>
+      <div id="todo-color-rows" class="todo-color-rows"></div>
+      <button id="todo-add-color" class="btn-secondary" style="margin-top:12px;width:100%">+ Add Color</button>
+      <div class="modal-actions">
+        <button id="todo-settings-close" class="btn-primary">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Agent Modal -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>New Agent</h2>
+      <form id="new-agent-form">
+        <label>
+          Name
+          <input type="text" id="agent-name" placeholder="my-agent" required>
+        </label>
+
+        <!-- Resume Previous Session -->
+        <div class="session-picker">
+          <label>
+            Resume Previous Session <span class="optional">(optional)</span>
+            <input type="text" id="session-search" placeholder="Search by summary, branch, or prompt...">
+          </label>
+          <div id="session-list" class="session-list"></div>
+          <div id="session-selected-info" class="session-selected-info hidden">
+            <span id="session-selected-label"></span>
+            <a href="#" id="session-deselect" class="deselect-link">clear selection</a>
+          </div>
+        </div>
+
+        <div id="workdir-label" class="workdir-picker">
+          <span class="label-text">Working Directory</span>
+          <div class="workdir-options" id="workdir-options">
+            <!-- Workspace pills populated dynamically from config -->
+            <button type="button" class="workdir-pill" data-path="__custom__">Custom</button>
+          </div>
+          <input type="text" id="agent-workdir-custom" class="workdir-custom-input hidden" placeholder="/path/to/project">
+        </div>
+        <label id="prompt-label">
+          Initial Prompt <span class="optional">(optional)</span>
+          <div id="prompt-drop-zone" class="prompt-drop-zone">
+            <textarea id="agent-prompt" rows="3" placeholder="e.g. Fix the login bug in AuthView.swift"></textarea>
+            <div id="modal-attachment-chips" class="attachment-chips"></div>
+            <div class="drop-hint">Drop images or videos here</div>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Change Workspace Modal -->
+  <div id="workspace-modal-overlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h2>Change Workspace</h2>
+      <form id="workspace-form">
+        <input type="hidden" id="workspace-agent-name">
+        <label>
+          Working Directory
+          <input type="text" id="workspace-path" value="">
+        </label>
+        <p class="modal-warning">This will kill and recreate the agent session.</p>
+        <div class="modal-actions">
+          <button type="button" id="workspace-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" class="btn-primary">Update</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- .claude File Browser Panel -->
+  <div id="files-backdrop" class="files-backdrop"></div>
+  <aside id="files-panel" class="files-panel">
+    <div class="files-panel-header">
+      <h2>.claude</h2>
+      <button id="files-close" class="kill-btn" tabindex="0">&times;</button>
+    </div>
+    <div id="files-categories" class="files-categories"></div>
+    <div id="file-editor" class="file-editor hidden">
+      <div class="file-editor-header">
+        <span id="file-editor-name" class="file-editor-name"></span>
+        <div class="file-editor-actions">
+          <button id="file-editor-back" class="file-editor-back-btn" title="Back to file list">&larr;</button>
+          <button id="file-editor-toggle" class="md-toggle-btn" style="display:none;">Raw</button>
+          <button id="file-editor-finder" class="btn-secondary open-finder-btn" style="padding:3px 10px;font-size:11px;">Open Folder</button>
+          <button id="file-editor-save" class="btn-primary">Save</button>
+        </div>
+      </div>
+      <div id="file-editor-hint" class="file-editor-hint" style="display:none;">This is injected into every agent's context. Keep it short — verbose instructions degrade performance. Link to docs in <code>agent-docs/</code> instead of inlining details.</div>
+      <div id="file-editor-rendered" class="md-rendered markdown-body" style="display:none;"></div>
+      <textarea id="file-editor-content" class="file-editor-content"></textarea>
+    </div>
+  </aside>
+
+  <!-- Settings Panel -->
+  <div id="settings-backdrop" class="settings-backdrop"></div>
+  <aside id="settings-panel" class="settings-panel">
+    <div class="settings-panel-header">
+      <h2>Settings</h2>
+      <button id="settings-close" class="kill-btn" tabindex="0">&times;</button>
+    </div>
+    <div class="settings-content">
+      <!-- Sleep Prevention -->
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Sleep Prevention</span>
+            <span class="settings-desc">Automatic — Mac stays awake while dashboard is running. Close lid, agents keep working.</span>
+          </div>
+          <span class="settings-badge-active">Active</span>
+        </div>
+      </div>
+
+      <!-- Auto-Start on Boot -->
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Auto-Start on Boot</span>
+            <span class="settings-desc">Launch CEO Dashboard automatically when you log in</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-autostart">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Add to Dock -->
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Add to Dock</span>
+            <span class="settings-desc" id="dock-desc">Install as a standalone app in your Dock</span>
+          </div>
+          <button id="setting-add-to-dock" class="btn-settings-action">Install</button>
+        </div>
+      </div>
+
+      <!-- In-App Browser -->
+      <div class="settings-section">
+        <div class="settings-section-title">In-App Browser</div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Authentication</span>
+            <span class="settings-desc">Passkeys require Safari. Use the globe icon in the browser bar to open the page in Safari for passkey login, then return.</span>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Clear Browser Data</span>
+            <span class="settings-desc">Reset cookies, cache, and saved logins for the in-app browser</span>
+          </div>
+          <button id="setting-clear-browser" class="btn-settings-action" style="background:#a33">Clear</button>
+        </div>
+      </div>
+
+      <!-- Tailscale -->
+      <div class="settings-section">
+        <div class="settings-section-title">Remote Access</div>
+        <div id="tailscale-status" class="settings-row tailscale-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Tailscale</span>
+            <span class="settings-desc" id="tailscale-desc">Checking...</span>
+          </div>
+          <span id="tailscale-badge" class="settings-badge offline">...</span>
+        </div>
+        <div id="tailscale-details" class="tailscale-details hidden">
+          <div class="tailscale-detail-row">
+            <span class="tailscale-detail-label">IP</span>
+            <code id="tailscale-ip" class="tailscale-detail-value">—</code>
+          </div>
+          <div class="tailscale-detail-row">
+            <span class="tailscale-detail-label">URL</span>
+            <a id="tailscale-url" class="tailscale-detail-value tailscale-link" href="#" target="_blank">—</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Defaults (collapsible) -->
+      <div class="settings-section settings-collapse">
+        <button type="button" class="settings-collapse-toggle" id="agent-defaults-toggle">
+          <span class="settings-collapse-arrow">&#x25B6;</span>
+          <span class="settings-section-title" style="margin:0">Agent Defaults</span>
+        </button>
+        <div id="agent-defaults-body" class="settings-collapse-body hidden">
+          <div class="settings-inline-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Default Name</span>
+              <span class="settings-desc">Pre-filled name when creating a new agent. Auto-increments if taken.</span>
+            </div>
+            <input type="text" id="setting-default-agent-name" class="settings-inline-input" placeholder="agent">
+          </div>
+          <div class="settings-inline-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Session Prefix</span>
+              <span class="settings-desc">Prefix for tmux session names so the dashboard can identify its own sessions.</span>
+            </div>
+            <input type="text" id="setting-agent-prefix" class="settings-inline-input" placeholder="ceo-">
+          </div>
+          <div class="settings-inline-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Port</span>
+              <span class="settings-desc">The port the dashboard server runs on.</span>
+            </div>
+            <input type="number" id="setting-port" class="settings-inline-input" placeholder="9145" style="width:80px">
+          </div>
+          <div class="settings-inline-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Shell Command</span>
+              <span class="settings-desc">The terminal command that launches the dashboard (creates a shell alias).</span>
+            </div>
+            <div class="settings-shell-cmd-row">
+              <input type="text" id="setting-shell-command" class="settings-inline-input" placeholder="ceo" style="width:80px">
+              <button id="setting-install-alias" class="btn-settings-action">Install</button>
+            </div>
+          </div>
+          <p class="settings-hint">Prefix, port, and shell command changes take effect after restart.</p>
+        </div>
+      </div>
+
+      <!-- Workspaces (collapsible) -->
+      <div class="settings-section settings-collapse">
+        <button type="button" class="settings-collapse-toggle" id="workspace-toggle">
+          <span class="settings-collapse-arrow">&#x25B6;</span>
+          <span class="settings-section-title" style="margin:0">Workspaces</span>
+        </button>
+        <div id="workspace-collapse-body" class="settings-collapse-body hidden">
+          <div id="workspace-list" class="workspace-list"></div>
+          <div class="workspace-add-row">
+            <input type="text" id="workspace-add-path" class="workspace-input" placeholder="/path/to/project">
+            <input type="text" id="workspace-add-label" class="workspace-input workspace-label-input" placeholder="Label">
+            <button id="workspace-add-btn" class="btn-settings-action">Add</button>
+          </div>
+          <div class="workspace-default-row">
+            <span class="settings-label">Default</span>
+            <div id="workspace-default-select" class="custom-select">
+              <div class="custom-select-trigger">
+                <span class="custom-select-label">—</span>
+                <span class="custom-select-arrow">&#x25BC;</span>
+              </div>
+              <div class="custom-select-options"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Embedded Shell Terminal — always-visible footer -->
+  <div id="shell-panel" class="shell-panel">
+    <div class="shell-panel-resize"></div>
+    <div id="shell-header" class="shell-panel-header">
+      <div class="shell-panel-header-left">
+        <span class="shell-panel-label">Terminal <kbd>T</kbd></span>
+        <span id="shell-cwd" class="shell-info-pill shell-cwd-pill"></span>
+        <span id="shell-branch" class="shell-info-pill shell-branch-pill"></span>
+        <a id="shell-pr-link" class="shell-pr-link" href="#" target="_blank" style="display:none">PR</a>
+      </div>
+      <div class="shell-panel-header-right">
+        <span id="shell-chevron" class="shell-chevron">&#x25B2;</span>
+      </div>
+    </div>
+    <div id="shell-terminal" class="shell-terminal"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

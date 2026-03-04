@@ -1,0 +1,11 @@
+{
+  "workspaces": [
+    { "path": "/Users/you/projects/my-app", "label": "my-app" }
+  ],
+  "defaultWorkspace": "/Users/you/projects/my-app",
+  "port": 9145,
+  "agentPrefix": "ceo-",
+  "defaultAgentName": "agent",
+  "shellCommand": "ceo",
+  "prLinkStyle": "graphite"
+}

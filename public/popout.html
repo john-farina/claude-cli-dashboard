@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent — CEO Dashboard</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg?v=2">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="popout-body">
+  <div class="popout-header">
+    <div class="popout-header-left">
+      <button id="back-btn" class="btn-secondary popout-back-btn">&#8592; Dashboard</button>
+      <span id="agent-name" class="agent-name"></span>
+      <span id="status-badge" class="status-badge working">working</span>
+    </div>
+    <div class="popout-header-right">
+      <span id="workdir" class="workdir-link"></span>
+      <span id="branch-info" class="branch-info"></span>
+      <button id="restart-btn" class="restart-btn" title="Restart Claude">&#8635;</button>
+      <button id="kill-btn" class="kill-btn" title="Kill agent">&times;</button>
+    </div>
+  </div>
+
+  <div id="terminal" class="terminal" tabindex="0"></div>
+  <div id="prompt-actions" class="prompt-actions"></div>
+  <div id="attachment-chips" class="attachment-chips"></div>
+  <div class="popout-input">
+    <textarea id="input" rows="1" placeholder="Send a message..."></textarea>
+    <button id="send-btn" class="send-btn">Send</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js"></script>
+  <script src="popout.js"></script>
+</body>
+</html>
