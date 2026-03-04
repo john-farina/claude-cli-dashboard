@@ -655,6 +655,12 @@ function stripCeoPreamble(output) {
   return filtered.join("\n");
 }
 
+// Strip all ANSI escape sequences (SGR, CSI erase/cursor, OSC, etc.)
+// More comprehensive than SGR-only regex — handles ESC[K, ESC[J, etc.
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+}
+
 // Filter Claude Code's input prompt area from display output.
 // Strips the ❯ prompt line (with or without text) and adjacent separator lines.
 // We have our own input in the dashboard so Claude's prompt area is redundant.
@@ -662,23 +668,27 @@ function filterOutputForDisplay(lines) {
   // Strip CEO preamble first
   lines = filterCeoPreamble(lines);
 
-  // If this is an AskUserQuestion prompt, don't strip ❯ lines —
-  // the ❯ marks the currently selected option, not Claude's input prompt
+  // If this is an interactive TUI prompt (AskUserQuestion, etc.), don't strip ❯ lines —
+  // the ❯ marks the currently selected option, not Claude's input prompt.
+  // Detect via hint text OR ❯ prefix on a numbered option line.
   const tailLines = lines.slice(-15);
-  const isAskQuestion = tailLines.some((l) => {
-    const s = l.replace(/\x1b\[[0-9;]*m/g, "");
-    return s.includes("Enter to select") || s.includes("\u2191/\u2193 to navigate");
+  const isInteractiveSelect = tailLines.some((l) => {
+    const s = stripAnsi(l);
+    return s.includes("Enter to select") ||
+           s.includes("\u2191/\u2193 to navigate") ||
+           /^\s*❯\s*\d+\.\s/.test(s);
   });
-  if (isAskQuestion) return lines;
+  if (isInteractiveSelect) return lines;
 
   const searchStart = Math.max(0, lines.length - 15);
   let promptIdx = -1;
 
   for (let i = lines.length - 1; i >= searchStart; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
-    // Match ❯ prompt (with or without user text after it)
+    const stripped = stripAnsi(lines[i]).trim();
+    // Match ❯ prompt (with or without user text after it), but NOT numbered
+    // option lines like "❯ 1. Option" which are TUI selection indicators.
     // Also match bare > only when empty (> is used in blockquotes so don't match "> text")
-    if (/^❯/.test(stripped) || /^>\s*$/.test(stripped)) {
+    if ((/^❯/.test(stripped) && !/^❯\s*\d+\.\s/.test(stripped)) || /^>\s*$/.test(stripped)) {
       promptIdx = i;
       break;
     }
@@ -690,13 +700,13 @@ function filterOutputForDisplay(lines) {
 
   // Check for separator line before prompt
   if (promptIdx > 0) {
-    const prev = lines[promptIdx - 1].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const prev = stripAnsi(lines[promptIdx - 1]).trim();
     if (isSeparatorLine(prev)) toRemove.add(promptIdx - 1);
   }
 
   // Check for separator line after prompt
   if (promptIdx < lines.length - 1) {
-    const next = lines[promptIdx + 1].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const next = stripAnsi(lines[promptIdx + 1]).trim();
     if (isSeparatorLine(next)) toRemove.add(promptIdx + 1);
   }
 
@@ -800,7 +810,7 @@ function detectStatus(output, prevOutput) {
   // lastLines[0] = last non-empty line, lastLines[1] = second-to-last, etc.
   const lastLines = [];
   for (let i = lines.length - 1; i >= 0 && lastLines.length < 15; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (stripped) lastLines.push(stripped);
   }
   const lastLine = lastLines[0] || "";
@@ -885,7 +895,7 @@ function detectPromptType(output) {
   const lines = output.split("\n");
   const lastLines = [];
   for (let i = lines.length - 1; i >= 0 && lastLines.length < 15; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (stripped) lastLines.unshift(stripped);
   }
   const chunk = lastLines.join("\n");
@@ -929,7 +939,7 @@ function parsePromptOptions(output) {
   // separator/decoration lines (──── or ←/→ nav bars), and the ❯ cursor prefix.
   // Stop when we hit an actual content line that isn't part of the options block.
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 40); i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (!stripped) continue; // blank line
     // Separator/decoration lines (─, ═, ━, ←, →, ☐, ✔, etc.)
     if (/^[─━═←→☐✔☑\s│|]+$/.test(stripped)) continue;
@@ -948,7 +958,7 @@ function parsePromptOptions(output) {
       // (indented text that follows an option).
       // Check if this looks like the question/header above options — stop scanning.
       // Indented lines (4+ spaces in original) are option descriptions — skip them.
-      const raw = lines[i].replace(/\x1b\[[0-9;]*m/g, "");
+      const raw = stripAnsi(lines[i]);
       if (raw.match(/^\s{4,}/)) continue; // indented description line — keep scanning
       break; // actual content line — stop
     } else {
