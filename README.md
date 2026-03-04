@@ -2,6 +2,7 @@
   <img src="public/favicon.svg" width="80" height="80" alt="CEO Dashboard">
 </p>
 
+
 <h1 align="center">CEO Dashboard</h1>
 
 <p align="center">
