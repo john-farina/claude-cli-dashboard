@@ -601,23 +601,33 @@ async function main() {
     console.log(`  Sandbox complete. Inspect results at: ${SANDBOX}`);
     console.log();
   } else {
-    const rcName = path.basename(rcFile);
-    console.log("  To start the dashboard:");
-    console.log(`    source ~/${rcName} && ${cmd}`);
-    console.log();
-    console.log("  Or without the alias:");
-    console.log("    npm start");
-    console.log();
     if (branchName) {
       console.log("  Built something cool? Submit a PR:");
       console.log("    git push -u origin " + branchName);
       console.log("    Then open a pull request on GitHub.");
       console.log();
     }
+    console.log("  Starting dashboard...");
+    console.log();
   }
 
   rl.close();
   aborted = true; // prevent "Setup cancelled" on normal close
+
+  // Launch the dashboard directly so the user doesn't have to type anything.
+  // Also exec into a new shell so the alias is available in subsequent commands.
+  if (!SANDBOX) {
+    const { spawn: cpSpawn } = require("child_process");
+    const serverPath = path.join(__dirname, "server.js");
+    const child = cpSpawn(process.execPath, [serverPath], {
+      cwd: __dirname,
+      stdio: "inherit",
+      env: { ...process.env, CLAUDECODE: undefined },
+    });
+    child.on("exit", (code) => process.exit(code || 0));
+    // Prevent setup from exiting before the server
+    return new Promise(() => {});
+  }
 }
 
 main().catch((e) => {
