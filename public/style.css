@@ -135,6 +135,14 @@ header {
 .contribute-info:focus {
   color: var(--accent);
 }
+.contribute-tooltip::before {
+  content: "";
+  position: absolute;
+  top: -12px;
+  left: 0;
+  width: 100%;
+  height: 12px;
+}
 .contribute-tooltip {
   display: none;
   position: absolute;
