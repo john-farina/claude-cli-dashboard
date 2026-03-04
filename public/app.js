@@ -4039,14 +4039,17 @@ updateBtn.addEventListener("click", async () => {
   sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
   try {
     const res = await fetch("/api/update", { method: "POST" });
-    const data = await res.json();
     if (!res.ok) {
+      let data = {};
+      try { data = await res.json(); } catch {}
+      sessionStorage.removeItem("ceo-reload-state");
       showUpdateError(data);
       updateBtn.disabled = false;
-      return;
+      updateBtn.textContent = "Update Available";
+      return; // Don't poll-and-reload — error modal needs to stay visible
     }
   } catch {
-    // Server likely died during restart — that's expected
+    // Server likely died during restart — that's expected, fall through to poll
   }
   const pollUntilReady = () => {
     fetch("/api/sessions", { signal: AbortSignal.timeout(2000) })
