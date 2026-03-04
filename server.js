@@ -137,6 +137,7 @@ const CEO_MD_PATH = path.join(__dirname, "claude-ceo.md");
 const TODOS_FILE = path.join(__dirname, "todos.json");
 const POLL_INTERVAL = 300;
 const SHELL_WORKDIR = DEFAULT_WORKDIR || os.homedir();
+const UPLOADS_DIR = path.join(os.tmpdir(), "ceo-dashboard-uploads");
 const MIN_DASHBOARD_VERSION = "v0.3.5";
 
 function compareVersions(a, b) {
@@ -240,9 +241,14 @@ function isWithinDir(filePath, baseDir) {
 function isValidWorkdir(dir) {
   if (typeof dir !== "string") return false;
   if (!path.isAbsolute(dir)) return false;
-  // Block shell metacharacters that could break out of quoting: backticks, $, newlines, null bytes
-  if (/[`$\n\r\0]/.test(dir)) return false;
+  // Block shell metacharacters that could break out of quoting
+  if (/[`$\n\r\0;|&(){}<>]/.test(dir)) return false;
   return true;
+}
+
+// Validate an agent name from URL params — prevents command injection via tmux commands
+function isValidAgentName(name) {
+  return typeof name === "string" && /^[a-zA-Z0-9_-]+$/.test(name) && name.length <= 128;
 }
 
 // Validate a Claude session ID — should be a UUID-like string (hex + dashes)
@@ -572,7 +578,10 @@ function sendKeysWithImages(session, text, imagePaths) {
   // Build paste content: paths first (each on own line), text on last line
   const parts = [];
   for (const p of imagePaths) {
-    parts.push(p);
+    // Validate paths are within the uploads directory to prevent path injection
+    if (typeof p === "string" && path.isAbsolute(p) && isWithinDir(p, UPLOADS_DIR)) {
+      parts.push(p);
+    }
   }
   if (text) parts.push(text);
   const pasteContent = parts.join("\n");
@@ -995,7 +1004,7 @@ function parsePromptOptions(output) {
 
 // --- REST API ---
 
-app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 // --- Security: CSRF protection for API endpoints ---
@@ -1053,10 +1062,16 @@ app.put("/api/config", (req, res) => {
   if (updates.defaultWorkspace) userConfig.defaultWorkspace = updates.defaultWorkspace;
   if (typeof updates.builtInPosition === "number") userConfig.builtInPosition = updates.builtInPosition;
   else delete userConfig.builtInPosition;
-  if (typeof updates.port === "number") userConfig.port = updates.port;
+  if (typeof updates.port === "number" && Number.isInteger(updates.port) && updates.port >= 1024 && updates.port <= 65535) userConfig.port = updates.port;
   if (updates.agentPrefix !== undefined) userConfig.agentPrefix = updates.agentPrefix;
   if (updates.defaultAgentName !== undefined) userConfig.defaultAgentName = updates.defaultAgentName;
-  if (updates.shellCommand !== undefined) userConfig.shellCommand = updates.shellCommand;
+  if (updates.shellCommand !== undefined) {
+    if (typeof updates.shellCommand === "string" && /^[a-zA-Z0-9_-]+$/.test(updates.shellCommand)) {
+      userConfig.shellCommand = updates.shellCommand;
+    } else {
+      return res.status(400).json({ error: "shellCommand must be alphanumeric/dashes/underscores only" });
+    }
+  }
   if (updates.title !== undefined) userConfig.title = updates.title;
   if (updates.dismissedOriginHead !== undefined) {
     if (updates.dismissedOriginHead === null) delete userConfig.dismissedOriginHead;
@@ -1072,6 +1087,10 @@ app.put("/api/config", (req, res) => {
 
 app.post("/api/settings/install-alias", (req, res) => {
   const cmd = userConfig.shellCommand || "ceo";
+  // Validate command name to prevent shell RC injection
+  if (!/^[a-zA-Z0-9_-]+$/.test(cmd)) {
+    return res.status(400).json({ error: "Invalid shell command name" });
+  }
   const scriptPath = path.join(__dirname, "ceo.sh");
   const aliasLine = `alias ${cmd}="bash ${scriptPath}"`;
   // Detect shell config file
@@ -1666,6 +1685,7 @@ app.post("/api/sessions", async (req, res) => {
 
 app.patch("/api/sessions/:name", (req, res) => {
   const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
   const { newName, workdir } = req.body;
   const session = `${PREFIX}${name}`;
 
@@ -1700,6 +1720,7 @@ app.patch("/api/sessions/:name", (req, res) => {
 // Restart agent — kill tmux session and resume with same Claude session ID
 app.post("/api/sessions/:name/restart", async (req, res) => {
   const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
   const session = `${PREFIX}${name}`;
 
   const meta = loadSessionsMeta();
@@ -1737,7 +1758,13 @@ app.post("/api/sessions/:name/restart", async (req, res) => {
   tmuxExec(`set-option -t ${session} history-limit 50000`);
 
   const claudeCmd = `claude --resume ${sessionId}`;
-  tmuxExec(`send-keys -t ${session} "clear && unset CLAUDECODE && ${claudeCmd}" Enter`);
+  // Use set-buffer/paste-buffer (same safe pattern as createSession) to avoid shell injection
+  const fullCmd = `clear && unset CLAUDECODE && ${claudeCmd}`;
+  const cmdEscaped = fullCmd.replace(/'/g, "'\\''");
+  tmuxExec(`set-buffer -b ceocmd -- '${cmdEscaped}'`);
+  tmuxExec(`paste-buffer -b ceocmd -t ${session}`);
+  tmuxExec(`delete-buffer -b ceocmd`);
+  tmuxExec(`send-keys -t ${session} Enter`);
 
   // Update metadata — keep everything, refresh created time
   info.resumeSessionId = sessionId;
@@ -1749,6 +1776,7 @@ app.post("/api/sessions/:name/restart", async (req, res) => {
 
 app.delete("/api/sessions/:name", (req, res) => {
   const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
   const session = `${PREFIX}${name}`;
 
   if (!listTmuxSessions().includes(session)) {
@@ -2314,8 +2342,8 @@ app.post("/api/shell/completions", (req, res) => {
 // Open a URL in the dashboard client (intercepted from shell `open` command)
 app.post("/api/shell/open-url", (req, res) => {
   const { url } = req.body || {};
-  if (!url || typeof url !== "string" || !url.startsWith("http")) {
-    return res.status(400).json({ error: "Invalid URL" });
+  if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: "Invalid URL — must start with http:// or https://" });
   }
   const msg = JSON.stringify({ type: "shell-open-url", url });
   wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
@@ -2332,6 +2360,14 @@ app.post("/api/shell/open-finder", (req, res) => {
   if (/[\0\n\r]/.test(folderPath)) {
     return res.status(400).json({ error: "Invalid path characters" });
   }
+  // Verify target is an existing directory before opening
+  try {
+    if (!fs.statSync(folderPath).isDirectory()) {
+      return res.status(400).json({ error: "Path is not a directory" });
+    }
+  } catch {
+    return res.status(400).json({ error: "Path does not exist" });
+  }
   // Use execFile (no shell) to prevent command injection
   require("child_process").execFile("open", [folderPath], { timeout: 5000 }, () => {});
   res.json({ ok: true });
@@ -2340,8 +2376,8 @@ app.post("/api/shell/open-finder", (req, res) => {
 // Open a URL in the native app's in-app browser overlay (used by BROWSER env var helper)
 app.post("/api/open-url", express.json(), (req, res) => {
   const { url } = req.body || {};
-  if (!url || typeof url !== "string" || !url.startsWith("http")) {
-    return res.status(400).json({ error: "Invalid URL" });
+  if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ error: "Invalid URL — must start with http:// or https://" });
   }
   for (const client of wss.clients) {
     try { client.send(JSON.stringify({ type: "open-url", url })); } catch {}
@@ -2514,8 +2550,6 @@ app.post("/api/test-notification", (req, res) => {
 });
 
 // --- Image Upload API ---
-
-const UPLOADS_DIR = path.join(os.tmpdir(), "ceo-dashboard-uploads");
 
 app.post("/api/upload", (req, res) => {
   const { filename, data } = req.body;
@@ -3692,9 +3726,14 @@ server.on("error", (err) => {
   if (err.code === "EADDRINUSE") {
     console.log(`Port ${PORT} still in use, force-killing and retrying...`);
     try {
-      const pids = execSync(`lsof -ti :${PORT} -sTCP:LISTEN 2>/dev/null`).toString().trim();
+      const { execFileSync } = require("child_process");
+      const pids = execFileSync("lsof", ["-ti", `:${PORT}`, "-sTCP:LISTEN"], { encoding: "utf8", timeout: 5000 }).trim();
       if (pids) {
-        execSync(`echo "${pids}" | xargs kill -9 2>/dev/null`);
+        for (const pid of pids.split("\n").filter(Boolean)) {
+          if (/^\d+$/.test(pid)) {
+            try { process.kill(Number(pid), "SIGKILL"); } catch {}
+          }
+        }
       }
     } catch {}
     setTimeout(() => server.listen(PORT, BIND_HOST), 1000);
