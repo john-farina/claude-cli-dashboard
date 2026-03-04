@@ -4,7 +4,14 @@ const { WebSocketServer } = require("ws");
 const { execSync, exec, spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const pty = require("node-pty");
+let pty;
+try {
+  pty = require("node-pty");
+} catch (e) {
+  console.error("[shell] node-pty failed to load: " + e.message);
+  console.error("[shell] Embedded terminal will be unavailable. Run: npm rebuild node-pty");
+  pty = null;
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -95,11 +102,23 @@ const wss = new WebSocketServer({ server, verifyClient: verifyWsClient, maxPaylo
 // --- User config ---
 const CONFIG_PATH = path.join(__dirname, "config.json");
 let userConfig;
+let _configMissing = false;
 try {
   userConfig = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
 } catch {
-  console.error("\n  config.json not found.\n\n  Run the setup wizard to get started:\n    npm run setup\n\n  Or copy the template manually:\n    cp config.example.json config.json\n");
-  process.exit(1);
+  // No config.json — use sensible defaults so the dashboard still starts.
+  // Users can run `npm run setup` later to customize.
+  _configMissing = true;
+  userConfig = {
+    workspaces: [],
+    defaultWorkspace: os.homedir(),
+    port: 9145,
+    agentPrefix: "ceo-",
+    defaultAgentName: "agent",
+    shellCommand: "ceo",
+  };
+  console.log("[config] No config.json found — running with defaults.");
+  console.log("[config] Run 'npm run setup' to configure workspaces, aliases, and more.");
 }
 
 const PORT = userConfig.port || 9145;
@@ -110,7 +129,7 @@ const BIND_HOST = "0.0.0.0";
 // Route CLI browser opens (gt submit, gh auth, etc.) to the in-app browser overlay
 process.env.BROWSER = path.join(__dirname, "open-url.sh");
 const PREFIX = userConfig.agentPrefix || "ceo-";
-const DEFAULT_WORKDIR = userConfig.defaultWorkspace;
+const DEFAULT_WORKDIR = userConfig.defaultWorkspace || os.homedir();
 const SESSIONS_FILE = path.join(__dirname, "sessions.json");
 const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
 const DOCS_DIR = path.join(__dirname, "docs");
@@ -700,6 +719,12 @@ function isSeparatorLine(stripped) {
 }
 
 function createSession(name, workdir, initialPrompt, resumeSessionId) {
+  // Check tmux is available before trying to create a session
+  try {
+    execSync("command -v tmux", { stdio: ["pipe", "pipe", "pipe"], timeout: 2000 });
+  } catch {
+    throw new Error("tmux is required to create agents. Install it with: brew install tmux");
+  }
   ensureTmuxServer();
   const session = `${PREFIX}${name}`;
   const dir = workdir || DEFAULT_WORKDIR;
@@ -988,13 +1013,15 @@ app.get("/api/config", (req, res) => {
 
   res.json({
     workspaces,
-    defaultWorkspace: userConfig.defaultWorkspace,
+    defaultWorkspace: userConfig.defaultWorkspace || os.homedir(),
     homedir: os.homedir(),
     dashboardDir,
     port: PORT,
     agentPrefix: PREFIX,
     defaultAgentName: userConfig.defaultAgentName || "agent",
     shellCommand: userConfig.shellCommand || "ceo",
+    needsSetup: _configMissing,
+    shellAvailable: !!pty,
   });
 });
 
@@ -2013,6 +2040,16 @@ app.put("/api/claude-files/write", (req, res) => {
   }
 });
 
+app.post("/api/claude-files/ensure-docs", (req, res) => {
+  const docsDir = path.join(os.homedir(), ".claude", "docs");
+  try {
+    if (!fs.existsSync(docsDir)) fs.mkdirSync(docsDir, { recursive: true });
+    res.json({ ok: true, path: docsDir });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- Agent Docs API (multi-doc per agent) ---
 
 app.get("/api/agent-docs/:name", (req, res) => {
@@ -2576,7 +2613,7 @@ app.post("/api/install-version", (req, res) => {
   if (compareVersions(tag, MIN_DASHBOARD_VERSION) < 0) return res.status(400).json({ error: `Cannot install versions older than ${MIN_DASHBOARD_VERSION}` });
   try {
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
-    if (branch !== "main") return res.status(400).json({ error: "Must be on main branch to switch versions" });
+    if (branch !== "main") return res.status(400).json({ error: "not-on-main", message: "Must be on the main branch to switch versions.", cwd: __dirname });
     // Save current origin/main HEAD as dismissed so update button doesn't nag
     try {
       const originHead = execSync("git rev-parse origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
@@ -2598,7 +2635,14 @@ app.post("/api/install-version", (req, res) => {
     child.unref();
     setTimeout(() => process.exit(0), 300);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Install failed" });
+    const msg = (err.stderr || "").toString() + " " + (err.message || "");
+    if (/uncommitted changes|overwritten|local changes|please commit or stash/i.test(msg))
+      return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that prevent switching versions.", cwd: __dirname });
+    if (/could not resolve|unable to access|connection refused|network is unreachable/i.test(msg))
+      return res.status(502).json({ error: "network", message: "Could not reach the remote repository." });
+    if (/timed? ?out/i.test(msg))
+      return res.status(504).json({ error: "timeout", message: "The version install timed out. Try again." });
+    res.status(500).json({ error: "unknown", message: err.message || "Install failed", cwd: __dirname });
   }
 });
 
@@ -2701,20 +2745,39 @@ app.post("/api/update", async (req, res) => {
     // Run git fetch + merge
     execSync("git fetch origin main", { cwd: __dirname, timeout: 30000 });
     try {
-      execSync("git merge origin/main", { cwd: __dirname, timeout: 30000 });
+      execSync("git -c merge.ff=false -c pull.rebase=false merge origin/main --no-edit", { cwd: __dirname, timeout: 30000 });
     } catch (mergeErr) {
-      // Capture conflicted files before aborting
+      const stderr = (mergeErr.stderr || "").toString();
+      const msg = mergeErr.message || "";
+      const combined = stderr + " " + msg;
+
+      // Real merge conflict — check for unmerged paths
       let conflicts = [];
       try {
         conflicts = execSync("git diff --name-only --diff-filter=U", { cwd: __dirname, encoding: "utf8" })
           .trim().split("\n").filter(Boolean);
       } catch {}
+      if (conflicts.length > 0) {
+        try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
+        return res.status(409).json({ error: "merge-conflict", conflicts, cwd: __dirname });
+      }
+
       try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
-      return res.status(409).json({
-        error: "merge-conflict",
-        conflicts,
-        cwd: __dirname,
-      });
+
+      // Dirty working tree
+      if (/uncommitted changes|overwritten by merge|local changes|please commit or stash/i.test(combined))
+        return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that conflict with the update.", cwd: __dirname });
+
+      // Network
+      if (/could not resolve|unable to access|connection refused|network is unreachable|repository.*not found/i.test(combined))
+        return res.status(502).json({ error: "network", message: "Could not reach the remote repository." });
+
+      // Timeout
+      if (/timed? ?out/i.test(combined))
+        return res.status(504).json({ error: "timeout", message: "The update timed out. Try again." });
+
+      // Fallback
+      return res.status(500).json({ error: "unknown", message: stderr || msg || "Merge failed", cwd: __dirname });
     }
     // Clear version dismissal — user explicitly chose to update
     if (userConfig.dismissedOriginHead) {
@@ -2728,7 +2791,11 @@ app.post("/api/update", async (req, res) => {
       needsInstall = changed.includes("package-lock.json") || changed.includes("package.json");
     } catch {}
     if (needsInstall) {
-      execSync("npm install", { cwd: __dirname, timeout: 60000 });
+      try {
+        execSync("npm install", { cwd: __dirname, timeout: 60000 });
+      } catch (npmErr) {
+        return res.status(500).json({ error: "npm-failed", message: "Code updated but npm install failed.", cwd: __dirname });
+      }
     }
     res.json({ ok: true });
     // Notify clients and restart
@@ -2742,7 +2809,12 @@ app.post("/api/update", async (req, res) => {
     child.unref();
     setTimeout(() => process.exit(0), 300);
   } catch (err) {
-    res.status(500).json({ error: err.message || "Update failed" });
+    const msg = (err.stderr || "").toString() + " " + (err.message || "");
+    if (/could not resolve|unable to access|connection refused|network is unreachable/i.test(msg))
+      return res.status(502).json({ error: "network", message: "Could not reach the remote repository." });
+    if (/timed? ?out/i.test(msg))
+      return res.status(504).json({ error: "timeout", message: "The update timed out. Try again." });
+    res.status(500).json({ error: "unknown", message: err.message || "Update failed", cwd: __dirname });
   }
 });
 
@@ -3271,6 +3343,7 @@ function flushShellBatch() {
 
 function ensureShellPty() {
   if (shellPty) return;
+  if (!pty) return; // node-pty not available
   // Use configured workdir, fall back to home if it doesn't exist
   let cwd = SHELL_WORKDIR;
   try { if (!fs.statSync(cwd).isDirectory()) cwd = os.homedir(); } catch { cwd = os.homedir(); }

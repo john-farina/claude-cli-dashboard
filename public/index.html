@@ -162,19 +162,19 @@
     </div>
   </div>
 
-  <!-- Merge Conflict Modal -->
-  <div id="conflict-modal-overlay" class="modal-overlay hidden">
-    <div class="modal conflict-modal">
-      <h2>Merge Conflict</h2>
-      <p class="conflict-desc">Your local changes conflict with the latest update. The dashboard is still running — nothing broke. These files need resolving:</p>
-      <ul id="conflict-files" class="conflict-files"></ul>
-      <p class="conflict-desc">Copy this prompt and paste it into a terminal (<code>claude</code>) or one of your agents. It will handle everything automatically:</p>
-      <div class="conflict-prompt-wrap">
-        <pre id="conflict-prompt" class="conflict-prompt"></pre>
-        <button id="conflict-copy" class="btn-secondary conflict-copy-btn">Copy</button>
+  <!-- Update Error Modal -->
+  <div id="update-error-overlay" class="modal-overlay hidden">
+    <div class="modal update-error-modal">
+      <h2 id="update-error-title">Update Issue</h2>
+      <p id="update-error-desc" class="update-error-desc"></p>
+      <ul id="update-error-files" class="conflict-files hidden"></ul>
+      <div id="update-error-prompt-wrap" class="conflict-prompt-wrap hidden">
+        <pre id="update-error-prompt" class="conflict-prompt"></pre>
+        <button id="update-error-copy" class="btn-secondary conflict-copy-btn">Copy</button>
       </div>
       <div class="modal-actions">
-        <button id="conflict-close" class="btn-primary">Got it</button>
+        <button id="update-error-retry" class="btn-secondary hidden">Retry Update</button>
+        <button id="update-error-close" class="btn-primary">Got it</button>
       </div>
     </div>
   </div>

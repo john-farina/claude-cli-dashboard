@@ -2371,7 +2371,22 @@ function updateStatus(agent, status, promptType) {
 }
 
 function updateEmptyState() {
-  emptyState.style.display = agents.size === 0 ? "block" : "none";
+  if (agents.size > 0) {
+    emptyState.style.display = "none";
+    return;
+  }
+  emptyState.style.display = "block";
+  if (_needsSetup) {
+    emptyState.innerHTML =
+      '<div class="setup-banner">' +
+        '<p><strong>Welcome to CEO Dashboard!</strong></p>' +
+        '<p>You\'re running with defaults. To configure workspaces, shell alias, and auto-start:</p>' +
+        '<pre>npm run setup</pre>' +
+        '<p style="margin-top:8px;opacity:0.7">Everything works without setup — create an agent or use the terminal below to get started.</p>' +
+      '</div>';
+  } else {
+    emptyState.innerHTML = '<p>No agents running. Click <strong>+ New Agent</strong> to start one.</p>';
+  }
 }
 
 function shortPath(p) {
@@ -2915,6 +2930,7 @@ sessionDeselect.addEventListener("click", (e) => {
 let DEFAULT_WORKDIR = "";
 let _homedir = ""; // set by /api/config — shortPath() is a no-op until then
 let _defaultAgentName = "agent";
+let _needsSetup = false;
 
 // --- Config loading ---
 
@@ -2925,7 +2941,9 @@ fetch("/api/config")
     _homedir = cfg.homedir || _homedir;
     _defaultAgentName = cfg.defaultAgentName || "agent";
     selectedWorkdirPath = DEFAULT_WORKDIR;
+    _needsSetup = cfg.needsSetup || false;
     _renderWorkdirPills(cfg.workspaces || []);
+    updateEmptyState();
   })
   .catch(() => {});
 
@@ -3481,6 +3499,11 @@ document.addEventListener("keydown", (e) => {
       wsModalOverlay.classList.add("hidden");
       return;
     }
+    if (_ueOverlay && !_ueOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _ueOverlay.classList.add("hidden");
+      return;
+    }
     // Todo settings modal
     if (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) {
       e.preventDefault();
@@ -3697,7 +3720,8 @@ function renderFileCategories(data) {
   }
 
   for (const cat of categories) {
-    if (cat.files.length === 0) continue;
+    // Always show Docs category (even when empty) so users discover it
+    if (cat.files.length === 0 && cat.key !== "docs") continue;
 
     const section = document.createElement("div");
     section.className = "files-category";
@@ -3710,6 +3734,22 @@ function renderFileCategories(data) {
 
     const list = document.createElement("div");
     list.className = "files-category-list";
+
+    if (cat.key === "docs" && cat.files.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "files-docs-empty";
+      empty.innerHTML = `
+        <p>Save docs here for all future Claude sessions — coding guidelines, architecture notes, API references.</p>
+        <button class="btn-secondary files-create-docs-btn">Create Docs Folder</button>
+      `;
+      empty.querySelector("button").addEventListener("click", async () => {
+        try {
+          await fetch("/api/claude-files/ensure-docs", { method: "POST" });
+          loadClaudeFiles();
+        } catch {}
+      });
+      list.appendChild(empty);
+    }
 
     for (const file of cat.files) {
       const item = document.createElement("div");
@@ -3960,11 +4000,7 @@ updateBtn.addEventListener("click", async () => {
     const res = await fetch("/api/update", { method: "POST" });
     const data = await res.json();
     if (!res.ok) {
-      if (data.error === "merge-conflict") {
-        showConflictModal(data.conflicts || [], data.cwd || "");
-      } else {
-        updateBtn.textContent = data.error || "Update failed";
-      }
+      showUpdateError(data);
       updateBtn.disabled = false;
       return;
     }
@@ -3979,17 +4015,20 @@ updateBtn.addEventListener("click", async () => {
   setTimeout(pollUntilReady, 800);
 });
 
-// Merge conflict modal
-const conflictOverlay = document.getElementById("conflict-modal-overlay");
-const conflictFiles = document.getElementById("conflict-files");
-const conflictPrompt = document.getElementById("conflict-prompt");
-const conflictCopy = document.getElementById("conflict-copy");
-const conflictClose = document.getElementById("conflict-close");
+// Update error modal — handles all error types from /api/update and /api/install-version
+const _ueOverlay = document.getElementById("update-error-overlay");
+const _ueTitle = document.getElementById("update-error-title");
+const _ueDesc = document.getElementById("update-error-desc");
+const _ueFiles = document.getElementById("update-error-files");
+const _uePromptWrap = document.getElementById("update-error-prompt-wrap");
+const _uePrompt = document.getElementById("update-error-prompt");
+const _ueCopy = document.getElementById("update-error-copy");
+const _ueRetry = document.getElementById("update-error-retry");
+const _ueClose = document.getElementById("update-error-close");
 
-function showConflictModal(files, cwd) {
-  conflictFiles.innerHTML = files.map(f => `<li>${escapeHtml(f)}</li>`).join("");
+function _buildConflictPrompt(files, cwd) {
   const fileList = files.join("\n- ");
-  const prompt = `The CEO Dashboard at ${cwd} failed to auto-update due to merge conflicts. Fix this completely — run every command yourself.
+  return `The CEO Dashboard at ${cwd} failed to auto-update due to merge conflicts. Fix this completely — run every command yourself.
 
 Conflicting files:
 - ${fileList}
@@ -3997,7 +4036,7 @@ Conflicting files:
 Steps — run all of these:
 1. cd ${cwd}
 2. git fetch origin main
-3. git merge origin/main
+3. git -c merge.ff=false merge origin/main --no-edit
 4. Read each conflicting file and resolve every conflict block. Rules:
    - KEEP ALL upstream (origin/main) changes — every single one. These are required version updates.
    - KEEP ALL of my local changes too — merge both together so nothing is lost from either side.
@@ -4007,20 +4046,108 @@ Steps — run all of these:
 6. git commit -m "Merge origin/main — resolve conflicts"
 
 Once done, tell me it's ready and I'll click Update in the dashboard to restart with the new code.`;
-  conflictPrompt.textContent = prompt;
-  updateBtn.textContent = "Update Available";
-  conflictOverlay.classList.remove("hidden");
 }
 
-conflictCopy.addEventListener("click", () => {
-  navigator.clipboard.writeText(conflictPrompt.textContent).then(() => {
-    conflictCopy.textContent = "Copied!";
-    setTimeout(() => { conflictCopy.textContent = "Copy"; }, 2000);
+function _buildDirtyWorkdirPrompt(cwd) {
+  return `cd ${cwd} && git stash && git fetch origin main && git -c merge.ff=false merge origin/main --no-edit && git stash pop`;
+}
+
+function _buildUnknownPrompt(message, cwd) {
+  return `The CEO Dashboard update at ${cwd || "."} failed with this error:\n\n${message}\n\nDiagnose and fix this so the dashboard can update. Check git status, resolve any issues, then run: git fetch origin main && git -c merge.ff=false merge origin/main --no-edit`;
+}
+
+function showUpdateError(data) {
+  const errorType = data.error || "unknown";
+  const cwd = data.cwd || ".";
+  const message = data.message || "";
+  const files = data.conflicts || [];
+
+  // Reset all sections
+  _ueFiles.classList.add("hidden");
+  _ueFiles.innerHTML = "";
+  _uePromptWrap.classList.add("hidden");
+  _uePrompt.textContent = "";
+  _ueRetry.classList.add("hidden");
+  _ueCopy.textContent = "Copy";
+
+  switch (errorType) {
+    case "merge-conflict":
+      _ueTitle.textContent = "Merge Conflict";
+      _ueTitle.style.color = "var(--red)";
+      _ueDesc.innerHTML = "Your local changes conflict with the latest update. The dashboard is still running — nothing broke. Copy this prompt and paste it into a terminal (<code>claude</code>) or one of your agents:";
+      _ueFiles.innerHTML = files.map(f => `<li>${escapeHtml(f)}</li>`).join("");
+      _ueFiles.classList.remove("hidden");
+      _uePrompt.textContent = _buildConflictPrompt(files, cwd);
+      _uePromptWrap.classList.remove("hidden");
+      break;
+
+    case "dirty-workdir":
+      _ueTitle.textContent = "Uncommitted Changes";
+      _ueTitle.style.color = "var(--accent)";
+      _ueDesc.textContent = "You have local changes that prevent the update. Stash them first, then retry. Copy this command:";
+      _uePrompt.textContent = _buildDirtyWorkdirPrompt(cwd);
+      _uePromptWrap.classList.remove("hidden");
+      break;
+
+    case "network":
+      _ueTitle.textContent = "Network Error";
+      _ueTitle.style.color = "var(--accent)";
+      _ueDesc.textContent = message || "Could not reach the remote repository. Check your internet connection and try again.";
+      _ueRetry.classList.remove("hidden");
+      break;
+
+    case "timeout":
+      _ueTitle.textContent = "Timed Out";
+      _ueTitle.style.color = "var(--accent)";
+      _ueDesc.textContent = message || "The update timed out. This is usually temporary — try again.";
+      _ueRetry.classList.remove("hidden");
+      break;
+
+    case "not-on-main":
+      _ueTitle.textContent = "Wrong Branch";
+      _ueTitle.style.color = "var(--accent)";
+      _ueDesc.innerHTML = "You must be on the <code>main</code> branch to update. Run this command first:";
+      _uePrompt.textContent = `cd ${cwd} && git checkout main`;
+      _uePromptWrap.classList.remove("hidden");
+      break;
+
+    case "npm-failed":
+      _ueTitle.textContent = "Install Failed";
+      _ueTitle.style.color = "var(--red)";
+      _ueDesc.textContent = "The code was updated, but npm install failed. Run this manually:";
+      _uePrompt.textContent = `cd ${cwd} && npm install`;
+      _uePromptWrap.classList.remove("hidden");
+      break;
+
+    default: // "unknown" or unrecognized
+      _ueTitle.textContent = "Update Failed";
+      _ueTitle.style.color = "var(--red)";
+      _ueDesc.textContent = message || "An unexpected error occurred during the update.";
+      if (cwd) {
+        _uePrompt.textContent = _buildUnknownPrompt(message, cwd);
+        _uePromptWrap.classList.remove("hidden");
+      }
+      break;
+  }
+
+  updateBtn.textContent = "Update Available";
+  _ueOverlay.classList.remove("hidden");
+}
+
+_ueCopy.addEventListener("click", () => {
+  navigator.clipboard.writeText(_uePrompt.textContent).then(() => {
+    _ueCopy.textContent = "Copied!";
+    setTimeout(() => { _ueCopy.textContent = "Copy"; }, 2000);
   });
 });
 
-conflictClose.addEventListener("click", () => {
-  conflictOverlay.classList.add("hidden");
+_ueRetry.addEventListener("click", () => {
+  _ueOverlay.classList.add("hidden");
+  updateBtn.click();
+});
+
+_ueClose.addEventListener("click", () => {
+  _ueOverlay.classList.add("hidden");
 });
 
 // --- Settings Panel ---
@@ -4494,7 +4621,7 @@ async function _installVersion(tag, btn) {
     });
     const data = await res.json();
     if (!res.ok) {
-      alert(data.error || "Install failed");
+      showUpdateError(data);
       btn.textContent = "Install";
       btn.disabled = false;
       return;
