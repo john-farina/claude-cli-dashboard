@@ -810,7 +810,7 @@ function detectStatus(output, prevOutput) {
   // lastLines[0] = last non-empty line, lastLines[1] = second-to-last, etc.
   const lastLines = [];
   for (let i = lines.length - 1; i >= 0 && lastLines.length < 15; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (stripped) lastLines.push(stripped);
   }
   const lastLine = lastLines[0] || "";
@@ -895,7 +895,7 @@ function detectPromptType(output) {
   const lines = output.split("\n");
   const lastLines = [];
   for (let i = lines.length - 1; i >= 0 && lastLines.length < 15; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (stripped) lastLines.unshift(stripped);
   }
   const chunk = lastLines.join("\n");
@@ -939,7 +939,7 @@ function parsePromptOptions(output) {
   // separator/decoration lines (──── or ←/→ nav bars), and the ❯ cursor prefix.
   // Stop when we hit an actual content line that isn't part of the options block.
   for (let i = lines.length - 1; i >= Math.max(0, lines.length - 40); i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const stripped = stripAnsi(lines[i]).trim();
     if (!stripped) continue; // blank line
     // Separator/decoration lines (─, ═, ━, ←, →, ☐, ✔, etc.)
     if (/^[─━═←→☐✔☑\s│|]+$/.test(stripped)) continue;
@@ -958,7 +958,7 @@ function parsePromptOptions(output) {
       // (indented text that follows an option).
       // Check if this looks like the question/header above options — stop scanning.
       // Indented lines (4+ spaces in original) are option descriptions — skip them.
-      const raw = lines[i].replace(/\x1b\[[0-9;]*m/g, "");
+      const raw = stripAnsi(lines[i]);
       if (raw.match(/^\s{4,}/)) continue; // indented description line — keep scanning
       break; // actual content line — stop
     } else {
