@@ -154,25 +154,39 @@ function updateTabNotifications() {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) {
     updateTabNotifications();
-    // If we haven't received any WS message in >20s, the connection is likely dead
-    if (ws && Date.now() - _lastWsMessage > 20000) {
-      console.log("[ws] Stale connection detected on visibility change, reconnecting");
-      try { ws.close(); } catch {}
-      clearTimeout(reconnectTimer);
-      connect();
-    }
+    _reconnectIfStale();
   }
 });
 window.addEventListener("focus", () => {
   updateTabNotifications();
-  // Same stale-connection check on window focus (covers Mac app + browser tabs)
-  if (ws && Date.now() - _lastWsMessage > 20000) {
-    console.log("[ws] Stale connection detected on focus, reconnecting");
+  _reconnectIfStale();
+});
+
+// --- Periodic liveness heartbeat ---
+// Catches dead WS connections without waiting for visibility/focus events (critical for mobile over Tailscale)
+// Only acts on OPEN sockets — never kills CONNECTING ones (that causes an infinite reconnect loop on iOS)
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN && Date.now() - _lastWsMessage > 15000) {
+    console.log("[ws] Heartbeat: no message in 15s, reconnecting");
     try { ws.close(); } catch {}
     clearTimeout(reconnectTimer);
     connect();
   }
-});
+}, 5000);
+
+// Guard: don't reconnect if already connecting
+function _reconnectIfStale() {
+  if (ws && ws.readyState === WebSocket.CONNECTING) return; // let pending connect finish
+  if (ws && ws.readyState === WebSocket.OPEN && Date.now() - _lastWsMessage > 20000) {
+    console.log("[ws] Stale connection detected, reconnecting");
+    try { ws.close(); } catch {}
+    clearTimeout(reconnectTimer);
+    connect();
+  }
+}
+
+// --- Pending send queue (survives reconnect) ---
+let _pendingSend = null; // { session, text, paths } — only latest message
 
 // --- Mobile detection ---
 function isMobile() { return window.innerWidth <= 600; }
@@ -581,7 +595,9 @@ function buildReloadState() {
 }
 
 function connect() {
-  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+  // If already connecting, don't kill-and-restart — let the pending handshake finish
+  if (ws && ws.readyState === WebSocket.CONNECTING) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
   ws = new WebSocket(`ws://${location.host}`);
@@ -607,6 +623,17 @@ function connect() {
     fetch("/api/check-update").then(r => r.json()).then(data => {
       if (data.updateAvailable) showUpdateButton(data);
     }).catch(() => {});
+    // Drain pending send that was queued while disconnected
+    if (_pendingSend) {
+      const p = _pendingSend;
+      _pendingSend = null;
+      if (p.paths && p.paths.length > 0) {
+        sendInputWithImages(p.session, p.text, p.paths);
+      } else {
+        sendInput(p.session, p.text);
+      }
+      console.log("[ws] Drained pending send for", p.session);
+    }
   };
 
   ws.onclose = () => {
@@ -1080,13 +1107,12 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       if (pasteChip) pasteChip.remove();
     }
     if (!text && pendingAttachments.length === 0) return;
-    // Don't clear input if WS isn't connected — message would be silently dropped
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     // Don't send while video frames are still extracting
     if (pendingAttachments.some((a) => a.processing)) return;
 
+    // Build the message payload
+    let sendSession = name, sendText = text, sendPaths = null;
     if (pendingAttachments.length > 0) {
-      // Collect all paths (images + video frames)
       const paths = [];
       const videoContextParts = [];
       for (const a of pendingAttachments) {
@@ -1099,14 +1125,25 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           paths.push(a.path);
         }
       }
-      const fullText = [...videoContextParts, text].filter(Boolean).join("\n");
-      sendInputWithImages(name, fullText, paths);
-      // Clear attachments
+      sendText = [...videoContextParts, text].filter(Boolean).join("\n");
+      sendPaths = paths;
       pendingAttachments.length = 0;
       const chips = card.querySelector(".attachment-chips");
       if (chips) chips.innerHTML = "";
+    }
+
+    // If WS isn't open, queue the message and trigger reconnect
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      _pendingSend = { session: sendSession, text: sendText, paths: sendPaths };
+      console.log("[ws] Send queued for", sendSession, "— triggering reconnect");
+      connDot.className = "dot offline";
+      connDot.title = "Reconnecting…";
+      clearTimeout(reconnectTimer);
+      connect();
+    } else if (sendPaths && sendPaths.length > 0) {
+      sendInputWithImages(sendSession, sendText, sendPaths);
     } else {
-      sendInput(name, text);
+      sendInput(sendSession, sendText);
     }
     input.value = "";
     // User sent input — they want to see the response, reset scroll lock
@@ -2941,6 +2978,12 @@ fetch("/api/config")
       const headerTitle = document.getElementById("header-title");
       if (headerTitle) headerTitle.textContent = cfg.title;
     }
+    // Populate the contribute tooltip with the dashboard directory
+    if (cfg.dashboardDir) {
+      const dir = shortPath(cfg.dashboardDir);
+      const tip = document.querySelector(".contribute-tooltip");
+      if (tip) tip.querySelector(".dashboard-dir").textContent = dir;
+    }
     _renderWorkdirPills(cfg.workspaces || []);
     updateEmptyState();
   })
@@ -3569,14 +3612,13 @@ document.addEventListener("keydown", (e) => {
     document.getElementById("shell-header").click();
     return;
   }
-  if (key === "f" && (!inInput || inFilesPanel)) {
+  if (key === "f" && !inInput) {
     e.preventDefault();
     filesBtn.click();
     if (!filesPanel.classList.contains("visible")) filesBtn.focus();
     return;
   }
-  const inSettingsPanel = !!e.target.closest("#settings-panel");
-  if (key === "s" && (!inInput || inSettingsPanel)) {
+  if (key === "s" && !inInput) {
     e.preventDefault();
     settingsBtn.click();
     if (!settingsPanel.classList.contains("visible")) settingsBtn.focus();
@@ -6744,15 +6786,6 @@ if (window.visualViewport && isMobile()) {
     }
   });
 
-  // Also handle focus events directly for textareas/inputs
-  document.addEventListener("focusin", (e) => {
-    if (!isMobile()) return;
-    const el = e.target;
-    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
-      // Delay to let the keyboard animation finish
-      setTimeout(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 300);
-    }
-  });
+  // Mobile focusin scroll is handled by the global focusin handler (line ~3093)
+  // which accounts for shell panel height and card context — no duplicate needed here.
 }

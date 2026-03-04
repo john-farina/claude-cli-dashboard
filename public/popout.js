@@ -58,17 +58,45 @@ window.addEventListener("beforeunload", () => {
 // --- WebSocket ---
 let ws;
 let reconnectTimer;
+let _lastWsMessage = Date.now();
+let _pendingSend = null; // { text, paths } — only latest message
+
+// Periodic liveness heartbeat (same as main app)
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN && Date.now() - _lastWsMessage > 15000) {
+    console.log("[ws] Heartbeat: no message in 15s, reconnecting");
+    try { ws.close(); } catch {}
+    clearTimeout(reconnectTimer);
+    connect();
+  }
+}, 5000);
 
 function connect() {
-  if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) {
+  if (ws && ws.readyState === WebSocket.CONNECTING) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
   ws = new WebSocket(`ws://${location.host}`);
   ws.binaryType = "arraybuffer";
-  ws.onopen = () => { clearTimeout(reconnectTimer); };
+  ws.onopen = () => {
+    clearTimeout(reconnectTimer);
+    _lastWsMessage = Date.now();
+    // Drain pending send
+    if (_pendingSend) {
+      const p = _pendingSend;
+      _pendingSend = null;
+      if (p.paths && p.paths.length > 0) {
+        sendInputWithImages(p.text, p.paths);
+      } else {
+        sendInput(p.text);
+      }
+      console.log("[ws] Drained pending send");
+    }
+  };
   ws.onclose = () => { reconnectTimer = setTimeout(connect, 2000); };
   ws.onerror = () => { try { ws.close(); } catch {} };
   ws.onmessage = (event) => {
+    _lastWsMessage = Date.now();
     // Binary frames are shell PTY data — popout windows don't use the shell, ignore them
     if (event.data instanceof ArrayBuffer) return;
     let msg;
@@ -269,9 +297,10 @@ const pendingAttachments = [];
 function doSend() {
   const text = input.value.trim();
   if (!text && pendingAttachments.length === 0) return;
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (pendingAttachments.some(a => a.processing)) return;
 
+  // Build the message payload
+  let sendText = text, sendPaths = null;
   if (pendingAttachments.length > 0) {
     const paths = [];
     const videoContextParts = [];
@@ -283,12 +312,22 @@ function doSend() {
         paths.push(a.path);
       }
     }
-    const fullText = [...videoContextParts, text].filter(Boolean).join("\n");
-    sendInputWithImages(fullText, paths);
+    sendText = [...videoContextParts, text].filter(Boolean).join("\n");
+    sendPaths = paths;
     pendingAttachments.length = 0;
     attachmentChips.innerHTML = "";
+  }
+
+  // If WS isn't open, queue and reconnect
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    _pendingSend = { text: sendText, paths: sendPaths };
+    console.log("[ws] Send queued — triggering reconnect");
+    clearTimeout(reconnectTimer);
+    connect();
+  } else if (sendPaths && sendPaths.length > 0) {
+    sendInputWithImages(sendText, sendPaths);
   } else {
-    sendInput(text);
+    sendInput(sendText);
   }
   input.value = "";
 }

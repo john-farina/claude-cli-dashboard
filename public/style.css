@@ -3821,6 +3821,7 @@ header .btn-secondary kbd {
 .todo-editor {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
   background: transparent;
   border: none;
   color: var(--text);
@@ -4205,9 +4206,9 @@ header .btn-secondary kbd {
     white-space: pre-wrap;
   }
 
-  /* Input — 14px (viewport maximum-scale=1 prevents iOS zoom) */
+  /* Input — 16px prevents iOS Safari auto-zoom on focus */
   .card-input textarea {
-    font-size: 14px;
+    font-size: 16px;
     min-height: 44px;
     padding: 10px 12px;
   }
