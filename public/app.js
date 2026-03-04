@@ -584,6 +584,10 @@ function connect() {
         location.reload();
       }
     }).catch(() => {});
+    // Check for dashboard updates
+    fetch("/api/check-update").then(r => r.json()).then(data => {
+      if (data.updateAvailable) showUpdateButton(data.latest, data.releaseNotes);
+    }).catch(() => {});
   };
 
   ws.onclose = () => {
@@ -634,6 +638,10 @@ function connect() {
           .catch(() => setTimeout(pollUntilReady, 500));
       };
       setTimeout(pollUntilReady, 800);
+      return;
+    }
+    if (msg.type === "update-available") {
+      showUpdateButton(msg.latest, msg.releaseNotes);
       return;
     }
     if (msg.type === "open-url") {
@@ -3882,6 +3890,94 @@ async function restartServer() {
 }
 
 restartServerBtn.addEventListener("click", restartServer);
+
+// --- Auto-Update ---
+
+const updateBtn = document.getElementById("update-btn");
+const updateWrapper = document.getElementById("update-wrapper");
+const updateTooltip = document.getElementById("update-tooltip");
+
+function showUpdateButton(latest, releaseNotes) {
+  if (!updateBtn || !updateWrapper) return;
+  updateWrapper.style.display = "";
+  updateBtn.textContent = `Update to ${latest}`;
+  if (releaseNotes && updateTooltip) {
+    updateTooltip.innerHTML = typeof marked !== "undefined"
+      ? marked.parse(releaseNotes)
+      : releaseNotes.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+  }
+}
+
+updateBtn.addEventListener("click", async () => {
+  updateBtn.disabled = true;
+  updateBtn.textContent = "Updating\u2026";
+  sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
+  try {
+    const res = await fetch("/api/update", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) {
+      if (data.error === "merge-conflict") {
+        showConflictModal(data.conflicts || [], data.cwd || "");
+      } else {
+        updateBtn.textContent = data.error || "Update failed";
+      }
+      updateBtn.disabled = false;
+      return;
+    }
+  } catch {
+    // Server likely died during restart — that's expected
+  }
+  const pollUntilReady = () => {
+    fetch("/api/sessions", { signal: AbortSignal.timeout(2000) })
+      .then((r) => { if (r.ok) location.reload(); else throw new Error(); })
+      .catch(() => setTimeout(pollUntilReady, 500));
+  };
+  setTimeout(pollUntilReady, 800);
+});
+
+// Merge conflict modal
+const conflictOverlay = document.getElementById("conflict-modal-overlay");
+const conflictFiles = document.getElementById("conflict-files");
+const conflictPrompt = document.getElementById("conflict-prompt");
+const conflictCopy = document.getElementById("conflict-copy");
+const conflictClose = document.getElementById("conflict-close");
+
+function showConflictModal(files, cwd) {
+  conflictFiles.innerHTML = files.map(f => `<li>${f}</li>`).join("");
+  const fileList = files.join("\n- ");
+  const prompt = `The CEO Dashboard at ${cwd} failed to auto-update due to merge conflicts. Fix this completely — run every command yourself.
+
+Conflicting files:
+- ${fileList}
+
+Steps — run all of these:
+1. cd ${cwd}
+2. git fetch origin main
+3. git merge origin/main
+4. Read each conflicting file and resolve every conflict block. Rules:
+   - KEEP ALL upstream (origin/main) changes — every single one. These are required version updates.
+   - KEEP ALL of my local changes too — merge both together so nothing is lost from either side.
+   - If both sides changed the same line and you can combine them (e.g. both added different code), include both.
+   - If both sides changed the same line and they truly cannot coexist (one removes something the other modifies), ask me which to keep before continuing. Show me both versions so I can decide.
+5. After resolving every file: git add ${files.join(" ")}
+6. git commit -m "Merge origin/main — resolve conflicts"
+
+Once done, tell me it's ready and I'll click Update in the dashboard to restart with the new code.`;
+  conflictPrompt.textContent = prompt;
+  updateBtn.textContent = "Update Available";
+  conflictOverlay.classList.remove("hidden");
+}
+
+conflictCopy.addEventListener("click", () => {
+  navigator.clipboard.writeText(conflictPrompt.textContent).then(() => {
+    conflictCopy.textContent = "Copied!";
+    setTimeout(() => { conflictCopy.textContent = "Copy"; }, 2000);
+  });
+});
+
+conflictClose.addEventListener("click", () => {
+  conflictOverlay.classList.add("hidden");
+});
 
 // --- Settings Panel ---
 

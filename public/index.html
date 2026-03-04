@@ -48,6 +48,10 @@
       </span>
     </div>
     <div class="header-right">
+      <span id="update-wrapper" class="update-wrapper" style="display:none">
+        <button id="update-btn" class="btn-update" tabindex="0">Update Available</button>
+        <div id="update-tooltip" class="update-tooltip"></div>
+      </span>
       <button id="settings-btn" class="settings-icon-btn" tabindex="0" title="Settings (S)"><span class="gear-icon">&#x2699;</span><kbd>S</kbd></button>
       <button id="restart-server-btn" class="btn-secondary" tabindex="0">&#x21bb; Refresh <kbd>R</kbd></button>
       <button id="ceo-md-btn" class="btn-secondary" tabindex="0">CEO.md <kbd>C</kbd></button>
@@ -155,6 +159,23 @@
           <button type="submit" class="btn-primary">Update</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Merge Conflict Modal -->
+  <div id="conflict-modal-overlay" class="modal-overlay hidden">
+    <div class="modal conflict-modal">
+      <h2>Merge Conflict</h2>
+      <p class="conflict-desc">Your local changes conflict with the latest update. The dashboard is still running — nothing broke. These files need resolving:</p>
+      <ul id="conflict-files" class="conflict-files"></ul>
+      <p class="conflict-desc">Copy this prompt and paste it into a terminal (<code>claude</code>) or one of your agents. It will handle everything automatically:</p>
+      <div class="conflict-prompt-wrap">
+        <pre id="conflict-prompt" class="conflict-prompt"></pre>
+        <button id="conflict-copy" class="btn-secondary conflict-copy-btn">Copy</button>
+      </div>
+      <div class="modal-actions">
+        <button id="conflict-close" class="btn-primary">Got it</button>
+      </div>
     </div>
   </div>
 

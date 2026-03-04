@@ -172,6 +172,20 @@ Supporting files:
 - `{ type: "shell-info", cwd, branch, isWorktree, prUrl }` — shell CWD/branch/PR updates
 - `{ type: "open-url", url }` — open URL in in-app browser overlay (native app) or new tab (browser)
 
+## Releasing Updates
+
+The dashboard has an auto-update system. Users see an "Update Available" button when a new version is tagged.
+
+To push a new release:
+1. Bump the version in `package.json` (e.g. `"version": "0.2.0"`)
+2. Commit the bump: `git commit -am "v0.2.0"`
+3. Tag it: `git tag v0.2.0`
+4. Push both: `git push origin main --tags`
+
+Users' dashboards check GitHub releases every hour (and on every server restart). When a newer release exists than their local `package.json` version, the update button appears with release notes shown on hover. Clicking it runs `git fetch origin main && git merge origin/main`, installs deps if needed, and restarts.
+
+**Important**: Use GitHub Releases (not just tags). The release tag must match the `package.json` version prefixed with `v` (e.g. version `0.2.0` → tag `v0.2.0`). Write release notes in the GitHub Release body — they show in the hover tooltip. The comparison is numeric semver — `v0.10.0 > v0.9.0`.
+
 ## Common Tasks
 
 ### Change CEO agent instructions

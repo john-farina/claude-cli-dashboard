@@ -2289,6 +2289,113 @@ app.get("/api/todos/by-agent/:agent", (req, res) => {
   })));
 });
 
+// --- Auto-update check ---
+// Compares local package.json version against latest GitHub tag.
+// Checks on boot (non-blocking) and every 6 hours.
+
+const currentVersion = require("./package.json").version;
+let updateCache = { latest: null, current: currentVersion, updateAvailable: false, checkedAt: 0, releaseNotes: null };
+
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/, "").split(".").map(Number);
+  const pb = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const na = pa[i] || 0, nb = pb[i] || 0;
+    if (na !== nb) return na - nb;
+  }
+  return 0;
+}
+
+async function checkForUpdate() {
+  try {
+    const https = require("https");
+    const data = await new Promise((resolve, reject) => {
+      const req = https.get("https://api.github.com/repos/john-farina/claude-cli-dashboard/releases?per_page=1", {
+        headers: { "User-Agent": "ceo-dashboard", "Accept": "application/vnd.github.v3+json" },
+        timeout: 10000,
+      }, (res) => {
+        let body = "";
+        res.on("data", (chunk) => body += chunk);
+        res.on("end", () => {
+          if (res.statusCode !== 200) return reject(new Error(`GitHub API ${res.statusCode}`));
+          resolve(JSON.parse(body));
+        });
+      });
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
+    });
+    if (!Array.isArray(data) || data.length === 0) {
+      updateCache = { latest: null, current: currentVersion, updateAvailable: false, checkedAt: Date.now(), releaseNotes: null };
+      return;
+    }
+    const latest = data[0].tag_name; // e.g. "v0.2.0"
+    const releaseNotes = data[0].body || null;
+    const updateAvailable = compareVersions(latest, currentVersion) > 0;
+    updateCache = { latest, current: currentVersion, updateAvailable, checkedAt: Date.now(), releaseNotes };
+    if (updateAvailable) {
+      const msg = JSON.stringify({ type: "update-available", latest, releaseNotes });
+      for (const client of wss.clients) {
+        try { if (client.readyState === 1) client.send(msg); } catch {}
+      }
+    }
+  } catch (err) {
+    // Silent fail — update check is best-effort
+  }
+}
+
+// Check on boot (non-blocking) and every hour
+setTimeout(checkForUpdate, 5000);
+setInterval(checkForUpdate, 60 * 60 * 1000);
+
+app.get("/api/check-update", (req, res) => {
+  res.json(updateCache);
+});
+
+app.post("/api/update", async (req, res) => {
+  try {
+    // Run git fetch + merge
+    execSync("git fetch origin main", { cwd: __dirname, timeout: 30000 });
+    try {
+      execSync("git merge origin/main", { cwd: __dirname, timeout: 30000 });
+    } catch (mergeErr) {
+      // Capture conflicted files before aborting
+      let conflicts = [];
+      try {
+        conflicts = execSync("git diff --name-only --diff-filter=U", { cwd: __dirname, encoding: "utf8" })
+          .trim().split("\n").filter(Boolean);
+      } catch {}
+      try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
+      return res.status(409).json({
+        error: "merge-conflict",
+        conflicts,
+        cwd: __dirname,
+      });
+    }
+    // Check if package-lock.json changed
+    let needsInstall = false;
+    try {
+      const changed = execSync("git diff HEAD~1 --name-only", { cwd: __dirname, encoding: "utf8" });
+      needsInstall = changed.includes("package-lock.json") || changed.includes("package.json");
+    } catch {}
+    if (needsInstall) {
+      execSync("npm install", { cwd: __dirname, timeout: 60000 });
+    }
+    res.json({ ok: true });
+    // Notify clients and restart
+    for (const client of wss.clients) {
+      try { client.send(JSON.stringify({ type: "server-restarting" })); } catch {}
+    }
+    const child = require("child_process").spawn(
+      process.execPath, [path.join(__dirname, "server.js")],
+      { cwd: __dirname, detached: true, stdio: "ignore", env: { ...process.env, CLAUDECODE: undefined } }
+    );
+    child.unref();
+    setTimeout(() => process.exit(0), 300);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Update failed" });
+  }
+});
+
 // --- Server self-restart ---
 // Responds immediately, spawns a fresh server, then exits this process.
 // The new server picks up all tmux sessions via restoreSessions().
