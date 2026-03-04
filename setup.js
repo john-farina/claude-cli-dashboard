@@ -334,7 +334,12 @@ async function main() {
   console.log();
   console.log("  ── Step 4/11: Workspaces ──");
   console.log();
-  console.log("  Workspaces are project directories where agents work.");
+  console.log("  When you create an agent, it launches in a workspace directory.");
+  console.log("  This is the project folder the agent can read, edit, and run code in.");
+  console.log();
+  console.log("  Example: /Users/you/my-ios-app");
+  console.log("           /Users/you/backend-api");
+  console.log();
   console.log("  Enter absolute paths, one per line. Empty line to finish.");
   console.log();
 

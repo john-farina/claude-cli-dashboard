@@ -10,25 +10,80 @@ const app = express();
 const server = http.createServer(app);
 const os = require("os");
 
-// --- Security: WebSocket origin validation ---
-// Prevents Cross-Site WebSocket Hijacking (CSWSH) — blocks connections from
-// untrusted origins (e.g., a malicious website opening ws://localhost:9145).
+// --- Security: IP-based access control ---
+// Only allows connections from localhost and YOUR Tailscale devices (your tailnet).
+// On startup, queries `tailscale status` to get the exact IPs of your devices.
+// Anyone else — same WiFi, different Tailscale account, internet — gets 403 Forbidden.
+
+const _allowedTailscaleIPs = new Set();
+let _tailscaleHostname = null;
+
+function refreshTailscaleIPs() {
+  try {
+    const raw = execSync("tailscale status --json 2>/dev/null", { encoding: "utf8", timeout: 5000 });
+    const ts = JSON.parse(raw);
+    _allowedTailscaleIPs.clear();
+    // Add our own IPs
+    if (ts.Self && ts.Self.TailscaleIPs) {
+      for (const ip of ts.Self.TailscaleIPs) _allowedTailscaleIPs.add(ip);
+    }
+    if (ts.Self && ts.Self.DNSName) {
+      _tailscaleHostname = ts.Self.DNSName.replace(/\.$/, "");
+    }
+    // Add all peer device IPs (these are YOUR other devices on YOUR tailnet)
+    if (ts.Peer) {
+      for (const peer of Object.values(ts.Peer)) {
+        if (peer.TailscaleIPs) {
+          for (const ip of peer.TailscaleIPs) _allowedTailscaleIPs.add(ip);
+        }
+      }
+    }
+    if (_allowedTailscaleIPs.size > 0) {
+      console.log(`[security] Tailscale allowlist: ${_allowedTailscaleIPs.size} device IPs from your tailnet`);
+    }
+  } catch {
+    // Tailscale not installed or not running — only localhost access
+  }
+}
+
+// Refresh on startup and every 60s (catches new devices joining your tailnet)
+refreshTailscaleIPs();
+setInterval(refreshTailscaleIPs, 60000);
+
+function isAllowedIP(ip) {
+  if (!ip) return false;
+  // Normalize IPv6-mapped IPv4 (::ffff:127.0.0.1 → 127.0.0.1)
+  const clean = ip.replace(/^::ffff:/, "");
+  // Localhost — always allowed (this is your own machine)
+  if (clean === "127.0.0.1" || clean === "::1") return true;
+  // Only allow IPs that are in YOUR tailnet (queried from `tailscale status`)
+  if (_allowedTailscaleIPs.has(clean)) return true;
+  return false;
+}
+
+// Block disallowed IPs at the HTTP level — applies to ALL requests (pages, API, static files)
+app.use((req, res, next) => {
+  if (isAllowedIP(req.ip)) return next();
+  res.status(403).end("Forbidden");
+});
+
+// --- Security: WebSocket validation ---
+// Layer 1 (above) blocks by source IP — only localhost + your Tailscale devices get through.
+// Layer 2 (below) blocks cross-site WSocket hijacking from a malicious page on your own machine.
 function verifyWsClient(info) {
+  // Check source IP first
+  const ip = info.req.socket.remoteAddress;
+  if (!isAllowedIP(ip)) return false;
+  // Then check origin header for CSWSH protection
   const origin = info.origin || info.req.headers.origin || "";
-  // Allow no-origin (native apps, CLI tools, curl, same-origin page loads)
-  if (!origin) return true;
+  if (!origin) return true; // no-origin = native apps, CLI tools, same-origin
   try {
     const url = new URL(origin);
     const host = url.hostname;
-    // Allow localhost connections
     if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0") return true;
-    // Allow Tailscale hostnames (*.ts.net)
     if (host.endsWith(".ts.net")) return true;
-    // Allow Tailscale IPs (100.x.x.x CGNAT range)
-    if (/^100\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-    // Allow LAN IPs (192.168.x.x, 10.x.x.x)
-    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
-    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    // Allow your Tailscale IPs in origin header too
+    if (_allowedTailscaleIPs.has(host)) return true;
     return false;
   } catch {
     return false;
@@ -48,9 +103,9 @@ try {
 }
 
 const PORT = userConfig.port || 9145;
-// Bind to localhost only by default — prevents other devices on the same WiFi from accessing.
-// Users who want remote access (phone, Tailscale) can set "bindHost": "0.0.0.0" in config.json.
-const BIND_HOST = userConfig.bindHost || "127.0.0.1";
+// Bind to 0.0.0.0 so Tailscale (mobile access) works out of the box.
+// Security is enforced by IP allowlist below, not by bind address.
+const BIND_HOST = "0.0.0.0";
 
 // Route CLI browser opens (gt submit, gh auth, etc.) to the in-app browser overlay
 process.env.BROWSER = path.join(__dirname, "open-url.sh");
@@ -877,23 +932,19 @@ function parsePromptOptions(output) {
 app.use(express.json({ limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// --- Security: Origin check for API endpoints ---
-// Blocks cross-origin POST/PUT/DELETE requests (CSRF protection).
-// Same logic as WebSocket origin validation — only allows localhost, Tailscale, and LAN.
+// --- Security: CSRF protection for API endpoints ---
+// The IP allowlist (above) blocks external attackers. This blocks cross-origin requests
+// from a malicious website running on YOUR machine (e.g., evil.com making fetch() to localhost).
 app.use("/api", (req, res, next) => {
-  // GET requests are safe (read-only) — skip origin check
   if (req.method === "GET") return next();
   const origin = req.headers.origin || "";
-  // No origin header = same-origin or non-browser client (curl, native app) — allow
   if (!origin) return next();
   try {
     const url = new URL(origin);
     const host = url.hostname;
     if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0") return next();
     if (host.endsWith(".ts.net")) return next();
-    if (/^100\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
-    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
-    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
+    if (_allowedTailscaleIPs.has(host)) return next();
   } catch {}
   res.status(403).json({ error: "Forbidden: cross-origin request blocked" });
 });
