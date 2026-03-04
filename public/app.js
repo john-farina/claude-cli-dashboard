@@ -4403,9 +4403,111 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// --- Version Manager ---
+
+const _versionSection = document.getElementById("version-toggle").closest(".settings-collapse");
+
+document.getElementById("version-toggle").addEventListener("click", () => {
+  const body = document.getElementById("version-collapse-body");
+  _versionSection.classList.toggle("open");
+  body.classList.toggle("hidden");
+});
+
+let _versionsLoaded = false;
+
+async function _loadVersions() {
+  const listEl = document.getElementById("version-list");
+  // Hide section until we know there's something to show
+  _versionSection.style.display = "none";
+  listEl.innerHTML = '<span class="settings-hint">Loading versions...</span>';
+  try {
+    const res = await fetch("/api/versions");
+    const data = await res.json();
+    _versionsLoaded = true;
+    const versions = data.versions || [];
+    const hasInstallable = versions.some(v => !v.isCurrent);
+    if (!hasInstallable) return; // nothing to downgrade to — keep hidden
+    _versionSection.style.display = "";
+    _renderVersionList(versions, listEl);
+  } catch {
+    // On error, keep hidden
+  }
+}
+
+function _renderVersionList(versions, listEl) {
+  listEl.innerHTML = "";
+  if (!versions.length) {
+    listEl.innerHTML = '<span class="settings-hint">No tagged versions found.</span>';
+    return;
+  }
+  for (const v of versions) {
+    const row = document.createElement("div");
+    row.className = "version-row" + (v.isCurrent ? " version-row-current" : "");
+    const tag = document.createElement("span");
+    tag.className = "version-tag";
+    tag.textContent = v.tag;
+    const date = document.createElement("span");
+    date.className = "version-date";
+    date.textContent = v.date ? new Date(v.date).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+    row.appendChild(tag);
+    row.appendChild(date);
+    if (v.isCurrent) {
+      const badge = document.createElement("span");
+      badge.className = "version-current-badge";
+      badge.textContent = "Current";
+      row.appendChild(badge);
+    } else {
+      const btn = document.createElement("button");
+      btn.className = "version-install-btn";
+      btn.textContent = "Install";
+      btn.addEventListener("click", () => _installVersion(v.tag, btn));
+      row.appendChild(btn);
+    }
+    listEl.appendChild(row);
+  }
+}
+
+async function _installVersion(tag, btn) {
+  if (!confirm(`Switch to ${tag}? The server will restart.`)) return;
+  btn.disabled = true;
+  btn.textContent = "Installing...";
+  try {
+    const res = await fetch("/api/install-version", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tag }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert(data.error || "Install failed");
+      btn.textContent = "Install";
+      btn.disabled = false;
+      return;
+    }
+    // Server is restarting — poll until it's back
+    btn.textContent = "Restarting...";
+    const start = Date.now();
+    const poll = setInterval(async () => {
+      if (Date.now() - start > 30000) { clearInterval(poll); btn.textContent = "Timeout"; return; }
+      try {
+        const r = await fetch("/api/sessions", { signal: AbortSignal.timeout(2000) });
+        if (r.ok) { clearInterval(poll); location.reload(); }
+      } catch {}
+    }, 1500);
+  } catch {
+    btn.textContent = "Error";
+    setTimeout(() => { btn.textContent = "Install"; btn.disabled = false; }, 2000);
+  }
+}
+
 // Load config sections when settings panel opens
 const _origLoadSettings = loadSettings;
 loadSettings = async function() {
+  _versionsLoaded = false;
+  _versionSection.style.display = "none";
+  _versionSection.classList.remove("open");
+  document.getElementById("version-collapse-body").classList.add("hidden");
+  _loadVersions();
   _loadAgentDefaults();
   _loadWorkspaceConfig();
   return _origLoadSettings();
@@ -4437,6 +4539,17 @@ function dismissPageLoader() {
       if (_savedReloadState) {
         _applyRestoredState(_savedReloadState);
         _savedReloadState = null;
+      } else {
+        // First load (no reload state) — auto-open shell if not explicitly closed before
+        // Default is open ("1") so new users see the terminal immediately
+        const shellPref = localStorage.getItem("ceo-shell-open");
+        if (shellPref !== "0") {
+          const header = document.getElementById("shell-header");
+          const panel = document.getElementById("shell-panel");
+          if (header && panel && !panel.classList.contains("open")) {
+            header.click();
+          }
+        }
       }
     });
   });
@@ -5161,6 +5274,7 @@ function _applyRestoredState(state) {
       shellPanel._savedHeight = shellPanel.offsetHeight;
     }
     const isOpen = shellPanel.classList.toggle("open");
+    try { localStorage.setItem("ceo-shell-open", isOpen ? "1" : "0"); } catch {}
     if (isOpen) {
       initShellTerminal();
       // Restore user-resized height, or clear to let CSS default (280px)

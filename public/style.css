@@ -3185,6 +3185,71 @@ header h1 {
   border-radius: 2px;
 }
 
+/* Version Manager */
+.version-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.version-list::-webkit-scrollbar { width: 4px; }
+.version-list::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 2px; }
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 12px;
+  transition: border-color 0.15s;
+}
+.version-row-current {
+  border-color: var(--green);
+}
+.version-tag {
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text);
+  min-width: 54px;
+}
+.version-date {
+  flex: 1;
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.version-current-badge {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(92, 184, 92, 0.15);
+  color: var(--green);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.version-install-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 10px;
+  padding: 2px 8px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.version-install-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.version-install-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* Toggle switch */
 .toggle-switch {
   position: relative;

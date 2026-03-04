@@ -117,7 +117,17 @@ const DOCS_DIR = path.join(__dirname, "docs");
 const CEO_MD_PATH = path.join(__dirname, "claude-ceo.md");
 const TODOS_FILE = path.join(__dirname, "todos.json");
 const POLL_INTERVAL = 300;
-const SHELL_WORKDIR = DEFAULT_WORKDIR;
+const SHELL_WORKDIR = DEFAULT_WORKDIR || os.homedir();
+const MIN_DASHBOARD_VERSION = "v0.3.5";
+
+function compareVersions(a, b) {
+  const pa = a.replace(/^v/, "").split(".").map(Number);
+  const pb = b.replace(/^v/, "").split(".").map(Number);
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+  }
+  return 0;
+}
 
 const DEFAULT_COLORS = [
   { id: "coral", name: "Coral", hex: "#E8836B" },
@@ -988,6 +998,10 @@ app.put("/api/config", (req, res) => {
   if (updates.agentPrefix !== undefined) userConfig.agentPrefix = updates.agentPrefix;
   if (updates.defaultAgentName !== undefined) userConfig.defaultAgentName = updates.defaultAgentName;
   if (updates.shellCommand !== undefined) userConfig.shellCommand = updates.shellCommand;
+  if (updates.dismissedOriginHead !== undefined) {
+    if (updates.dismissedOriginHead === null) delete userConfig.dismissedOriginHead;
+    else userConfig.dismissedOriginHead = updates.dismissedOriginHead;
+  }
   try {
     fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
     res.json({ ok: true, requiresRestart: updates.port !== undefined || updates.agentPrefix !== undefined });
@@ -2523,6 +2537,60 @@ app.get("/api/todos/by-agent/:agent", (req, res) => {
 // Any new commits on main trigger the update button — no releases needed.
 // Release notes are fetched from GitHub Releases API for the tooltip (optional).
 
+// --- Version Manager ---
+
+app.get("/api/versions", (req, res) => {
+  try {
+    try { execSync("git fetch --tags origin", { cwd: __dirname, timeout: 15000, stdio: "ignore" }); } catch {}
+    const tagsRaw = execSync('git tag -l "v*" --sort=-version:refname', { cwd: __dirname, encoding: "utf8" }).trim();
+    if (!tagsRaw) return res.json({ versions: [], currentHead: null, minVersion: MIN_DASHBOARD_VERSION });
+    const currentHead = execSync("git rev-parse HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
+    const versions = tagsRaw.split("\n").filter(t => /^v\d+\.\d+\.\d+$/.test(t) && compareVersions(t, MIN_DASHBOARD_VERSION) >= 0).map(tag => {
+      const commitHash = execSync(`git rev-parse ${tag}^{}`, { cwd: __dirname, encoding: "utf8" }).trim();
+      let date = null;
+      try { date = execSync(`git log -1 --format=%aI ${tag}^{}`, { cwd: __dirname, encoding: "utf8" }).trim(); } catch {}
+      return { tag, commitHash, date, isCurrent: commitHash === currentHead };
+    });
+    res.json({ versions, currentHead, minVersion: MIN_DASHBOARD_VERSION });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/install-version", (req, res) => {
+  const { tag } = req.body;
+  if (!tag || !/^v\d+\.\d+\.\d+$/.test(tag)) return res.status(400).json({ error: "Invalid version tag" });
+  if (compareVersions(tag, MIN_DASHBOARD_VERSION) < 0) return res.status(400).json({ error: `Cannot install versions older than ${MIN_DASHBOARD_VERSION}` });
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
+    if (branch !== "main") return res.status(400).json({ error: "Must be on main branch to switch versions" });
+    // Save current origin/main HEAD as dismissed so update button doesn't nag
+    try {
+      const originHead = execSync("git rev-parse origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+      userConfig.dismissedOriginHead = originHead;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    } catch {}
+    execSync(`git reset --hard ${tag}`, { cwd: __dirname, timeout: 30000 });
+    // npm install if needed
+    try { execSync("npm install", { cwd: __dirname, timeout: 60000 }); } catch {}
+    res.json({ ok: true });
+    // Notify clients and restart (same pattern as POST /api/update)
+    for (const client of wss.clients) {
+      try { client.send(JSON.stringify({ type: "server-restarting" })); } catch {}
+    }
+    const child = require("child_process").spawn(
+      process.execPath, [path.join(__dirname, "server.js")],
+      { cwd: __dirname, detached: true, stdio: "ignore", env: { ...process.env, CLAUDECODE: undefined } }
+    );
+    child.unref();
+    setTimeout(() => process.exit(0), 300);
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Install failed" });
+  }
+});
+
+// --- Update check ---
+
 let updateCache = { updateAvailable: false, checkedAt: 0, behind: 0, releaseNotes: null, summary: null };
 let _updateCheckPromise = null;
 
@@ -2540,7 +2608,22 @@ async function _doUpdateCheck() {
     // Count how many commits we're behind
     const behind = execSync("git rev-list --count HEAD..origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
     const behindCount = parseInt(behind, 10) || 0;
-    const updateAvailable = behindCount > 0;
+    let updateAvailable = behindCount > 0;
+
+    // Respect intentional downgrades — suppress update if user dismissed this origin/main HEAD
+    if (updateAvailable && userConfig.dismissedOriginHead) {
+      try {
+        const originHead = execSync("git rev-parse origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+        if (originHead === userConfig.dismissedOriginHead) {
+          // Same origin/main the user already dismissed — suppress
+          updateAvailable = false;
+        } else {
+          // origin/main advanced past what the user dismissed — clear dismissal
+          delete userConfig.dismissedOriginHead;
+          fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+        }
+      } catch {}
+    }
 
     // Get a short summary of what changed
     let summary = null;
@@ -2619,6 +2702,11 @@ app.post("/api/update", async (req, res) => {
         conflicts,
         cwd: __dirname,
       });
+    }
+    // Clear version dismissal — user explicitly chose to update
+    if (userConfig.dismissedOriginHead) {
+      delete userConfig.dismissedOriginHead;
+      try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2)); } catch {}
     }
     // Check if package-lock.json changed
     let needsInstall = false;
@@ -3163,12 +3251,15 @@ function flushShellBatch() {
 function ensureShellPty() {
   if (shellPty) return;
   const shell = process.env.SHELL || "/bin/zsh";
+  // Use configured workdir, fall back to home if it doesn't exist
+  let cwd = SHELL_WORKDIR;
+  try { if (!fs.statSync(cwd).isDirectory()) cwd = os.homedir(); } catch { cwd = os.homedir(); }
   try {
     shellPty = pty.spawn(shell, ["-l"], {
       name: "xterm-256color",
       cols: 120,
       rows: 24,
-      cwd: SHELL_WORKDIR,
+      cwd,
       env: { ...process.env, TERM: "xterm-256color" },
     });
   } catch (err) {
@@ -3177,7 +3268,7 @@ function ensureShellPty() {
     shellPty = null;
     return;
   }
-  console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) in ${SHELL_WORKDIR}`);
+  console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) in ${cwd}`);
 
   // Inject precmd hook that emits OSC 7 (cwd reporting) after every command.
   // Idempotent — checks if already defined before adding to hook arrays.
