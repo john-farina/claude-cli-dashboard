@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.css" integrity="sha384-7kLxZXax7DhezxjpSqH13QX4VIrQqiJNQfdb16B+7+GB2sFHVDbb9ZlKP+Gk1m90" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" integrity="sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/css/diff2html.min.css">
 </head>
 <body>
   <!-- Full-page loading overlay — visible until agents are laid out -->
@@ -170,6 +171,42 @@
       <div class="modal-actions">
         <button id="update-error-retry" class="btn-secondary hidden">Retry Update</button>
         <button id="update-error-close" class="btn-primary">Got it</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Code Diff Viewer Modal -->
+  <div id="diff-overlay" class="modal-overlay hidden">
+    <div class="modal diff-modal">
+      <div class="diff-modal-header">
+        <div class="diff-modal-title-row">
+          <h2>Code Diff</h2>
+          <span id="diff-agent-name" class="diff-agent-name"></span>
+          <span id="diff-workdir" class="diff-workdir"></span>
+        </div>
+        <div class="diff-modal-controls">
+          <div class="diff-tab-group" id="diff-tab-group">
+            <button class="diff-tab active" data-view="unified">Unified</button>
+            <button class="diff-tab" data-view="side-by-side">Split</button>
+          </div>
+          <button id="diff-refresh" class="diff-icon-btn" title="Refresh diff">&#8635;</button>
+          <button id="diff-close" class="diff-icon-btn diff-close-btn" title="Close">&times;</button>
+        </div>
+      </div>
+      <div id="diff-content" class="diff-content"></div>
+      <div id="diff-empty" class="diff-empty hidden">
+        <div class="diff-state-icon">&#10003;</div>
+        <div class="diff-state-text">No uncommitted changes</div>
+        <div class="diff-state-sub">Working tree is clean</div>
+      </div>
+      <div id="diff-loading" class="diff-loading hidden">
+        <div class="diff-spinner"></div>
+        <div class="diff-state-text">Loading diff&hellip;</div>
+      </div>
+      <div id="diff-error" class="diff-error hidden">
+        <div class="diff-state-icon">!</div>
+        <div class="diff-state-text" id="diff-error-msg"></div>
+        <button class="btn-secondary diff-retry-btn" id="diff-retry">Try Again</button>
       </div>
     </div>
   </div>
@@ -394,6 +431,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js" integrity="sha384-XGqKrV8Jrukp1NITJbOEHwg01tNkuXr6uB6YEj69ebpYU3v7FvoGgEg23C1Gcehk" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js" integrity="sha384-S1biLeI8L/bFduIVvCxbn/l4EtaG4nTqQjGF7qCYTbsGXGFe8KgIKXtw4+UWxprv" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js" integrity="sha384-suTk5GfzCaPxAJRzhqzQQvM81UskMll+stLgqXpay997ORTnMRm1IAJi143VfhXU" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

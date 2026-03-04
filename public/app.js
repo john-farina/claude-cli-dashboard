@@ -915,6 +915,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           <div class="more-menu-wrap">
             <button class="more-btn" tabindex="-1" title="More actions">&hellip;</button>
             <div class="more-menu">
+              <button class="more-menu-item" data-action="view-diff">View Diff</button>
               <button class="more-menu-item" data-action="rename">Rename</button>
               <button class="more-menu-item" data-action="header-color">Header Color</button>
               <div class="header-color-picker" style="display:none;">
@@ -1514,6 +1515,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
 
     moreMenu.classList.remove("visible");
 
+    if (action === "view-diff") { openDiffModal(name); return; }
     if (action === "rename") {
       const newName = prompt("Rename agent:", name);
       if (!newName || newName === name) return;
@@ -3516,7 +3518,7 @@ document.addEventListener("keydown", (e) => {
   const inFilesPanel = !!e.target.closest("#files-panel");
   const inInput = e.target.matches("input, textarea, [contenteditable]");
   const todoSettingsOverlay = document.getElementById("todo-settings-overlay");
-  const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden"));
+  const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) || (_diffOverlay && !_diffOverlay.classList.contains("hidden"));
 
   // Escape: layered dismiss (fullscreen → modals → file editor → files panel → shell → agent tmux)
   if (e.key === "Escape") {
@@ -3544,6 +3546,11 @@ document.addEventListener("keydown", (e) => {
     if (_ueOverlay && !_ueOverlay.classList.contains("hidden")) {
       e.preventDefault();
       _ueOverlay.classList.add("hidden");
+      return;
+    }
+    if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      closeDiffModal();
       return;
     }
     // Todo settings modal
@@ -4189,6 +4196,116 @@ _ueRetry.addEventListener("click", () => {
 
 _ueClose.addEventListener("click", () => {
   _ueOverlay.classList.add("hidden");
+});
+
+// --- Code Diff Viewer ---
+
+const _diffOverlay = document.getElementById("diff-overlay");
+const _diffAgentName = document.getElementById("diff-agent-name");
+const _diffWorkdir = document.getElementById("diff-workdir");
+const _diffContent = document.getElementById("diff-content");
+const _diffEmpty = document.getElementById("diff-empty");
+const _diffLoading = document.getElementById("diff-loading");
+const _diffError = document.getElementById("diff-error");
+const _diffErrorMsg = document.getElementById("diff-error-msg");
+const _diffClose = document.getElementById("diff-close");
+const _diffRefresh = document.getElementById("diff-refresh");
+const _diffRetry = document.getElementById("diff-retry");
+const _diffTabGroup = document.getElementById("diff-tab-group");
+
+let _diffCurrentAgent = null;
+let _diffSideBySide = false;
+let _diffCachedStaged = "";
+let _diffCachedUnstaged = "";
+
+function _diffSetState(state) {
+  _diffContent.innerHTML = "";
+  _diffEmpty.classList.add("hidden");
+  _diffLoading.classList.add("hidden");
+  _diffError.classList.add("hidden");
+  if (state === "loading") _diffLoading.classList.remove("hidden");
+  else if (state === "empty") _diffEmpty.classList.remove("hidden");
+  else if (state === "error") _diffError.classList.remove("hidden");
+}
+
+async function openDiffModal(agentName) {
+  _diffCurrentAgent = agentName;
+  _diffOverlay.classList.remove("hidden");
+  _diffAgentName.textContent = agentName;
+  _diffWorkdir.textContent = "";
+  _diffSetState("loading");
+
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/diff`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to fetch diff");
+
+    _diffWorkdir.textContent = shortPath(data.workdir);
+
+    if (!data.hasDiff) {
+      _diffCachedStaged = "";
+      _diffCachedUnstaged = "";
+      _diffSetState("empty");
+      return;
+    }
+
+    _diffCachedStaged = data.staged || "";
+    _diffCachedUnstaged = data.unstaged || "";
+    _diffSetState("content");
+    renderDiff(_diffCachedStaged, _diffCachedUnstaged);
+  } catch (e) {
+    _diffErrorMsg.textContent = e.message;
+    _diffSetState("error");
+  }
+}
+
+function renderDiff(staged, unstaged) {
+  let combined = "";
+  if (unstaged) combined += unstaged;
+  if (staged) combined += (combined ? "\n" : "") + staged;
+  if (!combined) { _diffSetState("empty"); return; }
+
+  const outputFormat = _diffSideBySide ? "side-by-side" : "line-by-line";
+  const html = Diff2Html.html(combined, {
+    drawFileList: true,
+    matching: "lines",
+    outputFormat,
+    colorScheme: "dark",
+  });
+  _diffContent.innerHTML = html;
+}
+
+function closeDiffModal() {
+  _diffOverlay.classList.add("hidden");
+  _diffContent.innerHTML = "";
+  _diffCachedStaged = "";
+  _diffCachedUnstaged = "";
+  _diffCurrentAgent = null;
+}
+
+_diffClose.addEventListener("click", closeDiffModal);
+
+_diffOverlay.addEventListener("click", (e) => {
+  if (e.target === _diffOverlay) closeDiffModal();
+});
+
+_diffRefresh.addEventListener("click", () => {
+  if (_diffCurrentAgent) openDiffModal(_diffCurrentAgent);
+});
+
+_diffRetry.addEventListener("click", () => {
+  if (_diffCurrentAgent) openDiffModal(_diffCurrentAgent);
+});
+
+_diffTabGroup.addEventListener("click", (e) => {
+  const tab = e.target.closest(".diff-tab");
+  if (!tab || tab.classList.contains("active")) return;
+  _diffTabGroup.querySelectorAll(".diff-tab").forEach(t => t.classList.remove("active"));
+  tab.classList.add("active");
+  _diffSideBySide = tab.dataset.view === "side-by-side";
+  if (_diffCachedStaged || _diffCachedUnstaged) {
+    renderDiff(_diffCachedStaged, _diffCachedUnstaged);
+  }
 });
 
 // --- Settings Panel ---
