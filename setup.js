@@ -327,6 +327,13 @@ async function main() {
       console.log("  Then re-run: npm run setup");
     }
   }
+  // Rebuild node-pty native bindings for this Node version/architecture.
+  // Required for the embedded terminal — prebuilt binaries often don't match.
+  console.log("  Rebuilding native modules for your system...");
+  if (!runCommand("npm rebuild node-pty 2>/dev/null", { cwd: __dirname })) {
+    console.log("  Warning: node-pty rebuild failed. Terminal may not work.");
+    console.log("  Try: xcode-select --install && npm rebuild node-pty");
+  }
 
   // ============================================================
   // Step 4: Workspace Configuration

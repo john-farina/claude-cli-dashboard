@@ -3250,25 +3250,33 @@ function flushShellBatch() {
 
 function ensureShellPty() {
   if (shellPty) return;
-  const shell = process.env.SHELL || "/bin/zsh";
   // Use configured workdir, fall back to home if it doesn't exist
   let cwd = SHELL_WORKDIR;
   try { if (!fs.statSync(cwd).isDirectory()) cwd = os.homedir(); } catch { cwd = os.homedir(); }
-  try {
-    shellPty = pty.spawn(shell, ["-l"], {
-      name: "xterm-256color",
-      cols: 120,
-      rows: 24,
-      cwd,
-      env: { ...process.env, TERM: "xterm-256color" },
-    });
-  } catch (err) {
-    console.error(`[shell] Failed to spawn PTY (${shell}): ${err.message}`);
+  // Try user's shell, then common fallbacks
+  const shells = [process.env.SHELL, "/bin/zsh", "/bin/bash", "/bin/sh"].filter(Boolean);
+  for (const shell of shells) {
+    try {
+      if (!fs.existsSync(shell)) continue;
+      shellPty = pty.spawn(shell, ["-l"], {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 24,
+        cwd,
+        env: { ...process.env, TERM: "xterm-256color" },
+      });
+      console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) using ${shell} in ${cwd}`);
+      break;
+    } catch (err) {
+      console.error(`[shell] Failed to spawn PTY (${shell}): ${err.message}`);
+      shellPty = null;
+    }
+  }
+  if (!shellPty) {
+    console.error("[shell] All shells failed. Try: npm rebuild node-pty");
     console.error("[shell] Embedded terminal will be unavailable. The dashboard still works.");
-    shellPty = null;
     return;
   }
-  console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) in ${cwd}`);
 
   // Inject precmd hook that emits OSC 7 (cwd reporting) after every command.
   // Idempotent — checks if already defined before adding to hook arrays.
