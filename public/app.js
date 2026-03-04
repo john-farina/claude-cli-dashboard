@@ -24,6 +24,16 @@ marked.use({
     html(token) {
       const text = typeof token === 'string' ? token : (token.raw || token.text || '');
       return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    },
+    link(token) {
+      const href = typeof token === 'string' ? token : (token.href || '');
+      const text = typeof token === 'string' ? token : (token.text || href);
+      // Block dangerous URI schemes (javascript:, data:, vbscript:, etc.)
+      const cleanHref = href.replace(/[\x00-\x1f\x7f]/g, '').trim();
+      if (/^(?:javascript|data|vbscript):/i.test(cleanHref)) {
+        return escapeHtml(text);
+      }
+      return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${text}</a>`;
     }
   }
 });
@@ -395,12 +405,13 @@ function applyLayout(name, card) {
   if (layout.height) {
     card.style.height = layout.height;
   }
-  // Header color
+  // Header color — sanitize to prevent CSS injection from localStorage
   if (layout.headerColor) {
+    const color = safeHex(layout.headerColor);
     const h = card.querySelector(".card-header");
     if (h) {
-      h.style.background = `linear-gradient(135deg, ${layout.headerColor}38 0%, ${layout.headerColor}20 100%)`;
-      h.style.borderBottom = `1px solid ${layout.headerColor}50`;
+      h.style.background = `linear-gradient(135deg, ${color}38 0%, ${color}20 100%)`;
+      h.style.borderBottom = `1px solid ${color}50`;
     }
   }
   // Note: minimized state is now server-side, applied separately in addAgentCard
@@ -600,7 +611,8 @@ function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
-  ws = new WebSocket(`ws://${location.host}`);
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${wsProto}//${location.host}`);
   ws.binaryType = "arraybuffer"; // Binary frames arrive as ArrayBuffer (shell PTY data)
 
   ws.onopen = () => {
@@ -700,11 +712,15 @@ function connect() {
       return;
     }
     if (msg.type === "open-url") {
-      window.open(msg.url, "_blank");
+      if (typeof msg.url === "string" && /^https?:\/\//i.test(msg.url)) {
+        window.open(msg.url, "_blank");
+      }
       return;
     }
     if (msg.type === "shell-open-url") {
-      window.open(msg.url, "_blank");
+      if (typeof msg.url === "string" && /^https?:\/\//i.test(msg.url)) {
+        window.open(msg.url, "_blank");
+      }
       return;
     }
     if (msg.type === "shell-info") {
@@ -4055,7 +4071,7 @@ function showUpdateButton(data) {
     if (commits.length) {
       if (tooltipHtml) tooltipHtml += "<hr style='border-color:var(--border);margin:10px 0'>";
       tooltipHtml += "<strong>Recent changes:</strong><ul>" +
-        commits.slice(0, 15).map(c => `<li>${c.replace(/</g, "&lt;")}</li>`).join("") +
+        commits.slice(0, 15).map(c => `<li>${escapeHtml(c)}</li>`).join("") +
         "</ul>";
     }
   }

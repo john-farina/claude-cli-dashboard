@@ -76,7 +76,8 @@ function connect() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.close();
   }
-  ws = new WebSocket(`ws://${location.host}`);
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${wsProto}//${location.host}`);
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     clearTimeout(reconnectTimer);
