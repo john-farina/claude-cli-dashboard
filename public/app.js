@@ -4061,8 +4061,22 @@ async function loadSettings() {
     } else {
       tailscaleBadge.textContent = "Not Installed";
       tailscaleBadge.className = "settings-badge offline";
-      tailscaleDesc.textContent = "Install Tailscale for secure remote access from your phone.";
-      tailscaleDetails.classList.add("hidden");
+      tailscaleDesc.innerHTML = 'Access your dashboard from your phone or any device on your network.';
+      tailscaleDetails.classList.remove("hidden");
+      tailscaleIp.textContent = "—";
+      tailscaleUrl.textContent = "";
+      tailscaleUrl.href = "#";
+      tailscaleDetails.innerHTML = `<div class="tailscale-setup-guide">
+        <p><strong>Setup:</strong></p>
+        <ol>
+          <li>Install from <a href="https://tailscale.com/download/mac" target="_blank">tailscale.com/download/mac</a></li>
+          <li>Open Tailscale.app and sign in (Google, Microsoft, or GitHub)</li>
+          <li>Install Tailscale on your phone too — same account</li>
+          <li>Both devices join the same private network automatically</li>
+          <li>Reopen Settings here — your dashboard URL will appear</li>
+        </ol>
+        <p style="margin-top:8px;color:var(--text-dim);font-size:11px;">Free for personal use. No port forwarding, no firewall changes needed.</p>
+      </div>`;
     }
   } catch {
     tailscaleDesc.textContent = "Failed to load settings";
@@ -4338,6 +4352,8 @@ _wsAddBtn.addEventListener("click", () => {
   _wsAddPath.value = "";
   _wsAddLabel.value = "";
   _saveWorkspaceConfig();
+  // Auto-select the newly added workspace in the new agent modal
+  setWorkdir(pathVal);
 });
 
 _wsAddPath.addEventListener("keydown", (e) => {

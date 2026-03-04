@@ -3293,6 +3293,27 @@ header h1 {
   text-decoration: underline;
 }
 
+.tailscale-setup-guide p {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0 0 6px;
+  line-height: 1.5;
+}
+.tailscale-setup-guide ol {
+  margin: 6px 0 0 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+.tailscale-setup-guide li { margin: 2px 0; }
+.tailscale-setup-guide a {
+  color: var(--blue);
+  text-decoration: none;
+}
+.tailscale-setup-guide a:hover {
+  text-decoration: underline;
+}
+
 /* Settings backdrop */
 .settings-backdrop {
   position: fixed;
