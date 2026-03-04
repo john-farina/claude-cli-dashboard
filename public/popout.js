@@ -112,16 +112,20 @@ function scheduleRefresh() {
 // --- Terminal rendering ---
 const LINK_RE = /(https?:\/\/[^\s<>"')\]]+)|((?:\/[\w.@:+-]+)+(?:\.[\w]+)?(?::\d+)?)/g;
 
+function escapeAttr(s) {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 function linkifyTerminal(html) {
   const parts = html.split(/(<[^>]+>)/);
   for (let i = 0; i < parts.length; i++) {
     if (parts[i].startsWith("<")) continue;
     parts[i] = parts[i].replace(LINK_RE, (match, url, filepath) => {
-      if (url) return `<a class="terminal-link" href="${url}" target="_blank" rel="noopener">${match}</a>`;
+      if (url) return `<a class="terminal-link" href="${escapeAttr(url)}" target="_blank" rel="noopener">${match}</a>`;
       if (filepath && filepath.length > 3) {
         const cleanPath = filepath.replace(/[,;:!?)]+$/, "");
         const trailing = filepath.slice(cleanPath.length);
-        return `<a class="terminal-link terminal-path" data-path="${cleanPath}" href="vscode://file${cleanPath}">${cleanPath}</a>${trailing}`;
+        return `<a class="terminal-link terminal-path" data-path="${escapeAttr(cleanPath)}" href="vscode://file${escapeAttr(cleanPath)}">${cleanPath}</a>${trailing}`;
       }
       return match;
     });
