@@ -472,6 +472,10 @@ async function main() {
       console.log(`  ✓ Exists: ${dir}`);
     }
   }
+  console.log();
+  console.log(`  Tip: Save docs to ~/.claude/docs/ and they'll be available to`);
+  console.log(`  all future Claude sessions — coding guidelines, architecture`);
+  console.log(`  notes, API references, anything you want Claude to know.`);
 
   // ============================================================
   // Step 9: Shell Alias
