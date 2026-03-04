@@ -2922,6 +2922,9 @@ wss.on("connection", (ws) => {
   ws.on("close", () => shellClients.delete(ws));
   // Ensure shell PTY is running and start info polling
   ensureShellPty();
+  if (!shellPty) {
+    try { ws.send(JSON.stringify({ type: "shell-unavailable" })); } catch {}
+  }
   startShellInfoPolling();
   // Replay buffered scrollback as binary chunks (no JSON overhead)
   const scrollback = getShellScrollback();

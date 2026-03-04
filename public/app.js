@@ -658,6 +658,15 @@ function connect() {
       setTimeout(pollUntilReady, 800);
       return;
     }
+    if (msg.type === "shell-unavailable") {
+      if (window._shellXterm) {
+        window._shellXterm.write("\r\n\x1b[1;31m  Terminal unavailable\x1b[0m\r\n\r\n");
+        window._shellXterm.write("  node-pty failed to start. Run this to fix:\r\n\r\n");
+        window._shellXterm.write("    \x1b[1mnpm rebuild node-pty\x1b[0m\r\n\r\n");
+        window._shellXterm.write("  Then restart the dashboard.\r\n");
+      }
+      return;
+    }
     if (msg.type === "update-available") {
       showUpdateButton(msg);
       return;
