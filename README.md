@@ -29,6 +29,7 @@
 - **Native macOS app** — Dock icon, in-app browser for PR links, keyboard shortcuts
 - **Mobile support** — fully usable on phones (iOS Safari)
 - **Embedded shell** — built-in terminal with autocomplete, git info, and PR links
+- **Embedded shell** — built-in terminal with autocomplete, git info, and PR links
 
 ## Prerequisites
 
