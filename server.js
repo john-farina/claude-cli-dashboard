@@ -754,8 +754,9 @@ function createSession(name, workdir, initialPrompt, resumeSessionId) {
     const ceoPreamble = ceoPreambleRaw.replace(/\{\{DOCS_DIR\}\}/g, DOCS_DIR);
     if (ceoPreamble && effectivePrompt) {
       effectivePrompt = `${ceoPreamble}\n\n---\n\n${effectivePrompt}${DOC_REMINDER}`;
-    } else if (ceoPreamble && !resumeSessionId) {
-      effectivePrompt = `${ceoPreamble}${DOC_REMINDER}`;
+    } else if (ceoPreamble && !effectivePrompt && !resumeSessionId) {
+      // No user prompt — send preamble with instruction to wait for user input
+      effectivePrompt = `${ceoPreamble}\n\n---\n\nNo task has been assigned yet. Say a short greeting using your agent name "${name}" and let the user know you're ready and waiting for instructions. Do NOT start any work, do NOT guess a task from your name, do NOT explore the codebase. Just greet and wait.${DOC_REMINDER}`;
     }
   } catch {}
 
@@ -3344,6 +3345,12 @@ function flushShellBatch() {
 function ensureShellPty() {
   if (shellPty) return;
   if (!pty) return; // node-pty not available
+  // Fix spawn-helper permissions (node-pty prebuilds ship without +x on some platforms)
+  try {
+    const helper = path.join(__dirname, "node_modules", "node-pty", "prebuilds", `${process.platform}-${process.arch}`, "spawn-helper");
+    const st = fs.statSync(helper);
+    if (!(st.mode & 0o111)) { fs.chmodSync(helper, st.mode | 0o755); console.log("[shell] Fixed spawn-helper permissions"); }
+  } catch {}
   // Use configured workdir, fall back to home if it doesn't exist
   let cwd = SHELL_WORKDIR;
   try { if (!fs.statSync(cwd).isDirectory()) cwd = os.homedir(); } catch { cwd = os.homedir(); }

@@ -1,6 +1,6 @@
 {
   "name": "claude-cli-dashboard",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Multi-agent management UI for Claude Code",
   "license": "MIT",
   "repository": {
@@ -11,7 +11,8 @@
     "start": "node server.js",
     "setup": "node setup.js",
     "setup:sandbox": "node setup.js --sandbox /tmp/ceo-test",
-    "setup:clean": "node setup.js --clean-sandbox /tmp/ceo-test"
+    "setup:clean": "node setup.js --clean-sandbox /tmp/ceo-test",
+    "postinstall": "chmod +x node_modules/node-pty/prebuilds/*/spawn-helper 2>/dev/null || true"
   },
   "dependencies": {
     "express": "^4.21.0",

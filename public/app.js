@@ -493,7 +493,6 @@ function buildReloadState() {
     scrollY: window.scrollY,
     drafts: {},
     attachments: {},
-    terminalScrolls: {},
     shellOpen: document.getElementById("shell-panel")?.classList.contains("open"),
     currentView: currentView || "agents",
   };
@@ -547,10 +546,6 @@ function buildReloadState() {
   for (const [name, agent] of agents) {
     const textarea = agent.card.querySelector(".card-input textarea");
     if (textarea && textarea.value) state.drafts[name] = textarea.value;
-    // Save terminal scroll position
-    if (agent.terminal) {
-      state.terminalScrolls[name] = agent.terminal.scrollTop;
-    }
     // Persist image attachments (only completed uploads, not processing videos)
     if (agent.pendingAttachments && agent.pendingAttachments.length > 0) {
       const saved = agent.pendingAttachments.filter(a => !a.processing).map(a => {
@@ -756,8 +751,7 @@ function connect() {
       const agent = agents.get(msg.session);
       const isFirstContent = !agent.terminal._lastContent;
       // Force scroll to bottom on first content received (handles reload/reconnect)
-      // But skip force-scroll if we have saved state to restore (user's position takes priority)
-      if (isFirstContent && !_savedReloadState) {
+      if (isFirstContent) {
         agent.terminal._forceScrollUntil = Date.now() + 5000;
       }
       updateTerminal(agent.terminal, msg.lines);
@@ -4807,18 +4801,14 @@ function _applyRestoredState(state) {
       }
     }
   }
-  // 3. Restore terminal scroll positions (override the default force-scroll-to-bottom)
-  if (state.terminalScrolls) {
-    for (const [name, scrollTop] of Object.entries(state.terminalScrolls)) {
-      const agent = agents.get(name);
-      if (agent && agent.terminal) {
-        agent.terminal._forceScrollUntil = 0; // cancel force scroll
-        agent.terminal._userScrolledUp = false;
-        agent.terminal.scrollTop = scrollTop;
-        // Check if they were scrolled up
-        const atBottom = agent.terminal.scrollHeight - scrollTop - agent.terminal.clientHeight < 30;
-        if (!atBottom) agent.terminal._userScrolledUp = true;
-      }
+  // 3. Force all terminals to scroll to bottom on reload.
+  // Saved scroll positions are unreliable after innerHTML rebuild — the offsets
+  // become stale and leave terminals stuck at the top.
+  for (const [, agent] of agents) {
+    if (agent.terminal) {
+      agent.terminal._userScrolledUp = false;
+      agent.terminal._forceScrollUntil = Date.now() + 5000;
+      scrollTerminalToBottom(agent.terminal);
     }
   }
   // 4. Restore page scroll position
