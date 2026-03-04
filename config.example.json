@@ -7,5 +7,6 @@
   "agentPrefix": "ceo-",
   "defaultAgentName": "agent",
   "shellCommand": "ceo",
-  "prLinkStyle": "graphite"
+  "prLinkStyle": "graphite",
+  "title": "CEO Dashboard"
 }

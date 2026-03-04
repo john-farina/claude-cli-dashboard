@@ -113,6 +113,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
         window.titlebarAppearsTransparent = true
         window.backgroundColor = NSColor(red: 0.07, green: 0.07, blue: 0.07, alpha: 1.0)
 
+        fetchDashboardTitle()
+
         DistributedNotificationCenter.default().addObserver(
             self,
             selector: #selector(handleReload),
@@ -142,7 +144,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
             }
 
         case "sendNotification":
-            let title = dict["title"] as? String ?? "CEO Dashboard"
+            let title = dict["title"] as? String ?? (self.window.title)
             let body = dict["body"] as? String ?? ""
             let tag = dict["tag"] as? String ?? "default"
 
@@ -554,6 +556,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
             self?.window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    func fetchDashboardTitle() {
+        guard let url = URL(string: "http://localhost:9145/api/config") else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let data = data,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let title = json["title"] as? String, !title.isEmpty else { return }
+            DispatchQueue.main.async {
+                self?.window.title = title
+            }
+        }.resume()
     }
 
     func checkServerAndLoad() {

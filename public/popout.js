@@ -9,7 +9,8 @@ if (!agentName) {
   throw new Error("No agent param");
 }
 
-document.title = `${agentName} — CEO Dashboard`;
+let _popoutTitle = "CEO Dashboard";
+document.title = `${agentName} — ${_popoutTitle}`;
 document.getElementById("agent-name").textContent = agentName;
 
 const terminal = document.getElementById("terminal");
@@ -177,9 +178,9 @@ function updateStatus(status, promptType) {
 
   // Update tab title for attention
   if (status === "waiting" || status === "asking") {
-    document.title = `\u26a0 ${agentName} — CEO Dashboard`;
+    document.title = `\u26a0 ${agentName} — ${_popoutTitle}`;
   } else {
-    document.title = `${agentName} — CEO Dashboard`;
+    document.title = `${agentName} — ${_popoutTitle}`;
   }
 
   if (status !== "waiting" || !promptType) {
@@ -523,7 +524,13 @@ killBtn.addEventListener("click", async () => {
 
 // --- Helpers ---
 let _popoutHomedir = "";
-fetch("/api/config").then(r => r.json()).then(cfg => { _popoutHomedir = cfg.homedir || ""; }).catch(() => {});
+fetch("/api/config").then(r => r.json()).then(cfg => {
+  _popoutHomedir = cfg.homedir || "";
+  if (cfg.title) {
+    _popoutTitle = cfg.title;
+    document.title = `${agentName} — ${_popoutTitle}`;
+  }
+}).catch(() => {});
 
 function shortPath(p) {
   if (!p) return "";

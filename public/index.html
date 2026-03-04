@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
-  <title>CEO Dashboard</title>
+  <title>Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="stylesheet" href="style.css">
@@ -30,7 +30,7 @@
   <header>
     <div class="header-left">
       <img src="claude-symbol.svg" alt="" class="header-logo">
-      <h1>CEO Dashboard</h1>
+      <h1 id="header-title">CEO Dashboard</h1>
       <span id="connection-dot" class="dot offline" title="Disconnected"></span>
       <span class="contribute-info" tabindex="0">
         &#x24D8;
@@ -55,7 +55,7 @@
       <button id="settings-btn" class="settings-icon-btn" tabindex="0" title="Settings (S)"><span class="gear-icon">&#x2699;</span><kbd>S</kbd></button>
       <button id="restart-server-btn" class="btn-secondary" tabindex="0">&#x21bb; Refresh <kbd>R</kbd></button>
       <button id="ceo-md-btn" class="btn-secondary" tabindex="0">CEO.md <kbd>C</kbd></button>
-      <button id="files-btn" class="btn-secondary" tabindex="0">.claude <kbd>F</kbd></button>
+      <button id="files-btn" class="btn-secondary" tabindex="0">Docs <kbd>F</kbd></button>
       <button id="todo-btn" class="btn-secondary" tabindex="0">&#x2611; Notes <kbd>D</kbd></button>
       <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
     </div>
@@ -183,7 +183,7 @@
   <div id="files-backdrop" class="files-backdrop"></div>
   <aside id="files-panel" class="files-panel">
     <div class="files-panel-header">
-      <h2>.claude</h2>
+      <h2>Docs</h2>
       <button id="files-close" class="kill-btn" tabindex="0">&times;</button>
     </div>
     <div id="files-categories" class="files-categories"></div>
@@ -294,6 +294,13 @@
           <span class="settings-section-title" style="margin:0">Agent Defaults</span>
         </button>
         <div id="agent-defaults-body" class="settings-collapse-body hidden">
+          <div class="settings-inline-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Dashboard Title</span>
+              <span class="settings-desc">Customize the name shown in the header, tab title, and notifications.</span>
+            </div>
+            <input type="text" id="setting-title" class="settings-inline-input" placeholder="CEO Dashboard">
+          </div>
           <div class="settings-inline-row">
             <div class="settings-row-info">
               <span class="settings-label">Default Name</span>

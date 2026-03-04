@@ -35,7 +35,7 @@ localStorage.removeItem("ceo-theme");
 let _lastWsMessage = Date.now();
 
 // --- Tab notifications (title flash + native/browser notifications + dock badge) ---
-const TAB_TITLE_DEFAULT = "CEO Dashboard";
+let TAB_TITLE_DEFAULT = "CEO Dashboard";
 let _tabFlashInterval = null;
 let _prevAttentionAgents = new Set(); // track which agents already triggered a notification
 const _isNativeApp = !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ceoBridge);
@@ -133,7 +133,7 @@ function updateTabNotifications() {
         if (_isNativeApp) {
           _sendNativeBridge({ action: "sendNotification", title: name, body, tag: `ceo-${name}` });
         } else if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-          new Notification(`CEO Dashboard — ${name}`, { body, tag: `ceo-${name}` });
+          new Notification(`${TAB_TITLE_DEFAULT} — ${name}`, { body, tag: `ceo-${name}` });
         }
       }
     }
@@ -2158,10 +2158,9 @@ function updateTerminal(terminal, lines) {
 
   // Skip update if content hasn't changed
   if (terminal._lastContent === content) {
-    // Even if content is the same, keep trying to scroll during force period.
-    // This handles the case where layout wasn't ready on the first attempt.
-    if (terminal._forceScrollUntil && Date.now() < terminal._forceScrollUntil
-        && !terminal._userTouching && !terminal._userScrolledUp) {
+    // Still ensure scroll is at bottom if user hasn't scrolled up.
+    // Layout changes (masonry, resize) can displace scrollTop even without new content.
+    if (!terminal._userTouching && !terminal._userScrolledUp) {
       scrollTerminalToBottom(terminal);
     }
     return;
@@ -2175,8 +2174,6 @@ function updateTerminal(terminal, lines) {
 
   const userInteracting = terminal._userTouching || terminal._userScrolledUp;
   const forceScroll = !userInteracting && terminal._forceScrollUntil && Date.now() < terminal._forceScrollUntil;
-  const wasScrolledToBottom = !userInteracting &&
-    terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 30;
 
   // Preserve scroll position when user is reading history (scrolled up)
   const savedScrollTop = userInteracting ? terminal.scrollTop : null;
@@ -2213,8 +2210,10 @@ function updateTerminal(terminal, lines) {
         }
       }, ms);
     }
-  } else if (wasScrolledToBottom) {
-    // Normal follow-bottom: just sync + rAF (no delayed timers that fight user scroll)
+  } else if (!userInteracting) {
+    // User hasn't scrolled up — always keep at bottom.
+    // (Previously checked wasScrolledToBottom, but layout changes like masonry reflow
+    // can displace scrollTop without user intent, leaving terminals stuck at top.)
     scrollTerminalToBottom(terminal);
     requestAnimationFrame(() => scrollTerminalToBottom(terminal));
   }
@@ -2936,6 +2935,12 @@ fetch("/api/config")
     _defaultAgentName = cfg.defaultAgentName || "agent";
     selectedWorkdirPath = DEFAULT_WORKDIR;
     _needsSetup = cfg.needsSetup || false;
+    if (cfg.title) {
+      TAB_TITLE_DEFAULT = cfg.title;
+      document.title = cfg.title;
+      const headerTitle = document.getElementById("header-title");
+      if (headerTitle) headerTitle.textContent = cfg.title;
+    }
     _renderWorkdirPills(cfg.workspaces || []);
     updateEmptyState();
   })
@@ -4315,6 +4320,7 @@ document.getElementById("agent-defaults-toggle").addEventListener("click", () =>
   body.classList.toggle("hidden");
 });
 
+const _settingTitle = document.getElementById("setting-title");
 const _settingDefaultName = document.getElementById("setting-default-agent-name");
 const _settingPrefix = document.getElementById("setting-agent-prefix");
 const _settingPort = document.getElementById("setting-port");
@@ -4323,6 +4329,7 @@ const _settingInstallAlias = document.getElementById("setting-install-alias");
 
 function _loadAgentDefaults() {
   fetch("/api/config").then(r => r.json()).then(cfg => {
+    _settingTitle.value = cfg.title || "CEO Dashboard";
     _defaultAgentName = cfg.defaultAgentName || "agent";
     _settingDefaultName.value = cfg.defaultAgentName || "agent";
     _settingPrefix.value = cfg.agentPrefix || "ceo-";
@@ -4345,6 +4352,14 @@ function _saveAgentDefault(key, value) {
   }, 400);
 }
 
+_settingTitle.addEventListener("input", () => {
+  const v = _settingTitle.value.trim() || "CEO Dashboard";
+  TAB_TITLE_DEFAULT = v;
+  document.title = v;
+  const headerTitle = document.getElementById("header-title");
+  if (headerTitle) headerTitle.textContent = v;
+  _saveAgentDefault("title", v);
+});
 _settingDefaultName.addEventListener("input", () => {
   const v = _settingDefaultName.value.trim();
   _defaultAgentName = v || "agent";

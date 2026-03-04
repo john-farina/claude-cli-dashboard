@@ -1021,6 +1021,7 @@ app.get("/api/config", (req, res) => {
     agentPrefix: PREFIX,
     defaultAgentName: userConfig.defaultAgentName || "agent",
     shellCommand: userConfig.shellCommand || "ceo",
+    title: userConfig.title || "CEO Dashboard",
     needsSetup: _configMissing,
     shellAvailable: !!pty,
   });
@@ -1036,6 +1037,7 @@ app.put("/api/config", (req, res) => {
   if (updates.agentPrefix !== undefined) userConfig.agentPrefix = updates.agentPrefix;
   if (updates.defaultAgentName !== undefined) userConfig.defaultAgentName = updates.defaultAgentName;
   if (updates.shellCommand !== undefined) userConfig.shellCommand = updates.shellCommand;
+  if (updates.title !== undefined) userConfig.title = updates.title;
   if (updates.dismissedOriginHead !== undefined) {
     if (updates.dismissedOriginHead === null) delete userConfig.dismissedOriginHead;
     else userConfig.dismissedOriginHead = updates.dismissedOriginHead;
