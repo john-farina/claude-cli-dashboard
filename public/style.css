@@ -1410,6 +1410,8 @@ header h1 {
   padding: 28px;
   width: 520px;
   max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
 }
 
