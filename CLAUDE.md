@@ -62,7 +62,7 @@ Supporting files:
 - `type-option` WebSocket message: navigates to option via arrow keys, waits 400ms, then types text
 
 **Output Filtering** (`filterOutputForDisplay`):
-- `filterCeoPreamble()` — strips CEO instructions from displayed output (matches `# CEO Agent Instructions` block)
+- `filterCeoPreamble()` — strips CEO instructions from displayed output. Matches from `# CEO Dashboard Agent` (or `MANDATORY RULES`) through `[END_CEO_PROMPT]` end marker. The server appends this marker to all injected prompts. Includes fallback logic for older prompts without the marker.
 - Prompt filter — strips Claude's `❯` input prompt lines (we have our own input field)
 - Applied to all 3 WebSocket output paths (broadcast, initial connection, push after creation)
 

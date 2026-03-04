@@ -36,7 +36,8 @@
         &#x24D8;
         <div class="contribute-tooltip">
           <strong>Contributing</strong>
-          <p>Spawn an agent in <code class="dashboard-dir">the dashboard directory</code>. When ready, paste this prompt:</p>
+          <p>Spawn an agent in <code class="dashboard-dir">the dashboard directory</code> <button class="contribute-spawn-btn" id="contribute-spawn-btn">Create Agent</button></p>
+          <p>When ready, paste this prompt:</p>
           <div class="contribute-prompt-wrap">
             <pre class="contribute-prompt">Read the CLAUDE.md for how to contribute a PR, then create one for my changes.</pre>
             <button class="contribute-copy-btn" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)})">Copy</button>

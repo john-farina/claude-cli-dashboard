@@ -600,8 +600,11 @@ function sendKeysWithImages(session, text, imagePaths) {
 function filterCeoPreamble(lines) {
   const toRemove = new Set();
 
-  // Pass 1: Find and mark CEO preamble block (header → first --- separator)
+  // Find start marker (# CEO Dashboard Agent) and end marker ([END_CEO_PROMPT])
+  // Strip everything between them inclusive — covers preamble, user prompt separator,
+  // no-task instruction, doc reminder, and the end marker itself.
   let startIdx = -1;
+  let foundEnd = false;
   for (let i = 0; i < lines.length; i++) {
     const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
     const content = stripped.replace(/^>\s*/, "");
@@ -610,37 +613,53 @@ function filterCeoPreamble(lines) {
       if (content.includes("CEO Dashboard Agent") || content.includes("MANDATORY RULES")) {
         startIdx = i;
       }
-    } else {
+    }
+    if (startIdx !== -1) {
       toRemove.add(i);
-      if (/^-{3,}$/.test(content)) {
-        toRemove.add(startIdx);
+      if (content.includes("[END_CEO_PROMPT]")) {
+        foundEnd = true;
         break;
       }
-      // Safety: don't strip more than 100 lines
-      if (i - startIdx > 100) {
-        toRemove.add(startIdx);
-        break;
-      }
+      // Safety: don't strip more than 200 lines
+      if (i - startIdx > 200) break;
     }
   }
 
-  // Pass 2: Find and mark the trailing CRITICAL REMINDER block
-  for (let i = 0; i < lines.length; i++) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
-    const content = stripped.replace(/^>\s*/, "");
-    if (content.includes("CRITICAL REMINDER") && content.includes("AGENT NAME")) {
-      // Remove from the --- above through the end of the reminder
-      if (i > 0) {
-        const prev = lines[i - 1].replace(/\x1b\[[0-9;]*m/g, "").trim().replace(/^>\s*/, "");
-        if (/^-{3,}$/.test(prev)) toRemove.add(i - 1);
+  // Fallback for older prompts without [END_CEO_PROMPT]: use the old --- + CRITICAL REMINDER logic
+  if (startIdx !== -1 && !foundEnd) {
+    toRemove.clear();
+    // Strip header → first ---
+    let inBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+      const content = stripped.replace(/^>\s*/, "");
+      if (!inBlock) {
+        if (content.includes("CEO Dashboard Agent") || content.includes("MANDATORY RULES")) {
+          inBlock = true;
+          toRemove.add(i);
+        }
+      } else {
+        toRemove.add(i);
+        if (/^-{3,}$/.test(content)) break;
+        if (i - startIdx > 100) break;
       }
-      // Remove the reminder and following lines until we hit a non-reminder line or end
-      for (let j = i; j < lines.length && j < i + 10; j++) {
-        const line = lines[j].replace(/\x1b\[[0-9;]*m/g, "").trim().replace(/^>\s*/, "");
-        if (j > i && line === "") break; // blank line ends the reminder
-        toRemove.add(j);
+    }
+    // Strip trailing CRITICAL REMINDER block
+    for (let i = 0; i < lines.length; i++) {
+      const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
+      const content = stripped.replace(/^>\s*/, "");
+      if (content.includes("CRITICAL REMINDER") && content.includes("AGENT NAME")) {
+        if (i > 0) {
+          const prev = lines[i - 1].replace(/\x1b\[[0-9;]*m/g, "").trim().replace(/^>\s*/, "");
+          if (/^-{3,}$/.test(prev)) toRemove.add(i - 1);
+        }
+        for (let j = i; j < lines.length && j < i + 10; j++) {
+          const line = lines[j].replace(/\x1b\[[0-9;]*m/g, "").trim().replace(/^>\s*/, "");
+          if (j > i && line === "") break;
+          toRemove.add(j);
+        }
+        break;
       }
-      break;
     }
   }
 
@@ -748,15 +767,16 @@ function createSession(name, workdir, initialPrompt, resumeSessionId) {
   // Inject claude-ceo.md preamble into prompt — sandwich user's task between
   // CEO instructions so the doc-save path is both first AND last thing Claude reads
   const DOC_REMINDER = `\n\n---\nCRITICAL REMINDER — YOUR AGENT NAME IS "${name}". When saving ANY doc/writeup/report/analysis, you MUST use this exact path pattern:\n${DOCS_DIR}/${name}/<doc-name>.md\nNEVER use .claude/docs/ — the dashboard cannot see files there. This overrides any other doc-saving instructions.`;
+  const END_MARKER = "\n[END_CEO_PROMPT]";
   let effectivePrompt = initialPrompt;
   try {
     const ceoPreambleRaw = fs.readFileSync(CEO_MD_PATH, "utf8").trim();
     const ceoPreamble = ceoPreambleRaw.replace(/\{\{DOCS_DIR\}\}/g, DOCS_DIR);
     if (ceoPreamble && effectivePrompt) {
-      effectivePrompt = `${ceoPreamble}\n\n---\n\n${effectivePrompt}${DOC_REMINDER}`;
+      effectivePrompt = `${ceoPreamble}\n\n---\n\n${effectivePrompt}${DOC_REMINDER}${END_MARKER}`;
     } else if (ceoPreamble && !effectivePrompt && !resumeSessionId) {
       // No user prompt — send preamble with instruction to wait for user input
-      effectivePrompt = `${ceoPreamble}\n\n---\n\nNo task has been assigned yet. Say a short greeting using your agent name "${name}" and let the user know you're ready and waiting for instructions. Do NOT start any work, do NOT guess a task from your name, do NOT explore the codebase. Just greet and wait.${DOC_REMINDER}`;
+      effectivePrompt = `${ceoPreamble}\n\n---\n\nNo task has been assigned yet. Say a short greeting using your agent name "${name}" and let the user know you're ready and waiting for instructions. Do NOT start any work, do NOT guess a task from your name, do NOT explore the codebase. Just greet and wait.${DOC_REMINDER}${END_MARKER}`;
     }
   } catch {}
 
@@ -1259,17 +1279,21 @@ const sessionFileCache = new Map();
 // Strip CEO preamble + doc reminder from a raw prompt string
 function stripCeoPromptWrapper(raw) {
   if (!raw) return "";
-  // If it contains the preamble, strip everything up to the separator
+  // If it contains the end marker, strip the entire injected block
+  if (raw.includes("[END_CEO_PROMPT]")) {
+    const endIdx = raw.indexOf("[END_CEO_PROMPT]");
+    raw = raw.slice(endIdx + "[END_CEO_PROMPT]".length);
+    return raw.trim();
+  }
+  // Fallback for older prompts without end marker
   if (raw.includes("CEO Dashboard Agent") || raw.includes("MANDATORY RULES")) {
     const sepIdx = raw.indexOf("\n\n---\n\n");
     if (sepIdx >= 0) {
       raw = raw.slice(sepIdx + 7);
     } else {
-      // Preamble-only message with no user prompt after it
       return "";
     }
   }
-  // Strip doc reminder suffix
   const remIdx = raw.indexOf("\n\n---\nCRITICAL REMINDER");
   if (remIdx >= 0) raw = raw.slice(0, remIdx);
   return raw.trim();

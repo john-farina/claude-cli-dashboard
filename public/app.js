@@ -2978,11 +2978,40 @@ fetch("/api/config")
       const headerTitle = document.getElementById("header-title");
       if (headerTitle) headerTitle.textContent = cfg.title;
     }
-    // Populate the contribute tooltip with the dashboard directory
+    // Populate the contribute tooltip with the dashboard directory + spawn button
     if (cfg.dashboardDir) {
       const dir = shortPath(cfg.dashboardDir);
       const tip = document.querySelector(".contribute-tooltip");
       if (tip) tip.querySelector(".dashboard-dir").textContent = dir;
+      const spawnBtn = document.getElementById("contribute-spawn-btn");
+      if (spawnBtn) {
+        spawnBtn.addEventListener("click", async () => {
+          spawnBtn.disabled = true;
+          spawnBtn.textContent = "Creating…";
+          try {
+            const res = await fetch("/api/sessions", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: "contributor", workdir: cfg.dashboardDir }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              addAgentCard(data.name, data.workdir, data.branch, data.isWorktree, false);
+              spawnBtn.textContent = "Created!";
+              setTimeout(() => {
+                const agent = agents.get(data.name);
+                if (agent) agent.card.scrollIntoView({ behavior: "smooth", block: "center" });
+              }, 300);
+            } else {
+              spawnBtn.textContent = "Create Agent";
+              spawnBtn.disabled = false;
+            }
+          } catch {
+            spawnBtn.textContent = "Create Agent";
+            spawnBtn.disabled = false;
+          }
+        });
+      }
     }
     _renderWorkdirPills(cfg.workspaces || []);
     updateEmptyState();
