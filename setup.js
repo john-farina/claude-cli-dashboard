@@ -611,8 +611,8 @@ async function main() {
     console.log();
   }
 
-  rl.close();
   aborted = true; // prevent "Setup cancelled" on normal close
+  rl.close();
 
   // Launch the dashboard directly so the user doesn't have to type anything.
   // Also exec into a new shell so the alias is available in subsequent commands.

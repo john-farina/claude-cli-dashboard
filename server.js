@@ -2332,6 +2332,7 @@ async function checkForUpdate() {
     const releaseNotes = data[0].body || null;
     const updateAvailable = compareVersions(latest, currentVersion) > 0;
     updateCache = { latest, current: currentVersion, updateAvailable, checkedAt: Date.now(), releaseNotes };
+    console.log(`[update-check] Local: v${currentVersion}, Latest: ${latest}, Update available: ${updateAvailable}`);
     if (updateAvailable) {
       const msg = JSON.stringify({ type: "update-available", latest, releaseNotes });
       for (const client of wss.clients) {
@@ -2339,7 +2340,7 @@ async function checkForUpdate() {
       }
     }
   } catch (err) {
-    // Silent fail — update check is best-effort
+    console.error(`[update-check] Failed: ${err.message}`);
   }
 }
 
@@ -2347,7 +2348,9 @@ async function checkForUpdate() {
 setTimeout(checkForUpdate, 5000);
 setInterval(checkForUpdate, 60 * 60 * 1000);
 
-app.get("/api/check-update", (req, res) => {
+app.get("/api/check-update", async (req, res) => {
+  // If we've never successfully checked, try now (covers race with boot delay)
+  if (!updateCache.checkedAt) await checkForUpdate();
   res.json(updateCache);
 });
 
@@ -3158,6 +3161,10 @@ server.on("error", (err) => {
 
 server.listen(PORT, () => {
   console.log(`CEO Dashboard running at http://localhost:${PORT}`);
+  // Ensure required directories exist (covers users who skipped setup or had partial setup)
+  for (const dir of [path.join(__dirname, "docs"), path.join(os.homedir(), ".claude", "docs")]) {
+    try { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); } catch {}
+  }
   startCaffeinate();
   ensureTmuxServer();
   // Clean up old tmux shell session (replaced by node-pty)
