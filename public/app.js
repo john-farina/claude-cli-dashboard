@@ -217,6 +217,12 @@ window.addEventListener("resize", scheduleMasonry);
 // Linkify file paths and URLs in terminal HTML output.
 // Splits on HTML tags to only process text nodes, avoiding breakage of ANSI spans.
 const LINK_RE = /(https?:\/\/[^\s<>"')\]]+)|((?:\/[\w.@:+-]+)+(?:\.[\w]+)?(?::\d+)?)/g;
+
+// Escape HTML special characters in attribute values to prevent XSS
+function escapeAttr(str) {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 function linkifyTerminal(html) {
   // Split into HTML tags and text segments
   const parts = html.split(/(<[^>]+>)/);
@@ -225,13 +231,17 @@ function linkifyTerminal(html) {
     if (parts[i].startsWith("<")) continue;
     parts[i] = parts[i].replace(LINK_RE, (match, url, filepath) => {
       if (url) {
-        return `<a class="terminal-link" href="${url}" target="_blank" rel="noopener">${match}</a>`;
+        // Only allow http/https URLs — block javascript:, data:, etc.
+        if (!/^https?:\/\//i.test(url)) return match;
+        const safeUrl = escapeAttr(url);
+        return `<a class="terminal-link" href="${safeUrl}" target="_blank" rel="noopener">${match}</a>`;
       }
       if (filepath && filepath.length > 3) {
         // File path — use vscode:// URI for cmd+click to open in editor
         const cleanPath = filepath.replace(/[,;:!?)]+$/, "");
         const trailing = filepath.slice(cleanPath.length);
-        return `<a class="terminal-link terminal-path" data-path="${cleanPath}" href="vscode://file${cleanPath}">${cleanPath}</a>${trailing}`;
+        const safePath = escapeAttr(cleanPath);
+        return `<a class="terminal-link terminal-path" data-path="${safePath}" href="vscode://file${safePath}">${cleanPath}</a>${trailing}`;
       }
       return match;
     });
@@ -586,7 +596,7 @@ function connect() {
     }).catch(() => {});
     // Check for dashboard updates
     fetch("/api/check-update").then(r => r.json()).then(data => {
-      if (data.updateAvailable) showUpdateButton(data.latest, data.releaseNotes);
+      if (data.updateAvailable) showUpdateButton(data);
     }).catch(() => {});
   };
 
@@ -641,7 +651,7 @@ function connect() {
       return;
     }
     if (msg.type === "update-available") {
-      showUpdateButton(msg.latest, msg.releaseNotes);
+      showUpdateButton(msg);
       return;
     }
     if (msg.type === "open-url") {
@@ -3897,15 +3907,26 @@ const updateBtn = document.getElementById("update-btn");
 const updateWrapper = document.getElementById("update-wrapper");
 const updateTooltip = document.getElementById("update-tooltip");
 
-function showUpdateButton(latest, releaseNotes) {
+function showUpdateButton(data) {
   if (!updateBtn || !updateWrapper) return;
   updateWrapper.style.display = "";
-  updateBtn.textContent = `Update to ${latest}`;
-  if (releaseNotes && updateTooltip) {
-    updateTooltip.innerHTML = typeof marked !== "undefined"
-      ? marked.parse(releaseNotes)
-      : releaseNotes.replace(/</g, "&lt;").replace(/\n/g, "<br>");
+  const n = data.behind || 0;
+  updateBtn.textContent = n > 1 ? `Update (${n} new commits)` : "Update Available";
+  // Build tooltip content: release notes + commit summary
+  let tooltipHtml = "";
+  if (data.releaseNotes && typeof marked !== "undefined") {
+    tooltipHtml += marked.parse(data.releaseNotes);
   }
+  if (data.summary) {
+    const commits = data.summary.split("\n").filter(Boolean);
+    if (commits.length) {
+      if (tooltipHtml) tooltipHtml += "<hr style='border-color:var(--border);margin:10px 0'>";
+      tooltipHtml += "<strong>Recent changes:</strong><ul>" +
+        commits.slice(0, 15).map(c => `<li>${c.replace(/</g, "&lt;")}</li>`).join("") +
+        "</ul>";
+    }
+  }
+  if (tooltipHtml && updateTooltip) updateTooltip.innerHTML = tooltipHtml;
 }
 
 updateBtn.addEventListener("click", async () => {

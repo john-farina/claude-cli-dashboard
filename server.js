@@ -8,9 +8,34 @@ const pty = require("node-pty");
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
-
 const os = require("os");
+
+// --- Security: WebSocket origin validation ---
+// Prevents Cross-Site WebSocket Hijacking (CSWSH) — blocks connections from
+// untrusted origins (e.g., a malicious website opening ws://localhost:9145).
+function verifyWsClient(info) {
+  const origin = info.origin || info.req.headers.origin || "";
+  // Allow no-origin (native apps, CLI tools, curl, same-origin page loads)
+  if (!origin) return true;
+  try {
+    const url = new URL(origin);
+    const host = url.hostname;
+    // Allow localhost connections
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0") return true;
+    // Allow Tailscale hostnames (*.ts.net)
+    if (host.endsWith(".ts.net")) return true;
+    // Allow Tailscale IPs (100.x.x.x CGNAT range)
+    if (/^100\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    // Allow LAN IPs (192.168.x.x, 10.x.x.x)
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+const wss = new WebSocketServer({ server, verifyClient: verifyWsClient });
 
 // --- User config ---
 const CONFIG_PATH = path.join(__dirname, "config.json");
@@ -80,6 +105,69 @@ function broadcastTodos() {
 
 function ensureDocsDir() {
   if (!fs.existsSync(DOCS_DIR)) fs.mkdirSync(DOCS_DIR, { recursive: true });
+}
+
+// --- Security: Input validation helpers ---
+
+// Whitelist of allowed tmux key names for the keypress WebSocket handler.
+// Prevents command injection via crafted key values.
+const ALLOWED_TMUX_KEYS = new Set([
+  "Enter", "Escape", "Tab", "Space", "BSpace",
+  "Up", "Down", "Left", "Right",
+  "Home", "End", "PageUp", "PageDown", "PPage", "NPage",
+  "DC", "IC", // Delete, Insert
+  "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12",
+  "C-c", "C-d", "C-z", "C-a", "C-e", "C-u", "C-k", "C-l", "C-r", "C-w",
+  "y", "n", "Y", "N", "q", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0",
+]);
+
+function isValidTmuxKey(key) {
+  if (typeof key !== "string" || key.length === 0 || key.length > 20) return false;
+  // Allow exact matches from whitelist
+  if (ALLOWED_TMUX_KEYS.has(key)) return true;
+  // Allow single printable ASCII characters (a-z, A-Z, 0-9, common symbols)
+  if (key.length === 1 && key.charCodeAt(0) >= 32 && key.charCodeAt(0) <= 126) return true;
+  return false;
+}
+
+// Validate path parameters to prevent path traversal attacks.
+// Returns true if the name is safe to use in path.join() (no slashes, dots-only, etc.)
+function isSafePathSegment(segment) {
+  if (typeof segment !== "string") return false;
+  if (segment.length === 0 || segment.length > 200) return false;
+  // Block path traversal characters and sequences
+  if (segment.includes("/") || segment.includes("\\") || segment.includes("\0")) return false;
+  if (segment === "." || segment === "..") return false;
+  if (segment.startsWith(".")) return false; // no hidden files
+  return true;
+}
+
+// Validate that a resolved file path is within the expected directory
+function isWithinDir(filePath, baseDir) {
+  const resolved = path.resolve(filePath);
+  const base = path.resolve(baseDir);
+  return resolved === base || resolved.startsWith(base + path.sep);
+}
+
+// Validate a working directory path — must be absolute, exist, and not contain shell metacharacters
+function isValidWorkdir(dir) {
+  if (typeof dir !== "string") return false;
+  if (!path.isAbsolute(dir)) return false;
+  // Block shell metacharacters that could break out of quoting: backticks, $, newlines, null bytes
+  if (/[`$\n\r\0]/.test(dir)) return false;
+  return true;
+}
+
+// Validate a Claude session ID — should be a UUID-like string (hex + dashes)
+function isValidSessionId(id) {
+  if (typeof id !== "string") return false;
+  // Session IDs are UUIDs or hex strings — only allow alphanumeric, dashes, underscores
+  return /^[a-zA-Z0-9_-]{1,128}$/.test(id);
+}
+
+// Shell-safe quoting: wrap in single quotes, escaping embedded single quotes
+function shellQuote(str) {
+  return "'" + str.replace(/'/g, "'\\''") + "'";
 }
 
 // --- Session metadata persistence ---
@@ -538,10 +626,19 @@ function createSession(name, workdir, initialPrompt, resumeSessionId) {
   const session = `${PREFIX}${name}`;
   const dir = workdir || DEFAULT_WORKDIR;
 
+  // Validate workdir to prevent shell injection via crafted directory paths
+  if (!isValidWorkdir(dir)) {
+    throw new Error("Invalid working directory");
+  }
+  // Validate session ID if resuming
+  if (resumeSessionId && !isValidSessionId(resumeSessionId)) {
+    throw new Error("Invalid session ID");
+  }
+
   // Create a shell session first — don't make Claude the session command.
   // This way the shell survives if Claude exits, and we can see errors.
   execSync(
-    `tmux new-session -d -s ${session} -x 120 -y 50 -c "${dir}"`,
+    `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
     { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
   );
 
@@ -776,6 +873,27 @@ function parsePromptOptions(output) {
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.static(path.join(__dirname, "public")));
+
+// --- Security: Origin check for API endpoints ---
+// Blocks cross-origin POST/PUT/DELETE requests (CSRF protection).
+// Same logic as WebSocket origin validation — only allows localhost, Tailscale, and LAN.
+app.use("/api", (req, res, next) => {
+  // GET requests are safe (read-only) — skip origin check
+  if (req.method === "GET") return next();
+  const origin = req.headers.origin || "";
+  // No origin header = same-origin or non-browser client (curl, native app) — allow
+  if (!origin) return next();
+  try {
+    const url = new URL(origin);
+    const host = url.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "0.0.0.0") return next();
+    if (host.endsWith(".ts.net")) return next();
+    if (/^100\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
+    if (/^192\.168\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
+    if (/^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) return next();
+  } catch {}
+  res.status(403).json({ error: "Forbidden: cross-origin request blocked" });
+});
 
 // --- Config API ---
 
@@ -1473,8 +1591,14 @@ app.post("/api/sessions/:name/restart", async (req, res) => {
 
   // Recreate the tmux session in the same workdir
   const dir = info.workdir || DEFAULT_WORKDIR;
+  if (!isValidWorkdir(dir)) {
+    return res.status(400).json({ error: "Invalid working directory in metadata" });
+  }
+  if (!isValidSessionId(sessionId)) {
+    return res.status(400).json({ error: "Invalid session ID format" });
+  }
   execSync(
-    `tmux new-session -d -s ${session} -x 120 -y 50 -c "${dir}"`,
+    `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
     { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
   );
   tmuxExec(`set-option -t ${session} remain-on-exit on`);
@@ -1609,7 +1733,13 @@ app.post("/api/sessions/:name/snapshot-memory", (req, res) => {
 
 app.delete("/api/sessions/:name/memory", (req, res) => {
   const { name } = req.params;
+  if (!isSafePathSegment(name)) {
+    return res.status(400).json({ error: "Invalid agent name" });
+  }
   const memoryPath = path.join(DOCS_DIR, name, "memory.md");
+  if (!isWithinDir(memoryPath, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   try {
     if (fs.existsSync(memoryPath)) {
       fs.unlinkSync(memoryPath);
@@ -1805,8 +1935,14 @@ app.put("/api/claude-files/write", (req, res) => {
 // --- Agent Docs API (multi-doc per agent) ---
 
 app.get("/api/agent-docs/:name", (req, res) => {
+  if (!isSafePathSegment(req.params.name)) {
+    return res.status(400).json({ error: "Invalid agent name" });
+  }
   ensureDocsDir();
   const agentDir = path.join(DOCS_DIR, req.params.name);
+  if (!isWithinDir(agentDir, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   try {
     if (!fs.existsSync(agentDir) || !fs.statSync(agentDir).isDirectory()) {
       return res.json([]);
@@ -1826,8 +1962,14 @@ app.get("/api/agent-docs/:name", (req, res) => {
 });
 
 app.get("/api/agent-docs/:name/:doc", (req, res) => {
+  if (!isSafePathSegment(req.params.name) || !isSafePathSegment(req.params.doc)) {
+    return res.status(400).json({ error: "Invalid name or doc" });
+  }
   ensureDocsDir();
   const filePath = path.join(DOCS_DIR, req.params.name, `${req.params.doc}.md`);
+  if (!isWithinDir(filePath, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   try {
     const content = fs.readFileSync(filePath, "utf8");
     res.json({ content });
@@ -1837,8 +1979,14 @@ app.get("/api/agent-docs/:name/:doc", (req, res) => {
 });
 
 app.put("/api/agent-docs/:name/:doc", (req, res) => {
+  if (!isSafePathSegment(req.params.name) || !isSafePathSegment(req.params.doc)) {
+    return res.status(400).json({ error: "Invalid name or doc" });
+  }
   ensureDocsDir();
   const agentDir = path.join(DOCS_DIR, req.params.name);
+  if (!isWithinDir(agentDir, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   if (!fs.existsSync(agentDir)) fs.mkdirSync(agentDir, { recursive: true });
   const filePath = path.join(agentDir, `${req.params.doc}.md`);
   try {
@@ -1850,8 +1998,14 @@ app.put("/api/agent-docs/:name/:doc", (req, res) => {
 });
 
 app.post("/api/agent-docs/:name/:doc/move-to-local", (req, res) => {
+  if (!isSafePathSegment(req.params.name) || !isSafePathSegment(req.params.doc)) {
+    return res.status(400).json({ error: "Invalid name or doc" });
+  }
   ensureDocsDir();
   const srcPath = path.join(DOCS_DIR, req.params.name, `${req.params.doc}.md`);
+  if (!isWithinDir(srcPath, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   const destDir = path.join(os.homedir(), ".claude", "docs");
   const destPath = path.join(destDir, `${req.params.doc}.md`);
 
@@ -1870,8 +2024,14 @@ app.post("/api/agent-docs/:name/:doc/move-to-local", (req, res) => {
 });
 
 app.delete("/api/agent-docs/:name/:doc", (req, res) => {
+  if (!isSafePathSegment(req.params.name) || !isSafePathSegment(req.params.doc)) {
+    return res.status(400).json({ error: "Invalid name or doc" });
+  }
   ensureDocsDir();
   const filePath = path.join(DOCS_DIR, req.params.name, `${req.params.doc}.md`);
+  if (!isWithinDir(filePath, DOCS_DIR)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
   try {
     if (!fs.existsSync(filePath)) {
       return res.status(404).json({ error: "Doc not found" });
@@ -1913,6 +2073,8 @@ app.put("/api/ceo-md", (req, res) => {
 app.post("/api/shell/completions", (req, res) => {
   const { word, cwd, dirsOnly } = req.body || {};
   if (!cwd || typeof cwd !== "string") return res.json({ completions: [] });
+  // Block null bytes in input to prevent path truncation attacks
+  if (/\0/.test(cwd) || (word && /\0/.test(word))) return res.json({ completions: [] });
   try {
     const expandedWord = (word || "").replace(/^~/, os.homedir());
     let targetDir, prefix;
@@ -1964,10 +2126,15 @@ app.post("/api/shell/open-url", (req, res) => {
 // Open a folder in Finder (used by shell CWD pill click)
 app.post("/api/shell/open-finder", (req, res) => {
   const { path: folderPath } = req.body || {};
-  if (!folderPath || typeof folderPath !== "string" || !folderPath.startsWith("/")) {
+  if (!folderPath || typeof folderPath !== "string" || !path.isAbsolute(folderPath)) {
     return res.status(400).json({ error: "Invalid path" });
   }
-  exec(`open ${JSON.stringify(folderPath)}`, { timeout: 5000 }, () => {});
+  // Block null bytes and newlines that could be used for injection
+  if (/[\0\n\r]/.test(folderPath)) {
+    return res.status(400).json({ error: "Invalid path characters" });
+  }
+  // Use execFile (no shell) to prevent command injection
+  require("child_process").execFile("open", [folderPath], { timeout: 5000 }, () => {});
   res.json({ ok: true });
 });
 
@@ -2117,15 +2284,19 @@ app.post("/api/settings/add-to-dock", (req, res) => {
 // Send a notification — osascript for macOS banners, WebSocket for browser + native app badge
 const DASHBOARD_TITLE = "CEO Dashboard";
 function sendNotification(subtitle, body) {
-  // macOS banner via osascript (works for ad-hoc signed apps, no permissions needed)
-  const escaped = (s) => (s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const subtitlePart = subtitle ? ` subtitle "${escaped(subtitle)}"` : "";
+  // Sanitize for AppleScript: strip control chars, limit length, escape for double-quoted strings.
+  // We pass the script via execFile argv (not shell) to avoid shell injection entirely.
+  const sanitize = (s) => (s || "").replace(/[\x00-\x1f\x7f]/g, "").slice(0, 500);
+  const escAS = (s) => sanitize(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  const subtitlePart = subtitle ? ` subtitle "${escAS(subtitle)}"` : "";
   try {
-    execSync(`osascript -e 'display notification "${escaped(body)}" with title "${escaped(DASHBOARD_TITLE)}"${subtitlePart} sound name "default"'`, { timeout: 3000 });
+    const script = `display notification "${escAS(body)}" with title "${escAS(DASHBOARD_TITLE)}"${subtitlePart} sound name "default"`;
+    // Use execFile to avoid shell interpretation — args are passed directly to osascript
+    require("child_process").execFileSync("osascript", ["-e", script], { timeout: 3000, stdio: "ignore" });
   } catch {}
   // Also broadcast via WebSocket for native app badge + browser notifications
   const browserTitle = subtitle ? `${DASHBOARD_TITLE} — ${subtitle}` : DASHBOARD_TITLE;
-  const msg = JSON.stringify({ type: "native-notification", title: browserTitle, body: body || "", tag: "agent-" + Date.now() });
+  const msg = JSON.stringify({ type: "native-notification", title: browserTitle, body: sanitize(body), tag: "agent-" + Date.now() });
   wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
 }
 
@@ -2172,10 +2343,14 @@ app.post("/api/open-folder", (req, res) => {
   if (filePath === "__ceo_md__") filePath = CEO_MD_PATH;
   const resolved = path.resolve(filePath);
   if (!isAllowedPath(resolved)) return res.status(403).json({ error: "Path not allowed" });
+  // Block null bytes
+  if (/[\0]/.test(resolved)) return res.status(400).json({ error: "Invalid path" });
   // If file exists, reveal it selected in Finder (-R); otherwise open parent dir
+  // Use execFile (no shell) to prevent command injection
+  const { execFile: execFileOpen } = require("child_process");
   const fileExists = fs.existsSync(resolved) && fs.statSync(resolved).isFile();
-  const cmd = fileExists ? `open -R ${JSON.stringify(resolved)}` : `open ${JSON.stringify(path.dirname(resolved))}`;
-  exec(cmd, (err) => {
+  const args = fileExists ? ["-R", resolved] : [path.dirname(resolved)];
+  execFileOpen("open", args, (err) => {
     if (err) return res.status(500).json({ error: err.message });
     res.json({ ok: true });
   });
@@ -2290,51 +2465,68 @@ app.get("/api/todos/by-agent/:agent", (req, res) => {
 });
 
 // --- Auto-update check ---
-// Compares local package.json version against latest GitHub tag.
-// Checks on boot (non-blocking) and every 6 hours.
+// Compares local HEAD against origin/main via git fetch.
+// Any new commits on main trigger the update button — no releases needed.
+// Release notes are fetched from GitHub Releases API for the tooltip (optional).
 
-const currentVersion = require("./package.json").version;
-let updateCache = { latest: null, current: currentVersion, updateAvailable: false, checkedAt: 0, releaseNotes: null };
+let updateCache = { updateAvailable: false, checkedAt: 0, behind: 0, releaseNotes: null, summary: null };
+let _updateCheckPromise = null;
 
-function compareVersions(a, b) {
-  const pa = a.replace(/^v/, "").split(".").map(Number);
-  const pb = b.replace(/^v/, "").split(".").map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0, nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
-  }
-  return 0;
+// Deduped wrapper — concurrent callers share the same in-flight check
+function checkForUpdate() {
+  if (_updateCheckPromise) return _updateCheckPromise;
+  _updateCheckPromise = _doUpdateCheck().finally(() => { _updateCheckPromise = null; });
+  return _updateCheckPromise;
 }
 
-async function checkForUpdate() {
+async function _doUpdateCheck() {
   try {
-    const https = require("https");
-    const data = await new Promise((resolve, reject) => {
-      const req = https.get("https://api.github.com/repos/john-farina/claude-cli-dashboard/releases?per_page=1", {
-        headers: { "User-Agent": "ceo-dashboard", "Accept": "application/vnd.github.v3+json" },
-        timeout: 10000,
-      }, (res) => {
-        let body = "";
-        res.on("data", (chunk) => body += chunk);
-        res.on("end", () => {
-          if (res.statusCode !== 200) return reject(new Error(`GitHub API ${res.statusCode}`));
-          resolve(JSON.parse(body));
-        });
-      });
-      req.on("error", reject);
-      req.on("timeout", () => { req.destroy(); reject(new Error("timeout")); });
-    });
-    if (!Array.isArray(data) || data.length === 0) {
-      updateCache = { latest: null, current: currentVersion, updateAvailable: false, checkedAt: Date.now(), releaseNotes: null };
-      return;
-    }
-    const latest = data[0].tag_name; // e.g. "v0.2.0"
-    const releaseNotes = data[0].body || null;
-    const updateAvailable = compareVersions(latest, currentVersion) > 0;
-    updateCache = { latest, current: currentVersion, updateAvailable, checkedAt: Date.now(), releaseNotes };
-    console.log(`[update-check] Local: v${currentVersion}, Latest: ${latest}, Update available: ${updateAvailable}`);
+    // Fetch latest commits from origin (no merge, just update refs)
+    execSync("git fetch origin main", { cwd: __dirname, timeout: 15000, stdio: "ignore" });
+    // Count how many commits we're behind
+    const behind = execSync("git rev-list --count HEAD..origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+    const behindCount = parseInt(behind, 10) || 0;
+    const updateAvailable = behindCount > 0;
+
+    // Get a short summary of what changed
+    let summary = null;
     if (updateAvailable) {
-      const msg = JSON.stringify({ type: "update-available", latest, releaseNotes });
+      try {
+        summary = execSync('git log HEAD..origin/main --pretty=format:"%s" --no-merges', { cwd: __dirname, encoding: "utf8" }).trim();
+      } catch {}
+    }
+
+    // Try to fetch release notes from GitHub (best-effort, for tooltip)
+    let releaseNotes = null;
+    if (updateAvailable) {
+      try {
+        const https = require("https");
+        const data = await new Promise((resolve, reject) => {
+          const req = https.get("https://api.github.com/repos/john-farina/claude-cli-dashboard/releases?per_page=1", {
+            headers: { "User-Agent": "ceo-dashboard", "Accept": "application/vnd.github.v3+json" },
+            timeout: 10000,
+          }, (res) => {
+            let body = "";
+            res.on("data", (chunk) => body += chunk);
+            res.on("end", () => {
+              if (res.statusCode === 200) resolve(JSON.parse(body));
+              else resolve([]);
+            });
+          });
+          req.on("error", () => resolve([]));
+          req.on("timeout", () => { req.destroy(); resolve([]); });
+        });
+        if (Array.isArray(data) && data.length > 0 && data[0].body) {
+          releaseNotes = data[0].body;
+        }
+      } catch {}
+    }
+
+    updateCache = { updateAvailable, checkedAt: Date.now(), behind: behindCount, releaseNotes, summary };
+    console.log(`[update-check] Behind origin/main by ${behindCount} commit(s). Update available: ${updateAvailable}`);
+
+    if (updateAvailable) {
+      const msg = JSON.stringify({ type: "update-available", behind: behindCount, releaseNotes, summary });
       for (const client of wss.clients) {
         try { if (client.readyState === 1) client.send(msg); } catch {}
       }
@@ -2344,12 +2536,12 @@ async function checkForUpdate() {
   }
 }
 
-// Check on boot (non-blocking) and every hour
-setTimeout(checkForUpdate, 5000);
+// Run immediately on boot (deduped, so safe if endpoint calls concurrently) + every hour
+checkForUpdate();
 setInterval(checkForUpdate, 60 * 60 * 1000);
 
 app.get("/api/check-update", async (req, res) => {
-  // If we've never successfully checked, try now (covers race with boot delay)
+  // Always wait for the check if it hasn't completed yet (boot race) or if cache is stale
   if (!updateCache.checkedAt) await checkForUpdate();
   res.json(updateCache);
 });
@@ -2681,10 +2873,13 @@ wss.on("connection", (ws) => {
       // All keys sent in one tmux command to avoid escape sequence race conditions
       if (msg.type === "keypress") {
         const session = `${PREFIX}${msg.session}`;
+        const keys = Array.isArray(msg.keys) ? msg.keys : [msg.keys];
+        // Validate all keys against whitelist to prevent command injection
+        const validKeys = keys.filter(isValidTmuxKey);
+        if (validKeys.length === 0) return;
         listTmuxSessionsAsync().then((sessions) => {
           if (sessions.includes(session)) {
-            const keys = Array.isArray(msg.keys) ? msg.keys : [msg.keys];
-            tmuxExecAsync(`send-keys -t ${session} ${keys.join(" ")}`);
+            tmuxExecAsync(`send-keys -t ${session} ${validKeys.join(" ")}`);
             scheduleForceUpdate();
           }
         });
@@ -2751,8 +2946,10 @@ wss.on("connection", (ws) => {
         listTmuxSessionsAsync().then((sessions) => {
           if (sessions.includes(session)) {
             const navKeys = Array.isArray(msg.keys) ? msg.keys : [msg.keys];
-            if (navKeys.length > 0) {
-              tmuxExecAsync(`send-keys -t ${session} ${navKeys.join(" ")}`);
+            // Validate navigation keys against whitelist
+            const validNavKeys = navKeys.filter(isValidTmuxKey);
+            if (validNavKeys.length > 0) {
+              tmuxExecAsync(`send-keys -t ${session} ${validNavKeys.join(" ")}`);
             }
             // Wait for TUI to transition to text input mode, then type the response
             setTimeout(() => {
@@ -2804,12 +3001,26 @@ function restoreSessions() {
     const dir = info.workdir || DEFAULT_WORKDIR;
     const session = `${PREFIX}${name}`;
 
+    // Validate workdir before using in shell commands
+    if (!isValidWorkdir(dir)) {
+      console.warn(`[restore] Skipping agent "${name}" — invalid workdir: ${dir}`);
+      delete meta[name];
+      continue;
+    }
+
     // Try to detect session ID if we don't have one yet
     if (!info.resumeSessionId) {
       const sessionId = detectClaudeSessionIdForAgent(dir, info.created);
       if (sessionId) {
         info.resumeSessionId = sessionId;
       }
+    }
+
+    // Validate session ID if present
+    if (info.resumeSessionId && !isValidSessionId(info.resumeSessionId)) {
+      console.warn(`[restore] Skipping agent "${name}" — invalid session ID`);
+      delete meta[name];
+      continue;
     }
 
     // Build restore command — resume if we have a Claude session ID, otherwise bare claude
@@ -2821,7 +3032,7 @@ function restoreSessions() {
     }
     try {
       execSync(
-        `tmux new-session -d -s ${session} -x 120 -y 50 -c "${dir}"`,
+        `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
         { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
       );
       tmuxExec(`send-keys -t ${session} "clear && unset CLAUDECODE && ${claudeCmd}" Enter`);

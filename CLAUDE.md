@@ -174,17 +174,16 @@ Supporting files:
 
 ## Releasing Updates
 
-The dashboard has an auto-update system. Users see an "Update Available" button when a new version is tagged.
+The dashboard has an auto-update system. Users see an "Update Available" button whenever `main` has new commits they don't have.
 
-To push a new release:
-1. Bump the version in `package.json` (e.g. `"version": "0.2.0"`)
-2. Commit the bump: `git commit -am "v0.2.0"`
-3. Tag it: `git tag v0.2.0`
-4. Push both: `git push origin main --tags`
+To push an update: just push to `main`. That's it. The update button appears automatically for all users on their next check.
 
-Users' dashboards check GitHub releases every hour (and on every server restart). When a newer release exists than their local `package.json` version, the update button appears with release notes shown on hover. Clicking it runs `git fetch origin main && git merge origin/main`, installs deps if needed, and restarts.
+- Dashboards run `git fetch origin main` every hour (and on every server restart) to check for new commits
+- The button shows the number of commits behind (e.g. "Update (3 new commits)")
+- Hovering shows commit summaries + release notes (if any) in a tooltip
+- Clicking runs `git merge origin/main`, installs deps if needed, and restarts
 
-**Important**: Use GitHub Releases (not just tags). The release tag must match the `package.json` version prefixed with `v` (e.g. version `0.2.0` → tag `v0.2.0`). Write release notes in the GitHub Release body — they show in the hover tooltip. The comparison is numeric semver — `v0.10.0 > v0.9.0`.
+**Optional: GitHub Releases** — If you create a GitHub Release (with a tag like `v0.3.0`), its release notes body will show in the hover tooltip alongside commit summaries. This is purely cosmetic — updates are triggered by commits, not releases.
 
 ## Common Tasks
 
