@@ -231,6 +231,12 @@ function escapeAttr(str) {
   return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
+// Validate and sanitize CSS color hex values to prevent CSS injection
+function safeHex(hex) {
+  if (typeof hex === "string" && /^#[0-9a-fA-F]{3,8}$/.test(hex)) return hex;
+  return "#8A9BA8"; // fallback to slate
+}
+
 function linkifyTerminal(html) {
   // Split into HTML tags and text segments
   const parts = html.split(/(<[^>]+>)/);
@@ -880,7 +886,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       <div class="card-header">
         <div class="card-header-left">
           <span class="alert-icon" title="Needs input"></span>
-          <span class="agent-name">${name}</span>
+          <span class="agent-name">${escapeHtml(name)}</span>
           <span class="status-badge working">working</span>
         </div>
         <div class="card-actions">
@@ -917,7 +923,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
         </div>
       </div>
       <div class="card-subheader">
-        <span class="workdir-link" title="Click to change workspace">${shortPath(workdir)}</span>
+        <span class="workdir-link" title="Click to change workspace">${escapeHtml(shortPath(workdir))}</span>
         <span class="branch-info"></span>
       </div>
     </div>
@@ -2525,9 +2531,9 @@ function renderAgentTodoRefs(card, todos) {
   }
   container.style.display = "flex";
   container.innerHTML = todos.map((t) => `
-    <span class="agent-todo-pill" title="${t.title}" data-todo-id="${t.id}">
-      <span class="agent-todo-pill-dot" style="background:${t.hex}"></span>
-      <span class="agent-todo-pill-label">${t.title}</span>
+    <span class="agent-todo-pill" title="${escapeHtml(t.title)}" data-todo-id="${t.id}">
+      <span class="agent-todo-pill-dot" style="background:${safeHex(t.hex)}"></span>
+      <span class="agent-todo-pill-label">${escapeHtml(t.title)}</span>
     </span>
   `).join("");
   // Click a pill → switch to todo view and select that list
@@ -4069,7 +4075,7 @@ function showUpdateError(data) {
       _ueTitle.textContent = "Merge Conflict";
       _ueTitle.style.color = "var(--red)";
       _ueDesc.innerHTML = "Your local changes conflict with the latest update. The dashboard is still running — nothing broke. Copy this prompt and paste it into a terminal (<code>claude</code>) or one of your agents:";
-      _ueFiles.innerHTML = files.map(f => `<li>${f}</li>`).join("");
+      _ueFiles.innerHTML = files.map(f => `<li>${escapeHtml(f)}</li>`).join("");
       _ueFiles.classList.remove("hidden");
       _uePrompt.textContent = _buildConflictPrompt(files, cwd);
       _uePromptWrap.classList.remove("hidden");
@@ -4411,8 +4417,8 @@ function _renderWorkspaceEditor() {
     row.dataset.idx = i;
     row.innerHTML = `
       <span class="workspace-drag-handle" title="Drag to reorder">&#x2630;</span>
-      <span class="workspace-row-path" title="${ws.path}">${shortPath(ws.path)}</span>
-      <span class="workspace-row-label">${ws.label}${ws.builtIn ? ' <span class="workspace-builtin-badge">built-in</span>' : ""}</span>
+      <span class="workspace-row-path" title="${escapeAttr(ws.path)}">${escapeHtml(shortPath(ws.path))}</span>
+      <span class="workspace-row-label">${escapeHtml(ws.label || "")}${ws.builtIn ? ' <span class="workspace-builtin-badge">built-in</span>' : ""}</span>
       ${ws.builtIn ? "" : '<button class="workspace-row-remove" title="Remove">&times;</button>'}
     `;
     if (!ws.builtIn) {
@@ -5710,7 +5716,7 @@ function renderActiveList() {
     return;
   }
 
-  const hex = getColorHex(list.colorId);
+  const hex = safeHex(getColorHex(list.colorId));
   const tintBg = hex + "0a";
 
   todoContentEl.innerHTML = `
@@ -6674,7 +6680,7 @@ function renderTodoColorSettings() {
     row.className = "todo-color-row";
     row.dataset.colorId = color.id;
     row.innerHTML = `
-      <input type="color" value="${color.hex}">
+      <input type="color" value="${safeHex(color.hex)}">
       <input type="text" value="${escapeHtml(color.name)}" placeholder="Color name">
       <button class="todo-color-remove" title="Remove">&times;</button>
     `;

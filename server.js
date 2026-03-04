@@ -97,7 +97,7 @@ function verifyWsClient(info) {
   }
 }
 
-const wss = new WebSocketServer({ server, verifyClient: verifyWsClient });
+const wss = new WebSocketServer({ server, verifyClient: verifyWsClient, maxPayload: 5 * 1024 * 1024 /* 5MB */ });
 
 // --- User config ---
 const CONFIG_PATH = path.join(__dirname, "config.json");
@@ -655,6 +655,12 @@ function stripCeoPreamble(output) {
   return filtered.join("\n");
 }
 
+// Strip all ANSI escape sequences (SGR, CSI erase/cursor, OSC, etc.)
+// More comprehensive than SGR-only regex — handles ESC[K, ESC[J, etc.
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+}
+
 // Filter Claude Code's input prompt area from display output.
 // Strips the ❯ prompt line (with or without text) and adjacent separator lines.
 // We have our own input in the dashboard so Claude's prompt area is redundant.
@@ -662,23 +668,27 @@ function filterOutputForDisplay(lines) {
   // Strip CEO preamble first
   lines = filterCeoPreamble(lines);
 
-  // If this is an AskUserQuestion prompt, don't strip ❯ lines —
-  // the ❯ marks the currently selected option, not Claude's input prompt
+  // If this is an interactive TUI prompt (AskUserQuestion, etc.), don't strip ❯ lines —
+  // the ❯ marks the currently selected option, not Claude's input prompt.
+  // Detect via hint text OR ❯ prefix on a numbered option line.
   const tailLines = lines.slice(-15);
-  const isAskQuestion = tailLines.some((l) => {
-    const s = l.replace(/\x1b\[[0-9;]*m/g, "");
-    return s.includes("Enter to select") || s.includes("\u2191/\u2193 to navigate");
+  const isInteractiveSelect = tailLines.some((l) => {
+    const s = stripAnsi(l);
+    return s.includes("Enter to select") ||
+           s.includes("\u2191/\u2193 to navigate") ||
+           /^\s*❯\s*\d+\.\s/.test(s);
   });
-  if (isAskQuestion) return lines;
+  if (isInteractiveSelect) return lines;
 
   const searchStart = Math.max(0, lines.length - 15);
   let promptIdx = -1;
 
   for (let i = lines.length - 1; i >= searchStart; i--) {
-    const stripped = lines[i].replace(/\x1b\[[0-9;]*m/g, "").trim();
-    // Match ❯ prompt (with or without user text after it)
+    const stripped = stripAnsi(lines[i]).trim();
+    // Match ❯ prompt (with or without user text after it), but NOT numbered
+    // option lines like "❯ 1. Option" which are TUI selection indicators.
     // Also match bare > only when empty (> is used in blockquotes so don't match "> text")
-    if (/^❯/.test(stripped) || /^>\s*$/.test(stripped)) {
+    if ((/^❯/.test(stripped) && !/^❯\s*\d+\.\s/.test(stripped)) || /^>\s*$/.test(stripped)) {
       promptIdx = i;
       break;
     }
@@ -690,13 +700,13 @@ function filterOutputForDisplay(lines) {
 
   // Check for separator line before prompt
   if (promptIdx > 0) {
-    const prev = lines[promptIdx - 1].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const prev = stripAnsi(lines[promptIdx - 1]).trim();
     if (isSeparatorLine(prev)) toRemove.add(promptIdx - 1);
   }
 
   // Check for separator line after prompt
   if (promptIdx < lines.length - 1) {
-    const next = lines[promptIdx + 1].replace(/\x1b\[[0-9;]*m/g, "").trim();
+    const next = stripAnsi(lines[promptIdx + 1]).trim();
     if (isSeparatorLine(next)) toRemove.add(promptIdx + 1);
   }
 
@@ -1761,6 +1771,9 @@ app.patch("/api/sessions/:name/minimize", (req, res) => {
 
 app.post("/api/sessions/:name/snapshot-memory", (req, res) => {
   const { name } = req.params;
+  if (!isSafePathSegment(name)) {
+    return res.status(400).json({ error: "Invalid agent name" });
+  }
   const mode = req.body?.mode || "save";
   const session = `${PREFIX}${name}`;
 
@@ -3063,6 +3076,11 @@ wss.on("connection", (ws) => {
       }
 
       const msg = JSON.parse(data);
+
+      // Validate session name for all message types that use it — prevents injection into tmux commands
+      if (msg.session && (typeof msg.session !== "string" || !/^[a-zA-Z0-9_-]+$/.test(msg.session))) {
+        return; // silently drop messages with invalid session names
+      }
 
       if (msg.type === "input") {
         const session = `${PREFIX}${msg.session}`;
