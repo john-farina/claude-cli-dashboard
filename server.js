@@ -2895,13 +2895,20 @@ function flushShellBatch() {
 function ensureShellPty() {
   if (shellPty) return;
   const shell = process.env.SHELL || "/bin/zsh";
-  shellPty = pty.spawn(shell, ["-l"], {
-    name: "xterm-256color",
-    cols: 120,
-    rows: 24,
-    cwd: SHELL_WORKDIR,
-    env: { ...process.env, TERM: "xterm-256color" },
-  });
+  try {
+    shellPty = pty.spawn(shell, ["-l"], {
+      name: "xterm-256color",
+      cols: 120,
+      rows: 24,
+      cwd: SHELL_WORKDIR,
+      env: { ...process.env, TERM: "xterm-256color" },
+    });
+  } catch (err) {
+    console.error(`[shell] Failed to spawn PTY (${shell}): ${err.message}`);
+    console.error("[shell] Embedded terminal will be unavailable. The dashboard still works.");
+    shellPty = null;
+    return;
+  }
   console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) in ${SHELL_WORKDIR}`);
 
   // Inject precmd hook that emits OSC 7 (cwd reporting) after every command.

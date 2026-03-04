@@ -603,7 +603,7 @@ async function main() {
   } else {
     const rcName = path.basename(rcFile);
     console.log("  To start the dashboard:");
-    console.log(`    source ~/.${rcName} && ${cmd}`);
+    console.log(`    source ~/${rcName} && ${cmd}`);
     console.log();
     console.log("  Or without the alias:");
     console.log("    npm start");
