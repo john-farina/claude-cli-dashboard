@@ -236,7 +236,7 @@ function scheduleMasonry() {
     masonryLayout();
     // After layout completes, scroll any terminals still in force-scroll mode
     for (const agent of agents.values()) {
-      if (agent.terminal._forceScrollUntil && Date.now() < agent.terminal._forceScrollUntil) {
+      if (agent.terminal && agent.terminal._forceScrollUntil && Date.now() < agent.terminal._forceScrollUntil) {
         scrollTerminalToBottom(agent.terminal);
       }
     }
@@ -308,7 +308,7 @@ popoutChannel.onmessage = (event) => {
     const agent = agents.get(msg.agent);
     if (agent) {
       agent.card.classList.remove("popped-out");
-      agent.terminal._forceScrollUntil = Date.now() + 3000;
+      if (agent.terminal) agent.terminal._forceScrollUntil = Date.now() + 3000;
       scheduleMasonry();
     }
   }
@@ -684,6 +684,16 @@ function connect() {
     if (window._shellXterm && window._shellXterm.cols) {
       ws.send(JSON.stringify({ type: "shell-resize", cols: window._shellXterm.cols, rows: window._shellXterm.rows }));
     }
+    // Re-subscribe all terminal cards on reconnect
+    for (const [tName, agent] of agents) {
+      if (agent.type === "terminal" && !agent.card.classList.contains("minimized")) {
+        ws.send(JSON.stringify({ type: "terminal-subscribe", session: tName }));
+        // Re-sync terminal dimensions (PTY wrapper may have been recreated with defaults)
+        if (agent.xterm?.cols && agent.xterm?.rows) {
+          _sendTerminalResize(tName, agent.xterm.cols, agent.xterm.rows);
+        }
+      }
+    }
     // Check if we missed a hot reload while disconnected (iOS Safari suspends WS in background)
     fetch("/api/version").then(r => r.json()).then(data => {
       if (_knownVersion === null) {
@@ -723,11 +733,20 @@ function connect() {
   ws.onmessage = (event) => {
     _lastWsMessage = Date.now();
 
-    // Binary frame = shell PTY data (hot path — zero JSON overhead)
-    // Server sends raw PTY bytes as binary WebSocket frames.
-    // Uint8Array feeds directly into xterm's UTF-8 parser, skipping JS string decode.
+    // Binary frame = shell PTY data or terminal card data (hot path — zero JSON overhead)
     if (event.data instanceof ArrayBuffer) {
-      if (window._shellXterm) window._shellXterm.write(new Uint8Array(event.data));
+      const buf = new Uint8Array(event.data);
+      // 0x02 prefix = terminal card output: 0x02 + nameLen(1B) + name + data
+      if (buf.length > 1 && buf[0] === 0x02) {
+        const nameLen = buf[1];
+        const tName = new TextDecoder().decode(buf.subarray(2, 2 + nameLen));
+        const tData = buf.subarray(2 + nameLen);
+        const agent = agents.get(tName);
+        if (agent?.xterm) agent.xterm.write(tData);
+        return;
+      }
+      // Default: footer shell (bare binary, no prefix)
+      if (window._shellXterm) window._shellXterm.write(buf);
       return;
     }
 
@@ -826,7 +845,11 @@ function connect() {
 
     if (msg.type === "sessions") {
       for (const s of msg.sessions) {
-        addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+        if (s.type === "terminal") {
+          addTerminalCard(s.name, s.workdir);
+        } else {
+          addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+        }
       }
       reorderCards();
       updateEmptyState();
@@ -858,6 +881,8 @@ function connect() {
     }
 
     if (msg.type === "output") {
+      const existing = agents.get(msg.session);
+      if (existing?.type === "terminal") return;
       if (!agents.has(msg.session)) {
         addAgentCard(msg.session, "", null, false, false);
       }
@@ -2284,6 +2309,272 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     .catch(() => {});
 }
 
+// --- Shared xterm.js terminal infrastructure ---
+const XTERM_THEME = {
+  background: "#0d1117", foreground: "#e6edf3", cursor: "#e6edf3",
+  selectionBackground: "rgba(56, 139, 253, 0.4)",
+  black: "#484f58", red: "#ff7b72", green: "#3fb950", yellow: "#d29922",
+  blue: "#58a6ff", magenta: "#bc8cff", cyan: "#39d353", white: "#b1bac4",
+  brightBlack: "#6e7681", brightRed: "#ffa198", brightGreen: "#56d364",
+  brightYellow: "#e3b341", brightBlue: "#79c0ff", brightMagenta: "#d2a8ff",
+  brightCyan: "#56d364", brightWhite: "#f0f6fc",
+};
+
+const XTERM_BASE_CONFIG = {
+  cursorBlink: true,
+  cursorStyle: "bar",
+  fontSize: 13,
+  fontFamily: "'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace",
+  fastScrollModifier: "alt",
+  fastScrollSensitivity: 10,
+  smoothScrollDuration: 0,
+  allowProposedApi: true,
+  theme: XTERM_THEME,
+};
+
+function createXtermInstance(scrollback) {
+  const term = new Terminal({ ...XTERM_BASE_CONFIG, scrollback });
+  const fitAddon = new FitAddon.FitAddon();
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+  term.loadAddon(fitAddon);
+  term.loadAddon(webLinksAddon);
+  return { term, fitAddon };
+}
+
+function initXtermWebGL(term) {
+  try {
+    if (typeof WebglAddon !== "undefined") {
+      const wgl = new WebglAddon.WebglAddon();
+      wgl.onContextLoss(() => { wgl.dispose(); });
+      term.loadAddon(wgl);
+    }
+  } catch (e) {
+    console.warn("[xterm] WebGL addon failed:", e);
+  }
+}
+
+const _xtermEncoder = new TextEncoder();
+
+// Binary WS: footer shell stdin (0x01 prefix)
+function _sendShellStdin(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const payload = _xtermEncoder.encode(data);
+    const frame = new Uint8Array(1 + payload.length);
+    frame[0] = 0x01;
+    frame.set(payload, 1);
+    ws.send(frame);
+  }
+}
+
+// --- Terminal Card (xterm.js + tmux via binary WS) ---
+
+// Binary WS: terminal card stdin (0x03 prefix + name routing)
+function _sendTerminalStdin(name, data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const nameBuf = _xtermEncoder.encode(name);
+    const dataBuf = _xtermEncoder.encode(data);
+    const frame = new Uint8Array(2 + nameBuf.length + dataBuf.length);
+    frame[0] = 0x03;
+    frame[1] = nameBuf.length;
+    frame.set(nameBuf, 2);
+    frame.set(dataBuf, 2 + nameBuf.length);
+    ws.send(frame);
+  }
+}
+
+// Binary WS: terminal card resize (0x04 prefix + name + cols/rows)
+function _sendTerminalResize(name, cols, rows) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const nameBuf = _xtermEncoder.encode(name);
+    const frame = new Uint8Array(2 + nameBuf.length + 4);
+    frame[0] = 0x04;
+    frame[1] = nameBuf.length;
+    frame.set(nameBuf, 2);
+    const dv = new DataView(frame.buffer);
+    dv.setUint16(2 + nameBuf.length, cols);
+    dv.setUint16(2 + nameBuf.length + 2, rows);
+    ws.send(frame);
+  }
+}
+
+function addTerminalCard(name, workdir) {
+  if (agents.has(name)) {
+    // Already exists — just update workdir if changed
+    const agent = agents.get(name);
+    if (workdir && workdir !== agent.workdir) {
+      agent.workdir = workdir;
+      const wdEl = agent.card.querySelector(".workdir-link");
+      if (wdEl) wdEl.textContent = shortPath(workdir);
+    }
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "agent-card terminal-card";
+  card.innerHTML = `
+    <div class="card-sticky-top">
+      <div class="card-header">
+        <div class="card-header-left">
+          <span class="terminal-icon">&gt;_</span>
+          <span class="agent-name">${escapeHtml(name)}</span>
+        </div>
+        <div class="card-actions">
+          <button class="minimize-btn" tabindex="0" title="Minimize">&minus;</button>
+          <button class="kill-btn" tabindex="0" title="Close terminal">&times;</button>
+        </div>
+      </div>
+      <div class="card-subheader">
+        <span class="workdir-link">${escapeHtml(shortPath(workdir))}</span>
+      </div>
+    </div>
+    <div class="terminal-xterm-container"></div>
+    <div class="resize-grip"></div>
+  `;
+
+  const xtermContainer = card.querySelector(".terminal-xterm-container");
+
+  // Create xterm.js terminal instance (shared infrastructure)
+  const { term, fitAddon } = createXtermInstance(5000);
+
+  // Store in agents map
+  agents.set(name, { card, xterm: term, fitAddon, type: "terminal", workdir, status: "terminal" });
+
+  // Kill button — double-click confirm
+  const killBtn = card.querySelector(".kill-btn");
+  let killArmed = false;
+  let killTimer = null;
+  killBtn.addEventListener("click", () => {
+    if (!killArmed) {
+      killArmed = true;
+      killBtn.classList.add("armed");
+      killBtn.textContent = "kill";
+      killTimer = setTimeout(() => {
+        killArmed = false;
+        killBtn.classList.remove("armed");
+        killBtn.innerHTML = "&times;";
+      }, 2000);
+    } else {
+      clearTimeout(killTimer);
+      // Unsubscribe + dispose + delete
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: name }));
+      }
+      const agentEntry = agents.get(name);
+      if (agentEntry?.resizeObserver) agentEntry.resizeObserver.disconnect();
+      term.dispose();
+      fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: "DELETE" }).catch(() => {});
+      card.remove();
+      agents.delete(name);
+      updateEmptyState();
+      scheduleMasonry();
+    }
+  });
+
+  // Minimize button
+  const minBtn = card.querySelector(".minimize-btn");
+  minBtn.addEventListener("click", () => {
+    if (card.classList.contains("minimized")) {
+      card.classList.remove("minimized");
+      minBtn.innerHTML = "\u2212";
+      minBtn.title = "Minimize";
+      grid.appendChild(card);
+      // Re-subscribe on restore
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-subscribe", session: name }));
+      }
+      reorderCards();
+      updateEmptyState();
+      scheduleMasonry();
+      // Re-fit after DOM layout
+      requestAnimationFrame(() => { try { fitAddon.fit(); } catch {} });
+    } else {
+      card.classList.add("minimized");
+      minBtn.innerHTML = "+";
+      minBtn.title = "Restore";
+      // Unsubscribe to save bandwidth
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: name }));
+      }
+      minimizedBar.appendChild(card);
+      updateEmptyState();
+      scheduleMasonry();
+    }
+  });
+
+  // Resize grip
+  const grip = card.querySelector(".resize-grip");
+  let resizing = false;
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    resizing = true;
+    const startY = e.clientY;
+    const startH = card.offsetHeight;
+    const onMove = (ev) => {
+      const h = startH + (ev.clientY - startY);
+      card.style.height = Math.max(150, h) + "px";
+    };
+    const onUp = () => {
+      resizing = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try { fitAddon.fit(); } catch {}
+      scheduleMasonry();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
+  // Add card to grid
+  grid.appendChild(card);
+  updateEmptyState();
+  scheduleMasonry();
+
+  // Open xterm after card is in DOM
+  requestAnimationFrame(() => {
+    term.open(xtermContainer);
+
+    initXtermWebGL(term);
+
+    // Wire input to binary WS
+    term.onData((data) => {
+      _sendTerminalStdin(name, data);
+    });
+
+    // Fit and subscribe
+    try { fitAddon.fit(); } catch {}
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "terminal-subscribe", session: name }));
+      // Send initial resize
+      if (term.cols && term.rows) {
+        _sendTerminalResize(name, term.cols, term.rows);
+      }
+    }
+
+    // ResizeObserver for auto-fit — store reference for cleanup on kill
+    const ro = new ResizeObserver(() => {
+      if (card.classList.contains("minimized")) return;
+      try {
+        fitAddon.fit();
+        if (term.cols && term.rows) {
+          _sendTerminalResize(name, term.cols, term.rows);
+        }
+      } catch {}
+    });
+    ro.observe(xtermContainer);
+    const agentEntry = agents.get(name);
+    if (agentEntry) agentEntry.resizeObserver = ro;
+
+    // Focus xterm on click
+    xtermContainer.addEventListener("click", () => { term.focus(); });
+
+    // Mark as loaded for page loader
+    if (!_loaderDismissed) {
+      _agentsWithContent.add(name);
+      checkAllAgentsLoaded();
+    }
+  });
+}
+
 // Scroll trapping: brief pause when scrolling down hits terminal bottom
 function setupScrollTrapping(el) {
   let _trappedUntil = 0;
@@ -2543,7 +2834,7 @@ function updateEmptyState() {
         '<p style="margin-top:8px;opacity:0.7">Everything works without setup — create an agent or use the terminal below to get started.</p>' +
       '</div>';
   } else {
-    emptyState.innerHTML = '<p>No agents running. Click <strong>+ New Agent</strong> to start one.</p>';
+    emptyState.innerHTML = '<p>No agents or terminals running. Click <strong>+ New Agent</strong> or <strong>+ Terminal</strong> to start one.</p>';
   }
 }
 
@@ -3333,6 +3624,27 @@ newAgentBtn.addEventListener("click", () => {
   nameInput.select();
 });
 
+// + Terminal button — instant create, no modal
+const newTerminalBtn = document.getElementById("new-terminal-btn");
+if (newTerminalBtn) {
+  newTerminalBtn.addEventListener("click", () => {
+    fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "terminal", type: "terminal" }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { console.error("[terminal] Create failed:", data.error); return; }
+        addTerminalCard(data.name, data.workdir);
+        reorderCards();
+        updateEmptyState();
+        scheduleMasonry();
+      })
+      .catch((err) => console.error("[terminal] Create failed:", err));
+  });
+}
+
 function closeNewAgentModal() {
   modalOverlay.classList.add("hidden");
   deselectSession();
@@ -3582,7 +3894,7 @@ wsForm.addEventListener("submit", async (e) => {
     if (agent) {
       agent.workdir = workdir;
       agent.card.querySelector(".workdir-link").textContent = shortPath(workdir);
-      agent.terminal.innerHTML = "";
+      if (agent.terminal) agent.terminal.innerHTML = "";
     }
     wsModalOverlay.classList.add("hidden");
   } else {
@@ -5850,7 +6162,11 @@ fetch("/api/sessions")
   .then((sessions) => {
     _expectedAgentCount = sessions.length;
     for (const s of sessions) {
-      addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite);
+      if (s.type === "terminal") {
+        addTerminalCard(s.name, s.workdir);
+      } else {
+        addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite);
+      }
     }
     reorderCards();
     updateEmptyState();
@@ -6112,45 +6428,8 @@ function _applyRestoredState(state) {
   // Set initial shell height CSS var for todo view sizing
   document.documentElement.style.setProperty("--shell-panel-h", (shellPanel.offsetHeight || 42) + 8 + "px");
 
-  // Create xterm.js terminal
-  const term = new Terminal({
-    cursorBlink: true,
-    cursorStyle: "bar",
-    fontSize: 13,
-    fontFamily: "'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace",
-    scrollback: 2000,
-    fastScrollModifier: "alt",
-    fastScrollSensitivity: 10,
-    smoothScrollDuration: 0, // disable smooth scroll animation for responsiveness
-    theme: {
-      background: "#0d1117",
-      foreground: "#e6edf3",
-      cursor: "#e6edf3",
-      selectionBackground: "rgba(56, 139, 253, 0.4)",
-      black: "#484f58",
-      red: "#ff7b72",
-      green: "#3fb950",
-      yellow: "#d29922",
-      blue: "#58a6ff",
-      magenta: "#bc8cff",
-      cyan: "#39d353",
-      white: "#b1bac4",
-      brightBlack: "#6e7681",
-      brightRed: "#ffa198",
-      brightGreen: "#56d364",
-      brightYellow: "#e3b341",
-      brightBlue: "#79c0ff",
-      brightMagenta: "#d2a8ff",
-      brightCyan: "#56d364",
-      brightWhite: "#f0f6fc",
-    },
-    allowProposedApi: true,
-  });
-
-  const fitAddon = new FitAddon.FitAddon();
-  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(webLinksAddon);
+  // Create xterm.js terminal (shared infrastructure)
+  const { term, fitAddon } = createXtermInstance(2000);
 
   // --- URL Opener wrapper detection + install ---
   const urlOpenerWrap = document.getElementById("url-opener-wrap");
@@ -6211,16 +6490,7 @@ function _applyRestoredState(state) {
     shellInitialized = true;
     term.open(shellContainer);
 
-    // WebGL renderer — dramatically faster than default canvas
-    try {
-      if (typeof WebglAddon !== "undefined") {
-        const webglAddon = new WebglAddon.WebglAddon();
-        webglAddon.onContextLoss(() => { webglAddon.dispose(); });
-        term.loadAddon(webglAddon);
-      }
-    } catch (e) {
-      console.warn("[shell] WebGL addon failed, using canvas renderer:", e);
-    }
+    initXtermWebGL(term);
 
     // Send input from xterm to server PTY
     // Handles selection-based editing for paste (keyboard is handled by attachCustomKeyEventHandler)
@@ -6295,18 +6565,6 @@ function _applyRestoredState(state) {
   let _acIndex = 0;         // selected index
   let _acWord = "";         // original word being completed
   let _acFetching = false;  // prevent double-fetch
-
-  const _shellEncoder = new TextEncoder();
-  function _sendShellStdin(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      // Binary protocol: 0x01 prefix + UTF-8 payload (skips JSON.parse on server)
-      const payload = _shellEncoder.encode(data);
-      const frame = new Uint8Array(1 + payload.length);
-      frame[0] = 0x01;
-      frame.set(payload, 1);
-      ws.send(frame);
-    }
-  }
 
   function _getCursorScreenPos() {
     const screen = shellContainer.querySelector(".xterm-screen");

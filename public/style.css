@@ -5698,3 +5698,33 @@ header .btn-primary kbd {
     min-height: 36px;
   }
 }
+
+/* ═══════════════════════════════════════════════════
+   TERMINAL CARD (xterm.js)
+   ═══════════════════════════════════════════════════ */
+.terminal-card {
+  display: flex;
+  flex-direction: column;
+}
+.terminal-card .terminal-xterm-container {
+  flex: 1 1 0;
+  min-height: 80px;
+  overflow: hidden;
+  background: #0d1117;
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.terminal-card .terminal-xterm-container .xterm {
+  height: 100% !important;
+  width: 100% !important;
+}
+.terminal-card .terminal-xterm-container .xterm-viewport {
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+.terminal-card .terminal-icon {
+  color: var(--text-dim);
+  font-family: monospace;
+  font-weight: bold;
+  margin-right: 4px;
+  font-size: 13px;
+}
