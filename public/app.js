@@ -3563,7 +3563,9 @@ document.addEventListener("keydown", (e) => {
   const inFilesPanel = !!e.target.closest("#files-panel");
   const inInput = e.target.matches("input, textarea, [contenteditable]");
   const todoSettingsOverlay = document.getElementById("todo-settings-overlay");
-  const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) || (_diffOverlay && !_diffOverlay.classList.contains("hidden"));
+  const bugReportOverlay = document.getElementById("bug-report-overlay");
+  const bugSuccessOverlay = document.getElementById("bug-success-overlay");
+  const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) || (_diffOverlay && !_diffOverlay.classList.contains("hidden")) || (bugReportOverlay && !bugReportOverlay.classList.contains("hidden")) || (bugSuccessOverlay && !bugSuccessOverlay.classList.contains("hidden"));
 
   // Escape: layered dismiss (fullscreen → modals → file editor → files panel → shell → agent tmux)
   if (e.key === "Escape") {
@@ -3596,6 +3598,17 @@ document.addEventListener("keydown", (e) => {
     if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
       e.preventDefault();
       closeDiffModal();
+      return;
+    }
+    if (bugReportOverlay && !bugReportOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      if (window.closeBugReportModal) window.closeBugReportModal();
+      else bugReportOverlay.classList.add("hidden");
+      return;
+    }
+    if (bugSuccessOverlay && !bugSuccessOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      bugSuccessOverlay.classList.add("hidden");
       return;
     }
     // Todo settings modal
@@ -3690,6 +3703,11 @@ document.addEventListener("keydown", (e) => {
     restartServer();
     return;
   }
+  if (key === "b") {
+    e.preventDefault();
+    document.getElementById("bug-report-btn").click();
+    return;
+  }
   if (key === "n") {
     e.preventDefault();
     newAgentBtn.click();
@@ -3726,6 +3744,237 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 });
+
+// --- Bug Report ---
+
+{
+  const bugReportBtn = document.getElementById("bug-report-btn");
+  const bugOverlay = document.getElementById("bug-report-overlay");
+  const bugForm = document.getElementById("bug-report-form");
+  const bugTitle = document.getElementById("bug-title");
+  const bugDesc = document.getElementById("bug-description");
+  const bugSteps = document.getElementById("bug-steps");
+  const bugSubmit = document.getElementById("bug-submit");
+  const bugCancel = document.getElementById("bug-cancel");
+  const bugTargetRepo = document.getElementById("bug-target-repo");
+  const bugSysinfoLoading = document.getElementById("bug-sysinfo-loading");
+  const bugSysinfoContent = document.getElementById("bug-sysinfo-content");
+  const bugSysinfoError = document.getElementById("bug-sysinfo-error");
+  const bugSysinfoRetry = document.getElementById("bug-sysinfo-retry");
+  const bugScreenshotZone = document.getElementById("bug-screenshot-zone");
+  const bugScreenshotInput = document.getElementById("bug-screenshot-input");
+  const bugScreenshotPlaceholder = document.getElementById("bug-screenshot-placeholder");
+  const bugScreenshotPreview = document.getElementById("bug-screenshot-preview");
+  const bugScreenshotImg = document.getElementById("bug-screenshot-img");
+  const bugScreenshotRemove = document.getElementById("bug-screenshot-remove");
+  const bugSuccessOverlay = document.getElementById("bug-success-overlay");
+  const bugSuccessMsg = document.getElementById("bug-success-msg");
+  const bugSuccessClose = document.getElementById("bug-success-close");
+  const bugSuccessSpawn = document.getElementById("bug-success-spawn");
+
+  let bugSelectedSeverity = "medium";
+  let bugScreenshotFile = null;
+  let bugSystemInfo = null;
+  let _lastIssueUrl = "";
+  let _lastBugTitle = "";
+  let _lastBugDesc = "";
+
+  function setSysinfoState(state) {
+    bugSysinfoLoading.classList.toggle("hidden", state !== "loading");
+    bugSysinfoContent.classList.toggle("hidden", state !== "content");
+    bugSysinfoError.classList.toggle("hidden", state !== "error");
+  }
+
+  function openBugReportModal() {
+    bugOverlay.classList.remove("hidden");
+    bugTargetRepo.textContent = _bugReportRepo;
+    bugTitle.focus();
+    fetchSystemInfo();
+  }
+
+  // Expose globally for Escape handler
+  window.closeBugReportModal = closeBugReportModal;
+  function closeBugReportModal() {
+    bugOverlay.classList.add("hidden");
+    bugForm.reset();
+    bugSelectedSeverity = "medium";
+    bugScreenshotFile = null;
+    bugScreenshotPreview.classList.add("hidden");
+    bugScreenshotPlaceholder.style.display = "";
+    bugSystemInfo = null;
+    setSysinfoState("loading");
+    // Reset severity pills
+    bugOverlay.querySelectorAll(".severity-pill").forEach(p => {
+      p.classList.toggle("active", p.dataset.severity === "medium");
+    });
+  }
+
+  let _bugReportRepo = "john-farina/claude-cli-dashboard";
+
+  async function fetchSystemInfo() {
+    setSysinfoState("loading");
+    try {
+      const res = await fetch("/api/system-info");
+      bugSystemInfo = await res.json();
+      bugSystemInfo.browser = navigator.userAgent.replace(/^Mozilla\/5\.0 /, "");
+      if (bugSystemInfo.bugReportRepo) _bugReportRepo = bugSystemInfo.bugReportRepo;
+      bugTargetRepo.textContent = _bugReportRepo;
+      bugSysinfoContent.textContent =
+        `Dashboard: ${bugSystemInfo.dashboardVersion} (${bugSystemInfo.dashboardBranch})\n` +
+        `Node: ${bugSystemInfo.nodeVersion}\n` +
+        `OS: ${bugSystemInfo.platform} ${bugSystemInfo.osVersion}\n` +
+        `Agents: ${bugSystemInfo.activeAgents}\n` +
+        `Browser: ${bugSystemInfo.browser}`;
+      setSysinfoState("content");
+    } catch {
+      setSysinfoState("error");
+    }
+  }
+
+  bugSysinfoRetry.addEventListener("click", fetchSystemInfo);
+
+  // Open modal
+  bugReportBtn.addEventListener("click", openBugReportModal);
+
+  // Close modal
+  bugCancel.addEventListener("click", closeBugReportModal);
+  bugOverlay.addEventListener("click", (e) => {
+    if (e.target === bugOverlay) closeBugReportModal();
+  });
+
+  // Severity pills
+  bugOverlay.querySelectorAll(".severity-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      bugOverlay.querySelectorAll(".severity-pill").forEach(p => p.classList.remove("active"));
+      pill.classList.add("active");
+      bugSelectedSeverity = pill.dataset.severity;
+    });
+  });
+
+  // Screenshot upload
+  bugScreenshotZone.addEventListener("click", () => bugScreenshotInput.click());
+  bugScreenshotZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    bugScreenshotZone.classList.add("dragover");
+  });
+  bugScreenshotZone.addEventListener("dragleave", () => {
+    bugScreenshotZone.classList.remove("dragover");
+  });
+  bugScreenshotZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    bugScreenshotZone.classList.remove("dragover");
+    const file = e.dataTransfer.files[0];
+    if (file && file.type.startsWith("image/")) handleScreenshot(file);
+  });
+  bugScreenshotInput.addEventListener("change", () => {
+    if (bugScreenshotInput.files[0]) handleScreenshot(bugScreenshotInput.files[0]);
+  });
+  bugScreenshotRemove.addEventListener("click", (e) => {
+    e.stopPropagation();
+    bugScreenshotFile = null;
+    bugScreenshotPreview.classList.add("hidden");
+    bugScreenshotPlaceholder.style.display = "";
+    bugScreenshotInput.value = "";
+  });
+
+  function handleScreenshot(file) {
+    bugScreenshotFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      bugScreenshotImg.src = reader.result;
+      bugScreenshotPreview.classList.remove("hidden");
+      bugScreenshotPlaceholder.style.display = "none";
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Submit bug report
+  bugForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const title = bugTitle.value.trim();
+    if (!title) return;
+
+    bugSubmit.disabled = true;
+    bugSubmit.textContent = "Submitting...";
+
+    try {
+      // Upload screenshot first if present
+      let screenshotPath = null;
+      if (bugScreenshotFile) {
+        const formData = new FormData();
+        formData.append("file", bugScreenshotFile);
+        const upRes = await fetch("/api/upload", { method: "POST", body: formData });
+        if (upRes.ok) {
+          const upData = await upRes.json();
+          screenshotPath = upData.path;
+        }
+      }
+
+      const res = await fetch("/api/bug-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description: bugDesc.value.trim(),
+          steps: bugSteps.value.trim(),
+          severity: bugSelectedSeverity,
+          systemInfo: bugSystemInfo,
+          screenshotPath,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.issueUrl) {
+        _lastIssueUrl = data.issueUrl;
+        _lastBugTitle = title;
+        _lastBugDesc = bugDesc.value.trim();
+        closeBugReportModal();
+        // Show success modal with spawn option
+        bugSuccessMsg.innerHTML = `Issue created: <a href="${escapeAttr(data.issueUrl)}" target="_blank">${escapeHtml(data.issueUrl)}</a>`;
+        bugSuccessOverlay.classList.remove("hidden");
+      } else {
+        alert(data.error || "Failed to create issue. Make sure `gh` CLI is authenticated.");
+      }
+    } catch {
+      alert("Failed to submit bug report. Check your network connection and gh CLI auth.");
+    } finally {
+      bugSubmit.disabled = false;
+      bugSubmit.textContent = "Submit Bug Report";
+    }
+  });
+
+  // Success modal actions
+  bugSuccessClose.addEventListener("click", () => {
+    bugSuccessOverlay.classList.add("hidden");
+  });
+  bugSuccessOverlay.addEventListener("click", (e) => {
+    if (e.target === bugSuccessOverlay) bugSuccessOverlay.classList.add("hidden");
+  });
+
+  bugSuccessSpawn.addEventListener("click", async () => {
+    bugSuccessOverlay.classList.add("hidden");
+    // Create a new agent with the bug details as its prompt
+    const prompt = `Fix this bug and create a PR:\n\nTitle: ${_lastBugTitle}\n${_lastBugDesc ? `Description: ${_lastBugDesc}\n` : ""}Issue: ${_lastIssueUrl}\n\nPlease investigate, fix the bug, and create a PR that references the issue.`;
+    try {
+      const res = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "bugfix-" + _lastBugTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30).replace(/-$/, ""),
+          prompt,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        addAgentCard(data.name, data.workdir, data.branch, data.isWorktree, false);
+      } else {
+        alert("Failed to spawn fix agent");
+      }
+    } catch {
+      alert("Failed to spawn fix agent");
+    }
+  });
+}
 
 // --- .claude File Browser ---
 
