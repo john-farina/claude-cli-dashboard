@@ -68,6 +68,7 @@
       <!-- merge conflict test: this comment will conflict with local dock-bar changes -->
       <button id="files-btn" class="btn-secondary" tabindex="0">Docs <kbd>F</kbd></button>
       <button id="todo-btn" class="btn-secondary" tabindex="0">&#x2611; Notes <kbd>D</kbd></button>
+      <button id="bug-report-btn" class="btn-secondary" tabindex="0">&#x1F41B; Bug Report <kbd>B</kbd></button>
       <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
     </div>
   </header>
@@ -222,6 +223,71 @@
         <div class="diff-state-icon">!</div>
         <div class="diff-state-text" id="diff-error-msg"></div>
         <button class="btn-secondary diff-retry-btn" id="diff-retry">Try Again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug Report Modal -->
+  <div id="bug-report-overlay" class="modal-overlay hidden">
+    <div class="modal bug-report-modal">
+      <h2>Report a Bug</h2>
+      <form id="bug-report-form">
+        <label>
+          Title
+          <input type="text" id="bug-title" placeholder="Brief description of the issue" required>
+        </label>
+        <label>
+          Description
+          <textarea id="bug-description" rows="5" placeholder="What happened? What did you expect to happen?"></textarea>
+        </label>
+        <label>
+          Steps to Reproduce <span class="optional">(optional)</span>
+          <textarea id="bug-steps" rows="3" placeholder="1. Go to...&#10;2. Click on...&#10;3. See error"></textarea>
+        </label>
+        <div class="bug-severity-picker">
+          <span class="label-text">Severity</span>
+          <div class="bug-severity-options">
+            <button type="button" class="severity-pill" data-severity="low">Low</button>
+            <button type="button" class="severity-pill active" data-severity="medium">Medium</button>
+            <button type="button" class="severity-pill" data-severity="high">High</button>
+            <button type="button" class="severity-pill" data-severity="critical">Critical</button>
+          </div>
+        </div>
+        <label>
+          Screenshot <span class="optional">(optional)</span>
+          <div id="bug-screenshot-zone" class="bug-screenshot-zone">
+            <input type="file" id="bug-screenshot-input" accept="image/*" style="display:none">
+            <div id="bug-screenshot-placeholder" class="bug-screenshot-placeholder">
+              <span>Click or drag an image here</span>
+            </div>
+            <div id="bug-screenshot-preview" class="bug-screenshot-preview hidden">
+              <img id="bug-screenshot-img" alt="Screenshot preview">
+              <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove">&times;</button>
+            </div>
+          </div>
+        </label>
+        <div id="bug-system-info" class="bug-system-info">
+          <span class="label-text">System Info</span>
+          <div id="bug-system-info-content" class="bug-system-info-content">Loading...</div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="bug-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" id="bug-submit" class="btn-primary">Submit Bug Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bug Report Success Modal (spawn agent confirmation) -->
+  <div id="bug-success-overlay" class="modal-overlay hidden">
+    <div class="modal bug-success-modal">
+      <div class="bug-success-icon">&#10003;</div>
+      <h2>Bug Report Filed</h2>
+      <p id="bug-success-msg" class="bug-success-msg"></p>
+      <p class="bug-success-ask">Would you like to spawn an agent to fix this bug?</p>
+      <div class="modal-actions">
+        <button type="button" id="bug-success-close" class="btn-secondary">No Thanks</button>
+        <button type="button" id="bug-success-spawn" class="btn-primary">Spawn Fix Agent</button>
       </div>
     </div>
   </div>

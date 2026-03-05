@@ -2933,6 +2933,74 @@ app.post("/api/update", async (req, res) => {
   }
 });
 
+// --- Bug Report ---
+// Collects system info and creates a GitHub issue via `gh` CLI.
+app.get("/api/system-info", (req, res) => {
+  const info = {};
+  try { info.dashboardVersion = execSync("git rev-parse --short HEAD", { cwd: __dirname, encoding: "utf8", timeout: 3000 }).trim(); } catch { info.dashboardVersion = "unknown"; }
+  try { info.dashboardBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: __dirname, encoding: "utf8", timeout: 3000 }).trim(); } catch { info.dashboardBranch = "unknown"; }
+  info.nodeVersion = process.version;
+  info.platform = `${process.platform} ${process.arch}`;
+  try { info.osVersion = execSync("sw_vers -productVersion 2>/dev/null || uname -r", { encoding: "utf8", timeout: 3000 }).trim(); } catch { info.osVersion = "unknown"; }
+  info.activeAgents = listTmuxSessions().filter(s => s.startsWith(PREFIX)).length;
+  res.json(info);
+});
+
+app.post("/api/bug-report", (req, res) => {
+  const { title, description, steps, severity, systemInfo, screenshotPath } = req.body;
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: "Title is required" });
+  }
+
+  const repo = userConfig.bugReportRepo || "john-farina/claude-cli-dashboard";
+
+  // Build issue body
+  const severityLabels = { low: "Low", medium: "Medium", high: "High", critical: "Critical" };
+  let body = "";
+  if (description) body += `## Description\n\n${description}\n\n`;
+  if (steps) body += `## Steps to Reproduce\n\n${steps}\n\n`;
+  body += `## Severity\n\n${severityLabels[severity] || "Medium"}\n\n`;
+  if (systemInfo) {
+    body += `## System Info\n\n\`\`\`\n`;
+    body += `Dashboard: ${systemInfo.dashboardVersion} (${systemInfo.dashboardBranch})\n`;
+    body += `Node: ${systemInfo.nodeVersion}\n`;
+    body += `OS: ${systemInfo.platform} ${systemInfo.osVersion}\n`;
+    body += `Active Agents: ${systemInfo.activeAgents}\n`;
+    if (systemInfo.browser) body += `Browser: ${systemInfo.browser}\n`;
+    body += `\`\`\`\n\n`;
+  }
+  if (screenshotPath) {
+    body += `## Screenshot\n\n*Screenshot attached to this issue*\n\n`;
+  }
+  body += `---\n*Filed via CEO Dashboard Bug Report*`;
+
+  // Map severity to GitHub labels
+  const labels = ["bug"];
+  if (severity === "critical") labels.push("priority: critical");
+  else if (severity === "high") labels.push("priority: high");
+
+  // Write body to temp file to avoid shell escaping issues
+  const tmpBodyFile = path.join(os.tmpdir(), `ceo-bug-report-${Date.now()}.md`);
+  fs.writeFileSync(tmpBodyFile, body);
+
+  const labelArgs = labels.map(l => `--label "${l}"`).join(" ");
+  const cmd = `gh issue create --repo "${repo}" --title "${title.replace(/"/g, '\\"')}" --body-file "${tmpBodyFile}" ${labelArgs} 2>&1`;
+
+  exec(cmd, { encoding: "utf8", timeout: 30000 }, (err, stdout, stderr) => {
+    // Clean up temp file
+    try { fs.unlinkSync(tmpBodyFile); } catch {}
+
+    if (err) {
+      const output = (stdout || "") + (stderr || "");
+      return res.status(500).json({ error: "Failed to create issue", details: output });
+    }
+
+    // stdout should contain the issue URL
+    const issueUrl = stdout.trim();
+    res.json({ ok: true, issueUrl });
+  });
+});
+
 // --- Server self-restart ---
 // Responds immediately, spawns a fresh server, then exits this process.
 // The new server picks up all tmux sessions via restoreSessions().
