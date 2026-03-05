@@ -2265,6 +2265,214 @@ header h1 {
 
 
 /* ═══════════════════════════════════════════════════
+   BUG REPORT MODAL
+   ═══════════════════════════════════════════════════ */
+.bug-report-modal {
+  width: 560px;
+}
+
+/* Header with repo context */
+.bug-report-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.bug-report-header h2 {
+  margin-bottom: 0;
+}
+.bug-target-repo {
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Severity pills — follows .workdir-pill pattern */
+.bug-severity-options {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.severity-pill {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.severity-pill:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+.severity-pill.active[data-severity="low"] {
+  background: rgba(74, 222, 128, 0.12);
+  border-color: #4ade80;
+  color: #4ade80;
+  box-shadow: 0 0 0 1px rgba(74, 222, 128, 0.2);
+}
+.severity-pill.active[data-severity="medium"] {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-glow);
+}
+.severity-pill.active[data-severity="high"] {
+  background: rgba(251, 146, 60, 0.12);
+  border-color: #fb923c;
+  color: #fb923c;
+  box-shadow: 0 0 0 1px rgba(251, 146, 60, 0.2);
+}
+.severity-pill.active[data-severity="critical"] {
+  background: rgba(248, 113, 113, 0.12);
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.2);
+}
+
+/* Screenshot upload zone */
+.bug-screenshot-zone {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  min-height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bug-screenshot-zone:hover,
+.bug-screenshot-zone.dragover {
+  border-color: var(--accent);
+}
+.bug-screenshot-placeholder span {
+  color: var(--text-dim);
+  font-size: 13px;
+}
+.bug-screenshot-preview {
+  position: relative;
+  display: inline-block;
+}
+.bug-screenshot-preview.hidden {
+  display: none;
+}
+.bug-screenshot-preview img {
+  max-width: 100%;
+  max-height: 200px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+/* Icon button pattern per CLAUDE.md */
+.bug-screenshot-remove-btn {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  background: var(--surface);
+}
+.bug-screenshot-remove-btn:hover {
+  color: var(--red);
+  background: rgba(248, 113, 113, 0.08);
+}
+
+/* System info — state screens per CLAUDE.md */
+.bug-system-info {
+  background: var(--terminal-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-height: 48px;
+}
+.bug-system-info-content {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  color: var(--text-dim);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.bug-system-info-content.hidden {
+  display: none;
+}
+.bug-sysinfo-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.bug-sysinfo-state.hidden {
+  display: none;
+}
+.bug-sysinfo-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2.5px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: bugSpin 0.7s linear infinite;
+}
+@keyframes bugSpin {
+  to { transform: rotate(360deg); }
+}
+.bug-sysinfo-state .btn-secondary {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+/* Bug success modal */
+.bug-success-modal {
+  text-align: center;
+  max-width: 420px;
+}
+.bug-success-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(74, 222, 128, 0.15);
+  color: #4ade80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin: 0 auto 12px;
+}
+.bug-success-msg {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.bug-success-msg a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.bug-success-ask {
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+.bug-success-modal .modal-actions {
+  justify-content: center;
+}
+
+/* ═══════════════════════════════════════════════════
    FILE BROWSER PANEL
    ═══════════════════════════════════════════════════ */
 .files-panel {
@@ -4873,6 +5081,26 @@ header .btn-secondary kbd {
     padding: 10px 16px;
   }
   .diff-modal-controls button {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  /* Bug report modal — mobile */
+  .bug-report-modal {
+    padding: 20px;
+  }
+  .bug-report-modal input,
+  .bug-report-modal textarea {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+  .bug-severity-options {
+    flex-wrap: wrap;
+  }
+  .severity-pill {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  .bug-screenshot-remove-btn {
     min-width: 36px;
     min-height: 36px;
   }

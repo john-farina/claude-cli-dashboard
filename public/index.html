@@ -65,8 +65,10 @@
       <button id="settings-btn" class="settings-icon-btn" tabindex="0" title="Settings (S)"><span class="gear-icon">&#x2699;</span><kbd>S</kbd></button>
       <button id="restart-server-btn" class="btn-secondary" tabindex="0">&#x21bb; Refresh <kbd>R</kbd></button>
       <button id="ceo-md-btn" class="btn-secondary" tabindex="0">CEO.md <kbd>C</kbd></button>
+      <!-- merge conflict test: this comment will conflict with local dock-bar changes -->
       <button id="files-btn" class="btn-secondary" tabindex="0">Docs <kbd>F</kbd></button>
       <button id="todo-btn" class="btn-secondary" tabindex="0">&#x2611; Notes <kbd>D</kbd></button>
+      <button id="bug-report-btn" class="btn-secondary" tabindex="0">&#x1F41B; Bug Report <kbd>B</kbd></button>
       <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
     </div>
   </header>
@@ -221,6 +223,84 @@
         <div class="diff-state-icon">!</div>
         <div class="diff-state-text" id="diff-error-msg"></div>
         <button class="btn-secondary diff-retry-btn" id="diff-retry">Try Again</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bug Report Modal -->
+  <div id="bug-report-overlay" class="modal-overlay hidden">
+    <div class="modal bug-report-modal">
+      <div class="bug-report-header">
+        <h2>Report a Bug</h2>
+        <span id="bug-target-repo" class="bug-target-repo"></span>
+      </div>
+      <form id="bug-report-form">
+        <label>
+          Title
+          <input type="text" id="bug-title" placeholder="Brief description of the issue" required>
+        </label>
+        <label>
+          Description
+          <textarea id="bug-description" rows="5" placeholder="What happened? What did you expect to happen?"></textarea>
+        </label>
+        <label>
+          Steps to Reproduce <span class="optional">(optional)</span>
+          <textarea id="bug-steps" rows="3" placeholder="1. Go to...&#10;2. Click on...&#10;3. See error"></textarea>
+        </label>
+        <label>
+          Severity
+          <div class="bug-severity-options">
+            <button type="button" class="severity-pill" data-severity="low">Low</button>
+            <button type="button" class="severity-pill active" data-severity="medium">Medium</button>
+            <button type="button" class="severity-pill" data-severity="high">High</button>
+            <button type="button" class="severity-pill" data-severity="critical">Critical</button>
+          </div>
+        </label>
+        <label>
+          Screenshot <span class="optional">(optional)</span>
+          <div id="bug-screenshot-zone" class="bug-screenshot-zone">
+            <input type="file" id="bug-screenshot-input" accept="image/*" style="display:none">
+            <div id="bug-screenshot-placeholder" class="bug-screenshot-placeholder">
+              <span>Click or drag an image here</span>
+            </div>
+            <div id="bug-screenshot-preview" class="bug-screenshot-preview hidden">
+              <img id="bug-screenshot-img" alt="Screenshot preview">
+              <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove-btn">&times;</button>
+            </div>
+          </div>
+        </label>
+        <label>
+          System Info
+          <div id="bug-system-info" class="bug-system-info">
+            <div id="bug-sysinfo-loading" class="bug-sysinfo-state">
+              <div class="bug-sysinfo-spinner"></div>
+              <span>Loading system info&hellip;</span>
+            </div>
+            <div id="bug-sysinfo-content" class="bug-system-info-content hidden"></div>
+            <div id="bug-sysinfo-error" class="bug-sysinfo-state hidden">
+              <span>Could not load system info</span>
+              <button type="button" id="bug-sysinfo-retry" class="btn-secondary">Retry</button>
+            </div>
+          </div>
+        </label>
+        <div class="modal-actions">
+          <button type="button" id="bug-cancel" class="btn-secondary">Cancel</button>
+          <button type="submit" id="bug-submit" class="btn-primary">Submit Bug Report</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Bug Report Success Modal (spawn agent confirmation) -->
+  <div id="bug-success-overlay" class="modal-overlay hidden">
+    <div class="modal bug-success-modal">
+      <div class="bug-success-icon">&#10003;</div>
+      <h2>Bug Report Filed</h2>
+      <p id="bug-success-msg" class="bug-success-msg"></p>
+      <p class="bug-success-ask">Would you like to spawn an agent to fix this bug?</p>
+      <div class="modal-actions">
+        <button type="button" id="bug-success-close" class="btn-secondary">No Thanks</button>
+        <button type="button" id="bug-success-spawn" class="btn-primary">Spawn Fix Agent</button>
       </div>
     </div>
   </div>

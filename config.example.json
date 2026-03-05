@@ -8,5 +8,6 @@
   "defaultAgentName": "agent",
   "shellCommand": "ceo",
   "prLinkStyle": "graphite",
-  "title": "CEO Dashboard"
+  "title": "CEO Dashboard",
+  "bugReportRepo": "john-farina/claude-cli-dashboard"
 }

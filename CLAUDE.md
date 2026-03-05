@@ -108,6 +108,14 @@ Supporting files:
 - Live branch display: gray for regular repos, green for worktrees
 - Live workdir updates from `getEffectiveCwd()` (detects worktree paths from terminal output)
 
+**Bug Report** (header button, keyboard shortcut `B`):
+- Modal collects title, description, steps to reproduce, severity (low/medium/high/critical), optional screenshot
+- Auto-loads system info via `GET /api/system-info` (version, branch, Node, OS, active agents)
+- Creates GitHub issues via `POST /api/bug-report` using `execFile("gh", args)` (no shell — prevents injection)
+- Target repo configurable via `bugReportRepo` in `config.json` (defaults to `john-farina/claude-cli-dashboard`)
+- Success modal offers to spawn a fix agent with the bug context as its initial prompt
+- System info panel uses proper state screens (spinner/content/error+retry per UI guidelines)
+
 **Git/Worktree Detection**:
 - `getGitInfo()` — branch name + worktree status (`.git` is a file in worktrees, directory in main repos)
 - `detectWorktreePath()` — scans terminal output for `.claude/worktrees/` paths (Claude doesn't `cd` into worktrees, uses `cwd:` args)
@@ -152,6 +160,8 @@ Supporting files:
 | `POST` | `/api/shell/completions` | File/dir autocomplete for embedded terminal |
 | `POST` | `/api/shell/open-finder` | Open a folder in Finder from shell CWD pill |
 | `POST` | `/api/open-url` | Route external URL to in-app browser overlay via WebSocket |
+| `GET` | `/api/system-info` | Dashboard version, Node, OS, agent count, configured bug report repo |
+| `POST` | `/api/bug-report` | Create GitHub issue via `gh` CLI (title, description, severity, systemInfo) |
 
 ## WebSocket Messages
 
