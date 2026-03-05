@@ -1891,6 +1891,60 @@ app.delete("/api/sessions/:name/memory", (req, res) => {
   }
 });
 
+// --- Code Diff Viewer API ---
+
+app.get("/api/sessions/:name/diff", async (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) {
+    return res.status(400).json({ error: "Invalid session name" });
+  }
+  const sessions = listTmuxSessions();
+  const session = sessions.find((s) => s === `${PREFIX}${name}`);
+  if (!session) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  // Resolve working directory
+  let workdir;
+  try {
+    workdir = await getEffectiveCwdAsync(session, prevOutputs.get(session));
+  } catch {}
+  if (!workdir) {
+    const meta = loadSessionsMeta();
+    workdir = meta[name]?.workdir;
+  }
+  if (!workdir) {
+    return res.status(400).json({ error: "Could not determine working directory" });
+  }
+
+  // Verify git repo
+  try {
+    execSync("git rev-parse --is-inside-work-tree", { cwd: workdir, timeout: 5000, stdio: "ignore" });
+  } catch {
+    return res.status(400).json({ error: "Not a git repository" });
+  }
+
+  // Run git diff (unstaged) + git diff --cached (staged) in parallel
+  const runGitDiff = (args) =>
+    new Promise((resolve) => {
+      exec(`git diff ${args}`, { cwd: workdir, timeout: 10000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+        resolve(err ? "" : stdout);
+      });
+    });
+
+  try {
+    const [unstaged, staged] = await Promise.all([runGitDiff(""), runGitDiff("--cached")]);
+    res.json({
+      workdir,
+      hasDiff: !!(unstaged || staged),
+      unstaged,
+      staged,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // --- .claude File Browser API ---
 
 const CLAUDE_HOME = path.join(os.homedir(), ".claude");
