@@ -2971,7 +2971,7 @@ app.post("/api/bug-report", (req, res) => {
     body += `\`\`\`\n\n`;
   }
   if (screenshotPath) {
-    body += `## Screenshot\n\n*Screenshot attached to this issue*\n\n`;
+    body += `## Screenshot\n\n*Screenshot saved locally at: \`${screenshotPath}\`*\n\n`;
   }
   body += `---\n*Filed via CEO Dashboard Bug Report*`;
 
@@ -2984,15 +2984,31 @@ app.post("/api/bug-report", (req, res) => {
   const tmpBodyFile = path.join(os.tmpdir(), `ceo-bug-report-${Date.now()}.md`);
   fs.writeFileSync(tmpBodyFile, body);
 
-  const labelArgs = labels.map(l => `--label "${l}"`).join(" ");
-  const cmd = `gh issue create --repo "${repo}" --title "${title.replace(/"/g, '\\"')}" --body-file "${tmpBodyFile}" ${labelArgs} 2>&1`;
+  // Use execFile (no shell) to prevent command injection from user-supplied title
+  const { execFile } = require("child_process");
+  const args = ["issue", "create", "--repo", repo, "--title", title.trim(), "--body-file", tmpBodyFile];
+  for (const l of labels) { args.push("--label", l); }
 
-  exec(cmd, { encoding: "utf8", timeout: 30000 }, (err, stdout, stderr) => {
+  execFile("gh", args, { encoding: "utf8", timeout: 30000 }, (err, stdout, stderr) => {
     // Clean up temp file
     try { fs.unlinkSync(tmpBodyFile); } catch {}
 
     if (err) {
       const output = (stdout || "") + (stderr || "");
+      // If labels don't exist on the repo, retry without them
+      if (output.includes("label") && labels.length > 0) {
+        const retryArgs = ["issue", "create", "--repo", repo, "--title", title.trim(), "--body-file", tmpBodyFile];
+        // Re-write body file since we deleted it
+        fs.writeFileSync(tmpBodyFile, body);
+        execFile("gh", retryArgs, { encoding: "utf8", timeout: 30000 }, (err2, stdout2, stderr2) => {
+          try { fs.unlinkSync(tmpBodyFile); } catch {}
+          if (err2) {
+            return res.status(500).json({ error: "Failed to create issue", details: (stdout2 || "") + (stderr2 || "") });
+          }
+          res.json({ ok: true, issueUrl: stdout2.trim() });
+        });
+        return;
+      }
       return res.status(500).json({ error: "Failed to create issue", details: output });
     }
 
