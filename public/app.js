@@ -1258,13 +1258,42 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   };
   input.addEventListener("input", autoResize);
 
-  // Collapse large pastes into a chip (like Claude CLI's "N lines pasted")
-  input.addEventListener("paste", (e) => {
+  // Handle pasted images from clipboard (e.g. screenshots)
+  input.addEventListener("paste", async (e) => {
+    const clipboardData = e.clipboardData || window.clipboardData;
+    if (!clipboardData) return;
+
+    // Check for image files in clipboard first
+    const imageFiles = Array.from(clipboardData.files || []).filter(f => f.type.startsWith("image/"));
+    if (imageFiles.length > 0) {
+      e.preventDefault();
+      for (const file of imageFiles) {
+        try {
+          const base64 = await fileToBase64(file);
+          const filename = file.name === "image.png" ? `clipboard-${Date.now()}.png` : file.name;
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename, data: base64 }),
+          });
+          const result = await res.json();
+          if (result.path) {
+            pendingAttachments.push({ path: result.path, name: filename });
+            renderAttachmentChips(card, pendingAttachments);
+          }
+        } catch (err) {
+          console.error("Clipboard image upload failed:", err);
+        }
+      }
+      return;
+    }
+
+    // Collapse large text pastes into a chip (like Claude CLI's "N lines pasted")
     let text;
     try {
-      text = (e.clipboardData || window.clipboardData)?.getData("text/plain") || (e.clipboardData || window.clipboardData)?.getData("text");
+      text = clipboardData.getData("text/plain") || clipboardData.getData("text");
     } catch {}
-    if (!text) return; // let browser handle it normally
+    if (!text) return;
 
     const lines = text.split("\n");
     if (lines.length < 3) return; // short pastes stay inline
@@ -3400,6 +3429,37 @@ if (promptDropZone) {
           if (idx !== -1) modalPendingAttachments.splice(idx, 1);
           renderAttachmentChips({ querySelector: () => chipsContainer }, modalPendingAttachments);
         }
+      }
+    }
+  });
+}
+
+// --- Modal paste for images ---
+const agentPromptTextarea = document.getElementById("agent-prompt");
+if (agentPromptTextarea) {
+  agentPromptTextarea.addEventListener("paste", async (e) => {
+    const clipboardData = e.clipboardData || window.clipboardData;
+    if (!clipboardData) return;
+    const imageFiles = Array.from(clipboardData.files || []).filter(f => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+    e.preventDefault();
+    const chipsContainer = document.getElementById("modal-attachment-chips");
+    for (const file of imageFiles) {
+      try {
+        const base64 = await fileToBase64(file);
+        const filename = file.name === "image.png" ? `clipboard-${Date.now()}.png` : file.name;
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ filename, data: base64 }),
+        });
+        const result = await res.json();
+        if (result.path) {
+          modalPendingAttachments.push({ path: result.path, name: filename });
+          renderAttachmentChips({ querySelector: () => chipsContainer }, modalPendingAttachments);
+        }
+      } catch (err) {
+        console.error("Modal clipboard upload failed:", err);
       }
     }
   });
