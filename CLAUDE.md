@@ -108,13 +108,9 @@ Supporting files:
 - Live branch display: gray for regular repos, green for worktrees
 - Live workdir updates from `getEffectiveCwd()` (detects worktree paths from terminal output)
 
-**Bug Report** (header button, keyboard shortcut `B`):
-- Modal collects title, description, steps to reproduce, severity (low/medium/high/critical), optional screenshot
-- Auto-loads system info via `GET /api/system-info` (version, branch, Node, OS, active agents)
-- Creates GitHub issues via `POST /api/bug-report` using `execFile("gh", args)` (no shell — prevents injection)
-- Target repo configurable via `bugReportRepo` in `config.json` (defaults to `john-farina/claude-cli-dashboard`)
-- Success modal offers to spawn a fix agent with the bug context as its initial prompt
-- System info panel uses proper state screens (spinner/content/error+retry per UI guidelines)
+**Bug Report** (header button, keyboard shortcut `!`): File GitHub issues directly from the dashboard. Collects system info, severity, screenshots. Uses `gh` CLI with `execFile` (no shell injection).
+
+**Full details:** Read `dev-docs/bug-report.md`
 
 **Git/Worktree Detection**:
 - `getGitInfo()` — branch name + worktree status (`.git` is a file in worktrees, directory in main repos)
@@ -195,6 +191,12 @@ To push an update: just push to `main`. That's it. The update button appears aut
 
 **Optional: GitHub Releases** — If you create a GitHub Release (with a tag like `v0.3.0`), its release notes body will show in the hover tooltip alongside commit summaries. This is purely cosmetic — updates are triggered by commits, not releases.
 
+### Update Conflict Resolver
+
+When "Update" fails due to dirty workdir or merge conflicts, a modal lets the user spawn a Claude agent that auto-resolves conflicts while preserving local customizations. The agent gets the full `git diff` embedded in its prompt, saves a backup to memory, asks the user about ambiguous conflicts, and restarts the server after approval.
+
+**Full details:** Read `dev-docs/update-conflict-resolver.md`
+
 ## Contributing a PR
 
 When a user asks to create a PR (e.g. "make a PR for my changes", "submit this as a PR"), handle the entire workflow automatically. **Most users are contributors without push access** — `gh pr create` handles fork creation automatically.
@@ -252,278 +254,35 @@ All colors are CSS variables in `:root` at the top of `style.css`. Change there 
 
 ## Mobile Support
 
-The dashboard is fully usable on phones (primarily iOS Safari). Mobile has its own breakpoints, touch targets, and feature swaps. All mobile styles live in `@media (max-width: 600px)` in `style.css`. There's also a `@media (max-width: 900px)` for single-column grid.
+Fully usable on phones (iOS Safari). Styles in `@media (max-width: 600px)` and `@media (max-width: 900px)` in `style.css`. Includes fullscreen agent view, touch targets, cross-device input sync, and mobile button swaps.
 
-### Design Principles
-- **Touch targets**: All interactive elements must be at least 36×36px (44px preferred for primary actions like send, prompt buttons)
-- **No new windows**: `window.open()` doesn't work well on iOS. Features that use popout windows on desktop must have an in-page alternative on mobile.
-- **Font size ≥ 14px on inputs**: Prevents iOS Safari auto-zoom on focus. All `<textarea>` and `<input>` in mobile breakpoint use `font-size: 14px+`.
-- **`100dvh` over `100vh`**: Use dynamic viewport height (`dvh`) for fullscreen layouts — `100vh` includes the iOS URL bar height, `100dvh` adjusts as it hides/shows. Always include `100vh` as a fallback before `100dvh`.
-
-### Mobile-Specific Features
-
-**Fullscreen Agent View** (`.expand-btn` / `.agent-card.fullscreen`):
-- Replaces desktop's popout-to-new-window (which doesn't work on mobile)
-- `.expand-btn` is `display: none` by default, shown via `display: flex !important` in the mobile media query
-- Hidden on `.agent-card.minimized` (added to the minimized hide list alongside restart/popout/favorite)
-- Click toggles `.fullscreen` class on the card + swaps icon (⛶ `\u26F6` ↔ ✕ `\u2715`)
-- Fullscreen state: `position: fixed; inset: 0; z-index: 100; height: 100dvh`
-- `document.body.style.overflow = "hidden"` prevents background scroll while fullscreen
-- Terminal gets `min-height: 0; flex: 1 1 0` in fullscreen so it fills all available space (without this, `min-height: 100px` from base styles constrains it)
-- Escape key exits fullscreen (handled first in the global Escape chain, before modals)
-- `scheduleMasonry()` called on exit to re-layout the grid
-
-**Button Visibility Swaps** (mobile media query):
-- Hidden on mobile: `.popout-btn`, `.restart-btn` (`display: none !important`)
-- Shown on mobile: `.expand-btn` (`display: flex !important`)
-- All non-minimized card action buttons get `min-width: 36px; min-height: 36px` for touch
-
-**Header Layout**:
-- Wraps to two rows (`flex-wrap: wrap`)
-- `position: static` instead of sticky (saves screen space)
-- Secondary buttons flex to fill width, primary button full-width below
-
-**Card Defaults**:
-- Height: `350px` (vs 500px desktop)
-- `card-sticky-top` becomes `position: static` (no sticky header inside small cards)
-- Terminal font: `11px`, `pre-wrap` for long lines
-
-### Cross-Device Input Sync
-- When a user types on one device, `input-sync` WebSocket messages update the textarea on all other connected clients
-- On receiving `input-sync` with non-empty text, `scrollTerminalToBottom()` is called so the terminal scrolls down to keep the input area visible (important for mobile where the card is short)
-- Desktop textarea auto-grows so this is less of an issue there, but mobile benefits from the scroll
-
-### Adding Mobile-Aware Features
-1. **New buttons**: If a button shouldn't appear on mobile, add it to the `display: none !important` list in the mobile media query. If it replaces a desktop button, add `display: flex !important` for mobile.
-2. **New card states** (like `.fullscreen`): Must handle `position: fixed` + `z-index` correctly, lock body scroll, and have an exit path (both button and Escape key).
-3. **New interactive elements**: Ensure `min-height: 44px` touch targets in the mobile media query.
-4. **Modals**: Must be scrollable on small screens (`max-height: 80vh; overflow-y: auto`). Input font size ≥ 16px to prevent iOS zoom.
+**Full details:** Read `dev-docs/mobile-support.md`
 
 ## Native macOS App (`native-app/`)
 
-The dashboard has a native macOS desktop app — a compiled Swift binary with a WKWebView that loads `localhost:9145`. It shows as its own app in the Dock with a custom icon (gold Claude star on dark gradient background).
+Compiled Swift binary with WKWebView loading `localhost:9145`. Custom Dock icon, in-app browser overlay for external URLs, CLI browser interception, server auto-start, and reload via DistributedNotification.
 
-### Files
+Key files: `main.swift`, `build.sh`, `generate-icon.py`, `open-url.sh`
 
-| File | Purpose |
-|------|---------|
-| `native-app/main.swift` | Swift app — WKWebView, in-app browser overlay, server auto-start, reload via DistributedNotification |
-| `native-app/build.sh` | Compiles Swift, generates `.icns` icon, codesigns, installs to `~/Applications/CEO Dashboard.app` |
-| `native-app/generate-icon.py` | Pure-Python PNG renderer — gold Claude star with gradient bg, drop shadow, rounded corners |
-| `native-app/entitlements.plist` | Code signing entitlements (network client) |
-| `open-url.sh` | Helper script for `BROWSER` env var — POSTs URLs to server for in-app overlay |
-
-### How It Works
-
-- `ceo.sh` (aliased to `ceo`) restarts the server, then either:
-  - **Refreshes** the existing app window if it's already running (sends `com.ceo-dashboard.reload` distributed notification → WebView reloads, window comes to front)
-  - **Opens** the app fresh if it's not running
-- The app auto-starts the Node server if it detects port 9145 is not listening
-- Settings panel has an "Add to Dock" button that runs `build.sh` via `POST /api/settings/add-to-dock`
-
-### Icon
-
-Generated by `generate-icon.py` (no external dependencies — pure Python with `struct`/`zlib`):
-- 1024×1024 PNG → converted to `.icns` via `sips` + `iconutil`
-- Gold accent color (`#C9A84C`) Claude star with vertical gradient (lighter top → deeper bottom)
-- Dark background matching dashboard (`#161616` center → `#040404` edges, radial gradient)
-- Subtle drop shadow behind the star, macOS-style rounded corners
-- Padding is controlled by the `padding` variable in `main()` (currently `0.22`)
-
-### Rebuilding
-
-```bash
-# Quit app, rebuild, flush icon cache, relaunch
-osascript -e 'tell application "CEO Dashboard" to quit' 2>/dev/null
-bash ./native-app/build.sh
-killall Dock  # flush icon cache
-open ~/Applications/CEO\ Dashboard.app
-```
-
-### Key Details
-- Bundle ID: `com.ceo-dashboard.app`
-- Installed to: `~/Applications/CEO Dashboard.app`
-- Favicon (`public/favicon.svg`): Plain Claude star (orange `#d97757`, no background) — separate from the app icon
-
-### In-App Browser Overlay
-
-External URLs (GitHub PRs, Graphite links, etc.) open in a native overlay instead of the system browser. Defined in `main.swift`.
-
-**How it works:**
-- `WKUIDelegate.createWebViewWith` routes URLs: external → overlay, localhost → popout window
-- Dark semi-transparent backdrop with inset rounded container (nav bar + WKWebView)
-- Nav bar: back/forward buttons, URL label, globe (Open in Safari), close (X)
-- Uses `WKWebsiteDataStore.default()` for persistent cookies across sessions
-- Safari user agent so websites treat it as a real browser
-- Escape key closes overlay (capture-phase JS `keydown` handler injected via `WKUserScript`)
-- Keyboard focus managed: `makeFirstResponder(bWebView)` on open, `makeFirstResponder(webView)` on close
-
-**CLI browser interception:**
-- `BROWSER` env var set to `./open-url.sh` in `server.js` (both `process.env` and `tmux set-environment -g`)
-- When CLI tools (e.g., `gt submit`, `gh auth`) open a URL, the script POSTs to `POST /api/open-url`
-- Server broadcasts via WebSocket → `window.open(url, "_blank")` → native overlay intercepts it
-- Works for both the embedded shell terminal and agent tmux sessions
-
-**Passkeys / WebAuthn — NOT SUPPORTED:**
-- `com.apple.developer.web-browser` is a **restricted entitlement** that Apple only grants to approved browser apps
-- Even with the entitlement embedded in the binary, macOS ignores it without a provisioning profile authorizing it
-- Xcode's automatic signing also rejects it: `"Mac Team Provisioning Profile: *" doesn't include the com.apple.developer.web-browser entitlement`
-- Diagnostic confirmed: `PublicKeyCredential: true` but `PlatformAuth: false` — API exists but platform authenticator blocked
-- **Workaround**: Globe icon in overlay bar opens current page in Safari for passkey-required auth
-- Do NOT attempt to fix this with different signing approaches — it's an Apple platform restriction
-
-### Agent Terminal Input
-
-Arrow keys and Enter in agent terminal cards send commands to tmux (not scroll):
-- `keydown` handler maps `ArrowUp`→`Up`, `ArrowDown`→`Down`, `ArrowLeft`→`Left`, `ArrowRight`→`Right`, `Enter`→`Enter`
-- Calls `sendKeypress(name, keyMap[e.key])` with `e.preventDefault()`
-- Enables navigating Claude's interactive prompts (MCP selections, AskUserQuestion options)
-
-### Card Order Persistence
-
-Card layout order persists across reloads via `localStorage` key `"ceo-card-order"`:
-- `saveCardOrder()` called after drag-drop, card deletion, and `reorderCards()`
-- `loadCardOrder()` returns saved array of agent names
-- `reorderCards()` prioritizes: saved order → favorites → DOM order for new cards
+**Full details:** Read `dev-docs/native-app.md`
 
 ## Embedded Shell Terminal
 
-The footer shell panel is a full PTY-backed terminal (not just an agent viewer). It uses `node-pty` on the server and `xterm.js` on the client with a binary WebSocket protocol.
+Full PTY-backed terminal in the footer panel using `node-pty` + `xterm.js` with binary WebSocket protocol. Features custom Tab autocomplete, click-to-position cursor, selection-based editing, `claude` command interception (opens new agent modal), and URL interception.
 
-### Architecture
-- **Server**: `node-pty` spawns a login shell (`zsh`). PTY data flows as raw binary WebSocket frames (no JSON) for zero-overhead streaming. Adaptive batching uses an array of chunks (not string concatenation) — sends first chunk immediately (keystroke echo) and coalesces during bursts (4ms window).
-- **Client**: `xterm.js v5.5.0` with WebGL addon. Binary frames arrive as `ArrayBuffer`, written directly to xterm as `Uint8Array` (bypasses JS string decode). All other messages (agent output, shell-info, etc.) remain JSON text frames.
-- **Shell input**: Client sends keystrokes as binary frames (`0x01` prefix + UTF-8 payload) — server detects `Buffer`/`ArrayBuffer` and writes directly to PTY, skipping JSON.parse entirely. JSON `shell-stdin` kept as fallback.
-- **Scrollback**: Chunked array on server (50KB limit, compacts at 1.2x). Replayed as 32KB binary chunks on client connect.
-- **Git info**: All git lookups are async (`getGitInfoAsync`) with a 5s cache — never blocks the event loop.
-- **CWD/Branch detection**: OSC 7 escape sequences emitted by an injected `precmd` hook. Git info fetched async with 150ms debounce. PR URL looked up via `gh pr view` and converted to Graphite URL.
-
-### Custom Autocomplete Dropdown
-Tab does NOT send `\t` to the shell. Instead it triggers a custom autocomplete system:
-1. Client reads the current word from the xterm buffer
-2. `POST /api/shell/completions` with `{ word, cwd, dirsOnly }` — server does `fs.readdir` + prefix filter
-3. Single match → auto-inserts remaining text. Multiple → inserts common prefix, shows styled dropdown.
-4. **Arrow keys** navigate the dropdown, **Tab** or **Enter** accepts, **Escape** dismisses.
-5. Any other keypress dismisses the dropdown and passes through to the terminal.
-6. `cd`/`pushd` commands filter to directories only.
-7. Filenames with spaces/special chars are escaped for the shell.
-
-### Click-to-Position Cursor
-Clicking on the current command line translates the click position into arrow key sequences (`\x1b[C` / `\x1b[D`) sent to the PTY. Multi-row wrapped commands are handled via xterm's `isWrapped` property. Only activates on single clicks (not drags) when the terminal is scrolled to the bottom.
-
-### Selection-Based Editing
-- **Select + Backspace/Delete**: Moves cursor to selection start, sends Delete × selection length
-- **Select + type**: Same as above, plus types the replacement character
-- **Select + paste**: Handled in `onData` — prefixes pasted text with move+delete sequence
-- Uses `getSelectionPosition()` (requires `allowProposedApi: true` in xterm config)
-- Only handles single-row selections on the cursor's row
-
-### `claude` Command Interception
-When the user types `claude` or `claude <prompt>` + Enter in the shell, it does NOT launch Claude. Instead:
-1. Clears the line (`Ctrl+U` + Enter for fresh prompt)
-2. Opens the new agent modal
-3. Pre-fills the prompt if one was given (e.g., `claude fix the bug` → modal opens with "fix the bug")
-
-### URL Interception
-When a shell command (e.g., `gt submit`) calls `open <url>`, the URL opens in the dashboard's popup system instead of launching the system browser directly:
-1. A shell function override for `open` is injected into the PTY on startup
-2. HTTP/HTTPS URLs are POSTed to `POST /api/shell/open-url`
-3. The server broadcasts `{ type: "shell-open-url", url }` to all WS clients
-4. The client calls `window.open(url, "_blank")`
-5. Non-URL arguments (e.g., `open .`) fall through to the real `command open`
-
-### Shell Header Pills
-- **CWD pill** (📂): Click opens Finder to that folder (`POST /api/shell/open-finder`)
-- **Branch pill** (⎇): Click copies branch name to clipboard
-- **PR link**: "View PR" link appears when `gh pr view` finds a PR (auto-converted to Graphite URL)
-
-### WebSocket Protocol
-- **Binary frames (server→client)** = shell PTY data (hot path, zero JSON overhead)
-- **Binary frames (client→server)** = shell stdin (`0x01` prefix + UTF-8 payload, skips JSON.parse)
-- **Text frames** = JSON for everything else (agent output, shell-info, etc.)
-- Client: `ws.binaryType = "arraybuffer"`, checks `event.data instanceof ArrayBuffer`
-- Backpressure: server skips send if `client.bufferedAmount > 1MB`
-- `popout.js` ignores binary frames (popout windows don't have a shell)
-
-### Performance Notes
-- **Key handler fast path**: When no autocomplete dropdown and no text selection, only checks Tab/Escape (skips all other conditionals). Selection state is cached via `onSelectionChange` callback.
-- **Autocomplete DOM caching**: Item elements cached in `_acDomItems` array on show — avoids `querySelectorAll` on every arrow key navigation.
-- **TextEncoder reuse**: Single `_shellEncoder` instance shared across all `_sendShellStdin` calls.
-- **tmux timeout**: 3s (not 10s) to prevent long server freezes if tmux hangs.
-
-### Key API Endpoints (Shell)
-| Method | Path | Purpose |
-|--------|------|---------|
-| `POST` | `/api/shell/completions` | File/dir completions for autocomplete |
-| `POST` | `/api/shell/open-finder` | Open a folder in Finder |
-| `POST` | `/api/shell/open-url` | Route a URL through the dashboard (broadcasts to WS clients) |
+**Full details:** Read `dev-docs/embedded-shell.md`
 
 ## UI/UX Guidelines for New Modals & Components
 
-### CSS Specificity Rules
+Covers CSS specificity rules (`.hidden` pattern), modal standards, button patterns, state screens (loading/empty/error), existing utilities (`shortPath`, `escapeHtml`), and third-party library dark theme overrides.
 
-**The `.hidden` pattern**: This codebase uses `.hidden { display: none }` to toggle visibility. If you define a base `display` on a class (e.g., `.my-state { display: flex }`), it has the same specificity as `.hidden` and whichever comes last in the file wins. **Always add a compound rule**: `.my-element.hidden { display: none; }` immediately after the base rule.
+**Full details:** Read `dev-docs/ui-ux-guidelines.md`
 
-**No `!important` on component styles.** Use parent-scoped selectors for specificity (e.g., `.diff-modal .d2h-file-collapse { display: none }` not `display: none !important`). The only acceptable `!important` uses are mobile media query visibility swaps.
+## Debugging Hard-to-Reproduce Issues
 
-### Modal Standards
+Playbook for visual glitches, focus loss, scroll jumps, and intermittent UI bugs. Covers diagnostic logging, server log locations (`/tmp/ceo-dashboard.log`), event chain tracing, common root causes table, and a worked example of three related scroll/focus bugs.
 
-All modals use `.modal` base class:
-- **Container**: `background: var(--modal-bg); border: 1px solid var(--border); border-radius: 16px; padding: 28px;` (mobile: `20px`)
-- **Title**: `font-size: 17px; font-weight: 700; letter-spacing: -0.3px;`
-- **Overlay**: `.modal-overlay` with `background: var(--modal-backdrop); backdrop-filter: blur(6px); z-index: 100`
-
-For full-width modals that set `padding: 0`, headers should use `padding: 18px 24px` (mobile: `12px 16px`).
-
-**Always include context in modal headers** — agent name (`color: var(--accent); font-weight: 600`) and workspace path (use `shortPath()`, never hardcode home dir replacement).
-
-### Use Existing Utilities
-
-- `shortPath(p)` — replaces homedir with `~` cross-platform. Never use `path.replace(/^\/Users\/[^/]+/, "~")`.
-- `escapeHtml(s)` / `escapeAttr(s)` — for user-provided text.
-- Search `app.js` for existing utilities before writing helpers.
-
-### Button Patterns
-
-| Type | Class / Pattern |
-|------|----------------|
-| Primary action | `.btn-primary` — gold bg, white text, `padding: 8px 18px; border-radius: 8px` |
-| Secondary action | `.btn-secondary` — transparent, dim text, accent border on hover |
-| Icon button (close/refresh) | Purpose-built class: `background: none; border: 1px solid transparent; color: var(--text-dim); width: 32px; height: 32px; border-radius: 8px`. Close hover: `color: var(--red); background: rgba(248,113,113,0.08)` |
-| Segmented toggle | Container: `background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; overflow: hidden`. Tabs: `padding: 5px 12px; font-size: 12px`. Active: `background: var(--surface-raised); font-weight: 600` |
-
-**Never reuse semantic classes** (like `.kill-btn`) for unrelated purposes. Never use a single text-swapping button for binary toggles — use a segmented control.
-
-### State Screens (Loading / Empty / Error)
-
-Every async panel needs three states. Layout: `display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px–64px 24px; gap: 8px; text-align: center`
-
-Each state needs:
-1. **Icon**: Themed circle (`width: 48px; height: 48px; border-radius: 50%`) — green for success/empty, red for error, spinner for loading
-2. **Title**: `font-size: 14px; color: var(--text); font-weight: 500`
-3. **Sub-text** (optional): `font-size: 12px; color: var(--text-dim)`
-4. **Error state must include a retry button** (`.btn-secondary`)
-5. **Loading spinner**: CSS border-spinner (`border: 2.5px solid var(--border); border-top-color: var(--accent); animation: spin 0.7s linear infinite`). Never use CSS `content` text animation for dots — it looks janky.
-
-Use a `_setState(state)` function that clears all states then shows the requested one. Always add `.my-state.hidden { display: none; }` rules.
-
-### Third-Party Library Integration
-
-**CDN imports**: Verify the bundle exports the API you actually call. Example: `diff2html.min.js` exports `Diff2Html.html()`, but `diff2html-ui.min.js` exports `Diff2HtmlUI` — a different class. Match import to usage.
-
-**Dark theme overrides**: Third-party libs ship light CSS. Override ALL visible surfaces, scoped under your modal class:
-- Backgrounds: code areas → `var(--terminal-bg)`, headers → `var(--surface)`, wrappers → `transparent`
-- Text: `var(--text)` / `var(--text-dim)`
-- Borders: `var(--border)`
-- Font: `"SF Mono", "Fira Code", "Consolas", monospace; font-size: 12px`
-
-**diff2html-specific** (if reused):
-- Hide "Viewed" checkbox: `.d2h-file-collapse, .d2h-file-switch { display: none }`
-- Hide file list title: `.d2h-file-list-title { display: none }`
-- `@@` hunk rows: override blue tint → `background: var(--surface); color: var(--text-dim)`
-- Ins/del inner lines: set `.d2h-ins .d2h-code-line { background: transparent }` so parent row color shows through (inner div is narrower than td, creating a visible color gap otherwise)
-- Remove `text-decoration` on ins/del content: use background highlighting (`rgba(..., 0.25)`) instead
-- Tags: `background: rgba(201,168,76,0.12); color: var(--accent)`
+**Full details:** Read `dev-docs/debugging-guide.md`
 
 ## Key Technical Notes
 

@@ -21,8 +21,6 @@ Save ALL docs/reports/analyses to:
 - Follow the project's CLAUDE.md and coding standards — doc paths above override those.
 - Notify only on completion, errors, or when blocked — not on routine progress.
 
-<!-- NOTE TO EDITORS: The first line "# CEO Dashboard Agent" is used by the dashboard
-     to detect and filter this prompt from the terminal display. The server also appends
-     a [END_CEO_PROMPT] marker after the prompt to mark where filtering ends.
-     Do NOT remove the "# CEO Dashboard Agent" heading — the prompt will leak into
-     the agent's terminal output if you do. -->
+<!-- NOTE TO EDITORS: The "# CEO Dashboard Agent" heading is the start marker for
+     terminal output filtering. The server appends an end marker after the full prompt.
+     Do NOT remove that heading — the prompt will leak into the agent's terminal if you do. -->

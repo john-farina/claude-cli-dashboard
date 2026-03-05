@@ -13,6 +13,22 @@ let _popoutTitle = "CEO Dashboard";
 document.title = `${agentName} — ${_popoutTitle}`;
 document.getElementById("agent-name").textContent = agentName;
 
+// Detect native macOS app — enable translucent blur backgrounds
+if (window.webkit?.messageHandlers?.ceoBridge) {
+  document.body.classList.add("native-blur");
+
+  // Drag popout window by its header (native app only)
+  const header = document.querySelector(".popout-header");
+  header.style.cursor = "grab";
+  header.addEventListener("mousedown", (e) => {
+    // Don't drag when clicking buttons or interactive elements
+    if (e.target.closest("button, .status-badge, .branch-info, a, input, textarea")) return;
+    header.style.cursor = "grabbing";
+    window.webkit.messageHandlers.ceoBridge.postMessage({ action: "startWindowDrag" });
+  });
+  header.addEventListener("mouseup", () => { header.style.cursor = "grab"; });
+}
+
 const terminal = document.getElementById("terminal");
 const statusBadge = document.getElementById("status-badge");
 const promptActions = document.getElementById("prompt-actions");
@@ -165,25 +181,47 @@ function linkifyTerminal(html) {
 
 function updateTerminal(lines) {
   const content = lines.join("\n");
-  if (terminal._lastContent === content) return;
+  if (terminal._lastContent === content) {
+    // Still keep at bottom if no user scroll-up
+    if (!terminal._userScrolledUp) terminal.scrollTop = terminal.scrollHeight;
+    return;
+  }
 
   const sel = window.getSelection();
   if (sel && sel.rangeCount > 0 && !sel.isCollapsed && terminal.contains(sel.anchorNode)) return;
 
   const forceScroll = terminal._forceScrollUntil && Date.now() < terminal._forceScrollUntil;
-  const wasScrolledToBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 30;
+  const shouldScroll = forceScroll || !terminal._userScrolledUp;
 
   terminal._lastContent = content;
   const html = linkifyTerminal(ansiUp.ansi_to_html(content));
+  terminal._updatingContent = true;
   terminal.innerHTML = `<pre>${html}</pre>`;
 
-  if (forceScroll || wasScrolledToBottom) {
-    requestAnimationFrame(() => { terminal.scrollTop = terminal.scrollHeight; });
+  if (shouldScroll) {
+    terminal.scrollTop = terminal.scrollHeight;
   }
+  requestAnimationFrame(() => {
+    terminal._updatingContent = false;
+    if (shouldScroll) terminal.scrollTop = terminal.scrollHeight;
+  });
 }
 
 // Force scroll on initial load
 terminal._forceScrollUntil = Date.now() + 5000;
+
+// Track user scroll-up intent
+terminal.addEventListener("wheel", (e) => {
+  if (e.deltaY < 0) {
+    terminal._userScrolledUp = true;
+    terminal._forceScrollUntil = 0;
+  }
+}, { passive: true });
+terminal.addEventListener("scroll", () => {
+  if (terminal._updatingContent) return;
+  const atBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 30;
+  if (atBottom) terminal._userScrolledUp = false;
+}, { passive: true });
 
 // --- Status + prompt actions ---
 function escapeHtml(str) {
@@ -477,6 +515,58 @@ function setupAutocomplete() {
 }
 setupAutocomplete();
 
+// --- Image helpers ---
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadImageFile(file) {
+  const base64 = await fileToBase64(file);
+  const res = await fetch("/api/upload", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: file.name, data: base64 }),
+  });
+  const data = await res.json();
+  return data.path;
+}
+
+// --- Image paste ---
+input.addEventListener("paste", async (e) => {
+  const items = e.clipboardData?.items;
+  if (items) {
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        try {
+          const filename = `paste-${Date.now()}.${item.type.split("/")[1] || "png"}`;
+          const base64 = await fileToBase64(file);
+          const res = await fetch("/api/upload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ filename, data: base64 }),
+          });
+          const result = await res.json();
+          if (result.path) {
+            pendingAttachments.push({ name: filename, path: result.path });
+            addAttachmentChip(filename, result.path);
+          }
+        } catch (err) {
+          console.error("Paste image upload failed:", err);
+        }
+        return;
+      }
+    }
+  }
+});
+
 // --- Image drag-and-drop ---
 function addAttachmentChip(name, path) {
   const chip = document.createElement("span");
@@ -491,11 +581,7 @@ function addAttachmentChip(name, path) {
 }
 
 async function uploadFile(file) {
-  const formData = new FormData();
-  formData.append("file", file);
-  const res = await fetch("/api/upload", { method: "POST", body: formData });
-  const data = await res.json();
-  return data.path;
+  return uploadImageFile(file);
 }
 
 const handleDragOver = (e) => { e.preventDefault(); e.stopPropagation(); };
