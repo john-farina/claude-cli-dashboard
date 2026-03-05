@@ -230,7 +230,10 @@
   <!-- Bug Report Modal -->
   <div id="bug-report-overlay" class="modal-overlay hidden">
     <div class="modal bug-report-modal">
-      <h2>Report a Bug</h2>
+      <div class="bug-report-header">
+        <h2>Report a Bug</h2>
+        <span id="bug-target-repo" class="bug-target-repo"></span>
+      </div>
       <form id="bug-report-form">
         <label>
           Title
@@ -244,15 +247,15 @@
           Steps to Reproduce <span class="optional">(optional)</span>
           <textarea id="bug-steps" rows="3" placeholder="1. Go to...&#10;2. Click on...&#10;3. See error"></textarea>
         </label>
-        <div class="bug-severity-picker">
-          <span class="label-text">Severity</span>
+        <label>
+          Severity
           <div class="bug-severity-options">
             <button type="button" class="severity-pill" data-severity="low">Low</button>
             <button type="button" class="severity-pill active" data-severity="medium">Medium</button>
             <button type="button" class="severity-pill" data-severity="high">High</button>
             <button type="button" class="severity-pill" data-severity="critical">Critical</button>
           </div>
-        </div>
+        </label>
         <label>
           Screenshot <span class="optional">(optional)</span>
           <div id="bug-screenshot-zone" class="bug-screenshot-zone">
@@ -262,14 +265,24 @@
             </div>
             <div id="bug-screenshot-preview" class="bug-screenshot-preview hidden">
               <img id="bug-screenshot-img" alt="Screenshot preview">
-              <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove">&times;</button>
+              <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove-btn">&times;</button>
             </div>
           </div>
         </label>
-        <div id="bug-system-info" class="bug-system-info">
-          <span class="label-text">System Info</span>
-          <div id="bug-system-info-content" class="bug-system-info-content">Loading...</div>
-        </div>
+        <label>
+          System Info
+          <div id="bug-system-info" class="bug-system-info">
+            <div id="bug-sysinfo-loading" class="bug-sysinfo-state">
+              <div class="bug-sysinfo-spinner"></div>
+              <span>Loading system info&hellip;</span>
+            </div>
+            <div id="bug-sysinfo-content" class="bug-system-info-content hidden"></div>
+            <div id="bug-sysinfo-error" class="bug-sysinfo-state hidden">
+              <span>Could not load system info</span>
+              <button type="button" id="bug-sysinfo-retry" class="btn-secondary">Retry</button>
+            </div>
+          </div>
+        </label>
         <div class="modal-actions">
           <button type="button" id="bug-cancel" class="btn-secondary">Cancel</button>
           <button type="submit" id="bug-submit" class="btn-primary">Submit Bug Report</button>

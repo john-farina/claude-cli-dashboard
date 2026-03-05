@@ -3756,7 +3756,11 @@ document.addEventListener("keydown", (e) => {
   const bugSteps = document.getElementById("bug-steps");
   const bugSubmit = document.getElementById("bug-submit");
   const bugCancel = document.getElementById("bug-cancel");
-  const bugSystemInfoContent = document.getElementById("bug-system-info-content");
+  const bugTargetRepo = document.getElementById("bug-target-repo");
+  const bugSysinfoLoading = document.getElementById("bug-sysinfo-loading");
+  const bugSysinfoContent = document.getElementById("bug-sysinfo-content");
+  const bugSysinfoError = document.getElementById("bug-sysinfo-error");
+  const bugSysinfoRetry = document.getElementById("bug-sysinfo-retry");
   const bugScreenshotZone = document.getElementById("bug-screenshot-zone");
   const bugScreenshotInput = document.getElementById("bug-screenshot-input");
   const bugScreenshotPlaceholder = document.getElementById("bug-screenshot-placeholder");
@@ -3775,8 +3779,15 @@ document.addEventListener("keydown", (e) => {
   let _lastBugTitle = "";
   let _lastBugDesc = "";
 
+  function setSysinfoState(state) {
+    bugSysinfoLoading.classList.toggle("hidden", state !== "loading");
+    bugSysinfoContent.classList.toggle("hidden", state !== "content");
+    bugSysinfoError.classList.toggle("hidden", state !== "error");
+  }
+
   function openBugReportModal() {
     bugOverlay.classList.remove("hidden");
+    bugTargetRepo.textContent = _bugReportRepo;
     bugTitle.focus();
     fetchSystemInfo();
   }
@@ -3791,28 +3802,36 @@ document.addEventListener("keydown", (e) => {
     bugScreenshotPreview.classList.add("hidden");
     bugScreenshotPlaceholder.style.display = "";
     bugSystemInfo = null;
-    bugSystemInfoContent.textContent = "Loading...";
+    setSysinfoState("loading");
     // Reset severity pills
     bugOverlay.querySelectorAll(".severity-pill").forEach(p => {
       p.classList.toggle("active", p.dataset.severity === "medium");
     });
   }
 
+  let _bugReportRepo = "john-farina/claude-cli-dashboard";
+
   async function fetchSystemInfo() {
+    setSysinfoState("loading");
     try {
       const res = await fetch("/api/system-info");
       bugSystemInfo = await res.json();
       bugSystemInfo.browser = navigator.userAgent.replace(/^Mozilla\/5\.0 /, "");
-      bugSystemInfoContent.textContent =
+      if (bugSystemInfo.bugReportRepo) _bugReportRepo = bugSystemInfo.bugReportRepo;
+      bugTargetRepo.textContent = _bugReportRepo;
+      bugSysinfoContent.textContent =
         `Dashboard: ${bugSystemInfo.dashboardVersion} (${bugSystemInfo.dashboardBranch})\n` +
         `Node: ${bugSystemInfo.nodeVersion}\n` +
         `OS: ${bugSystemInfo.platform} ${bugSystemInfo.osVersion}\n` +
         `Agents: ${bugSystemInfo.activeAgents}\n` +
         `Browser: ${bugSystemInfo.browser}`;
+      setSysinfoState("content");
     } catch {
-      bugSystemInfoContent.textContent = "Could not load system info";
+      setSysinfoState("error");
     }
   }
+
+  bugSysinfoRetry.addEventListener("click", fetchSystemInfo);
 
   // Open modal
   bugReportBtn.addEventListener("click", openBugReportModal);

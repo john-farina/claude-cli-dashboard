@@ -2943,6 +2943,7 @@ app.get("/api/system-info", (req, res) => {
   info.platform = `${process.platform} ${process.arch}`;
   try { info.osVersion = execSync("sw_vers -productVersion 2>/dev/null || uname -r", { encoding: "utf8", timeout: 3000 }).trim(); } catch { info.osVersion = "unknown"; }
   info.activeAgents = listTmuxSessions().filter(s => s.startsWith(PREFIX)).length;
+  info.bugReportRepo = userConfig.bugReportRepo || "john-farina/claude-cli-dashboard";
   res.json(info);
 });
 
