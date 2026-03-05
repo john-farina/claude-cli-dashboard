@@ -6,7 +6,34 @@
   <title>Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="stylesheet" href="style.css">
+  <!-- Critical inline CSS — prevents flash of unstyled content if style.css fails to load -->
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    :root{--bg:#121212;--bg-gradient:linear-gradient(135deg,#121212 0%,#1a1816 50%,#141210 100%);--surface:#1e1e1e;--text:#ede8e0;--text-dim:#7a7568;--accent:#c9a84c;--terminal-bg:#0e0e0d}
+    body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);background-image:var(--bg-gradient);background-attachment:fixed;color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
+    .page-loader{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;background:var(--bg);background-image:var(--bg-gradient)}
+    .hidden{display:none!important}
+  </style>
+  <link rel="stylesheet" href="style.css" id="main-css">
+  <script>
+    // Retry loading style.css if it fails (e.g. server restart timing)
+    document.getElementById('main-css').onerror = function() {
+      var retry = document.createElement('link');
+      retry.rel = 'stylesheet';
+      retry.href = 'style.css?retry=' + Date.now();
+      retry.id = 'main-css-retry';
+      document.head.appendChild(retry);
+      // Second retry after 2s if still failing
+      retry.onerror = function() {
+        setTimeout(function() {
+          var r2 = document.createElement('link');
+          r2.rel = 'stylesheet';
+          r2.href = 'style.css?retry2=' + Date.now();
+          document.head.appendChild(r2);
+        }, 2000);
+      };
+    };
+  </script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.css" integrity="sha384-7kLxZXax7DhezxjpSqH13QX4VIrQqiJNQfdb16B+7+GB2sFHVDbb9ZlKP+Gk1m90" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" integrity="sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/css/diff2html.min.css" integrity="sha384-iBvSlI3tNrrSIy7s6mvLg+5B2Z/QXbR4L0Pzg1nRf8zkXrz5JF316MLm2igMIpi2" crossorigin="anonymous">
@@ -62,13 +89,15 @@
         <button id="update-btn" class="btn-update" tabindex="0">Update Available</button>
         <div id="update-tooltip" class="update-tooltip"></div>
       </span>
-      <button id="settings-btn" class="settings-icon-btn" tabindex="0" title="Settings (S)"><span class="gear-icon">&#x2699;</span><kbd>S</kbd></button>
-      <button id="restart-server-btn" class="btn-secondary" tabindex="0">&#x21bb; Refresh <kbd>R</kbd></button>
-      <button id="ceo-md-btn" class="btn-secondary" tabindex="0">CEO.md <kbd>C</kbd></button>
-      <!-- merge conflict test: this comment will conflict with local dock-bar changes -->
-      <button id="files-btn" class="btn-secondary" tabindex="0">Docs <kbd>F</kbd></button>
-      <button id="todo-btn" class="btn-secondary" tabindex="0">&#x2611; Notes <kbd>D</kbd></button>
-      <button id="bug-report-btn" class="btn-secondary" tabindex="0">&#x1F41B; Bug Report <kbd>B</kbd></button>
+      <nav id="dock-bar" class="dock-bar">
+        <button id="bug-report-btn" class="dock-item" tabindex="0" title="Bug Report (!)"><svg class="dock-icon dock-icon-lg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9.5" r="4"/><path d="M6 6.5C6 5.4 6.9 4.5 8 4.5s2 .9 2 2"/><path d="M4 8H1.5M12 8h2.5M4.5 12l-2 1.5M11.5 12l2 1.5M4.5 7l-2-1.5M11.5 7l2-1.5"/></svg><span class="dock-label">Bug</span><kbd>!</kbd></button>
+        <button id="restart-server-btn" class="dock-item" tabindex="0" title="Refresh (R)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4"/><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.5 1.5v3h3"/><path d="M4.5 14.5v-3h-3"/></svg><span class="dock-label">Refresh</span><kbd>R</kbd></button>
+        <button id="settings-btn" class="dock-item" tabindex="0" title="Settings (S)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M2.7 2.7l1.1 1.1M12.2 12.2l1.1 1.1M13.3 2.7l-1.1 1.1M3.8 12.2l-1.1 1.1"/></svg><span class="dock-label">Settings</span><kbd>S</kbd></button>
+        <button id="ceo-md-btn" class="dock-item" tabindex="0" title="CEO.md (C)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 1.5H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V5z"/><path d="M9.5 1.5V5h3.5"/><path d="M5.5 8.5h5M5.5 11h3"/></svg><span class="dock-label">CEO.md</span><kbd>C</kbd></button>
+        <button id="files-btn" class="dock-item" tabindex="0" title="Docs (F)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 13.5H2a1 1 0 0 1-1-1v-8h5l2 2h5a1 1 0 0 1 1 1v5a1 1 0 0 1-1 1z"/><path d="M1 4.5v-2a1 1 0 0 1 1-1h4l2 2"/></svg><span class="dock-label">Docs</span><kbd>F</kbd></button>
+        <button id="bookmarks-btn" class="dock-item" tabindex="0" title="Bookmarks (B)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v12l-5-3-5 3z"/></svg><span class="dock-label">Bookmarks</span><kbd>B</kbd></button>
+        <button id="todo-btn" class="dock-item" tabindex="0" title="Notes (D)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="1.5" width="12" height="13" rx="1"/><path d="M5 5.5h6M5 8.5h6M5 11.5h3"/></svg><span class="dock-label">Notes</span><kbd>D</kbd></button>
+      </nav>
       <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
     </div>
   </header>
@@ -179,10 +208,19 @@
     <div class="modal update-error-modal">
       <h2 id="update-error-title">Update Issue</h2>
       <p id="update-error-desc" class="update-error-desc"></p>
+      <button id="update-error-agent-btn" class="update-error-agent-btn hidden">Launch Resolver Agent</button>
+      <p id="update-error-agent-desc" class="update-error-agent-desc hidden">Spawns a Claude agent to auto-resolve</p>
       <ul id="update-error-files" class="conflict-files hidden"></ul>
+      <details id="update-error-manual" class="update-error-manual hidden">
+        <summary>Or fix manually</summary>
+        <div class="conflict-prompt-wrap">
+          <pre id="update-error-prompt" class="conflict-prompt"></pre>
+          <button id="update-error-copy" class="btn-secondary conflict-copy-btn">Copy</button>
+        </div>
+      </details>
       <div id="update-error-prompt-wrap" class="conflict-prompt-wrap hidden">
-        <pre id="update-error-prompt" class="conflict-prompt"></pre>
-        <button id="update-error-copy" class="btn-secondary conflict-copy-btn">Copy</button>
+        <pre id="update-error-prompt-legacy" class="conflict-prompt"></pre>
+        <button id="update-error-copy-legacy" class="btn-secondary conflict-copy-btn">Copy</button>
       </div>
       <div class="modal-actions">
         <button id="update-error-retry" class="btn-secondary hidden">Retry Update</button>
@@ -502,6 +540,29 @@
     </div>
   </aside>
 
+  <!-- Bookmarks Panel -->
+  <div id="bookmarks-backdrop" class="bookmarks-backdrop"></div>
+  <aside id="bookmarks-panel" class="bookmarks-panel">
+    <div class="bookmarks-panel-header">
+      <h2>Bookmarks</h2>
+      <div class="bookmarks-header-actions">
+        <button id="bookmarks-add-toggle" class="btn-secondary bookmarks-add-btn" title="Add URL">+</button>
+        <button id="bookmarks-close" class="kill-btn" tabindex="0">&times;</button>
+      </div>
+    </div>
+    <div id="bookmarks-add-form" class="bookmarks-add-form hidden">
+      <input type="text" id="bookmark-add-url" class="bookmarks-input" placeholder="https://example.com">
+      <input type="text" id="bookmark-add-title" class="bookmarks-input" placeholder="Title (optional)">
+      <div class="bookmarks-form-actions">
+        <button id="bookmark-add-cancel" class="btn-secondary">Cancel</button>
+        <button id="bookmark-add-save" class="btn-primary">Add</button>
+      </div>
+    </div>
+    <div id="bookmarks-list" class="bookmarks-list">
+      <div class="bookmarks-empty">No bookmarks yet. Click <strong>+</strong> to add one.</div>
+    </div>
+  </aside>
+
   <!-- Embedded Shell Terminal — always-visible footer -->
   <div id="shell-panel" class="shell-panel">
     <div class="shell-panel-resize"></div>
@@ -513,6 +574,18 @@
         <a id="shell-pr-link" class="shell-pr-link" href="#" target="_blank" style="display:none">PR</a>
       </div>
       <div class="shell-panel-header-right">
+        <div class="url-opener-wrap" style="display:none" id="url-opener-wrap">
+          <button id="url-opener-btn" class="url-opener-btn">Enable URL Opener</button>
+          <div class="url-opener-tooltip" id="url-opener-tooltip">
+            <div class="url-opener-tooltip-title">URL Opener</div>
+            <div class="url-opener-tooltip-body">
+              CLI tools like <b>Graphite</b> (<code>gt submit</code>) and <b>GitHub CLI</b> (<code>gh browse</code>) open URLs in your system browser by default.<br><br>
+              This installs a lightweight script that intercepts those URLs <b>only inside the dashboard terminal</b> and opens them in the in-app browser overlay instead — so you stay in the dashboard.<br><br>
+              <span class="url-opener-tooltip-detail">Adds <code>~/.local/bin/open</code> — a wrapper that checks for the <code>CEO_DASHBOARD</code> env var. Has zero effect outside this terminal.</span>
+              <button id="url-opener-delete-btn" class="url-opener-delete-btn" style="display:none">Remove Script</button>
+            </div>
+          </div>
+        </div>
         <span id="shell-chevron" class="shell-chevron">&#x25B2;</span>
       </div>
     </div>

@@ -135,6 +135,7 @@ const CLAUDE_DIR = path.join(os.homedir(), ".claude", "projects");
 const DOCS_DIR = path.join(__dirname, "docs");
 const CEO_MD_PATH = path.join(__dirname, "claude-ceo.md");
 const TODOS_FILE = path.join(__dirname, "todos.json");
+const FAVORITES_FILE = path.join(__dirname, "favorites.json");
 const POLL_INTERVAL = 300;
 const SHELL_WORKDIR = DEFAULT_WORKDIR || os.homedir();
 const UPLOADS_DIR = path.join(os.tmpdir(), "ceo-dashboard-uploads");
@@ -189,6 +190,30 @@ function broadcastTodos() {
   wss.clients.forEach((client) => {
     if (client.readyState === 1) client.send(msg);
   });
+}
+
+function loadFavorites() {
+  try {
+    return JSON.parse(fs.readFileSync(FAVORITES_FILE, "utf8"));
+  } catch {
+    return [];
+  }
+}
+
+function saveFavorites(data) {
+  fs.writeFileSync(FAVORITES_FILE, JSON.stringify(data, null, 2));
+}
+
+function broadcastFavorites() {
+  const data = loadFavorites();
+  const msg = JSON.stringify({ type: "favorites-update", data });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) client.send(msg);
+  });
+}
+
+function generateFavId() {
+  return "f" + Math.random().toString(36).slice(2, 8);
 }
 
 function ensureDocsDir() {
@@ -362,6 +387,10 @@ function getGitInfo(dir) {
 // Async version — doesn't block the event loop
 function getGitInfoAsync(dir) {
   return new Promise((resolve) => {
+    // Validate dir exists and is actually a directory before spawning
+    try {
+      if (!dir || !fs.statSync(dir).isDirectory()) return resolve(null);
+    } catch { return resolve(null); }
     exec("git rev-parse --abbrev-ref HEAD", {
       cwd: dir, encoding: "utf8", timeout: 3000,
     }, (err, stdout) => {
@@ -789,13 +818,40 @@ function createSession(name, workdir, initialPrompt, resumeSessionId) {
     }
   } catch {}
 
-  // Build claude CLI command — use single quotes for prompt to prevent shell interpretation
+  // Build claude CLI command
   let claudeCmd;
+  let launchScript = null;
   if (resumeSessionId) {
     claudeCmd = `claude --resume ${resumeSessionId}`;
   } else if (effectivePrompt) {
-    const escaped = effectivePrompt.replace(/'/g, "'\\''");
-    claudeCmd = `claude '${escaped}'`;
+    // For large prompts (>8KB), write a launcher script that passes the prompt safely.
+    // This avoids tmux buffer limits and shell special-char issues with embedded diffs.
+    // The script uses exec to replace itself with claude, so the process tree stays clean.
+    if (effectivePrompt.length > 8000) {
+      launchScript = path.join(os.tmpdir(), `ceo-launch-${name}-${Date.now()}.py`);
+      const promptFile = path.join(os.tmpdir(), `ceo-prompt-${name}-${Date.now()}.txt`);
+      fs.writeFileSync(promptFile, effectivePrompt);
+      // Use a Python script to os.execvp claude with the prompt as argv — completely
+      // avoids shell interpretation of $, backticks, quotes, etc. in the diff content.
+      // os.execvp replaces the process, preserving the TTY for Claude's interactive mode.
+      fs.writeFileSync(launchScript, [
+        `#!/usr/bin/env python3`,
+        `import os`,
+        `pf = ${JSON.stringify(promptFile)}`,
+        `sf = ${JSON.stringify(launchScript)}`,
+        `prompt = open(pf).read()`,
+        `try: os.unlink(pf)`,
+        `except: pass`,
+        `try: os.unlink(sf)`,
+        `except: pass`,
+        `os.execvp("claude", ["claude", prompt])`,
+      ].join("\n"));
+      fs.chmodSync(launchScript, 0o755);
+      claudeCmd = shellQuote(launchScript);
+    } else {
+      const escaped = effectivePrompt.replace(/'/g, "'\\''");
+      claudeCmd = `claude '${escaped}'`;
+    }
   } else {
     claudeCmd = "claude";
   }
@@ -2342,6 +2398,7 @@ app.post("/api/shell/completions", (req, res) => {
 // Open a URL in the dashboard client (intercepted from shell `open` command)
 app.post("/api/shell/open-url", (req, res) => {
   const { url } = req.body || {};
+  shellLog("shell-open-url-hit", { url, source: "shell-open-override" });
   if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: "Invalid URL — must start with http:// or https://" });
   }
@@ -2376,6 +2433,7 @@ app.post("/api/shell/open-finder", (req, res) => {
 // Open a URL in the native app's in-app browser overlay (used by BROWSER env var helper)
 app.post("/api/open-url", express.json(), (req, res) => {
   const { url } = req.body || {};
+  shellLog("open-url-hit", { url, source: "BROWSER-env-var" });
   if (!url || typeof url !== "string" || !/^https?:\/\//i.test(url)) {
     return res.status(400).json({ error: "Invalid URL — must start with http:// or https://" });
   }
@@ -2549,6 +2607,108 @@ app.post("/api/test-notification", (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Focus Theft Debug Log ---
+const _focusLogEntries = [];
+const FOCUS_LOG_MAX = 500;
+const FOCUS_LOG_FILE = path.join(__dirname, "focus-debug.log");
+
+app.post("/api/focus-log", (req, res) => {
+  const entry = req.body;
+  if (!entry) return res.status(400).json({ error: "no body" });
+  entry._server_ts = new Date().toISOString();
+  _focusLogEntries.push(entry);
+  if (_focusLogEntries.length > FOCUS_LOG_MAX) _focusLogEntries.shift();
+  // Also append to file for persistence
+  const line = JSON.stringify(entry) + "\n";
+  fs.appendFile(FOCUS_LOG_FILE, line, () => {});
+  res.json({ ok: true });
+});
+
+app.get("/api/focus-log", (req, res) => {
+  // Return only entries where focus was NOT restored (actual theft)
+  const unrestored = req.query.all ? _focusLogEntries : _focusLogEntries.filter(e => !e.wasRestored);
+  res.json(unrestored);
+});
+
+app.delete("/api/focus-log", (req, res) => {
+  _focusLogEntries.length = 0;
+  fs.writeFile(FOCUS_LOG_FILE, "", () => {});
+  res.json({ ok: true });
+});
+
+// --- Shell Debug Log ---
+const SHELL_LOG_FILE = path.join(__dirname, "shell-debug.log");
+const _shellLog = [];
+const SHELL_LOG_MAX = 500;
+
+function shellLog(type, data) {
+  const entry = { ts: new Date().toISOString(), type, ...data };
+  _shellLog.push(entry);
+  if (_shellLog.length > SHELL_LOG_MAX) _shellLog.shift();
+  fs.appendFile(SHELL_LOG_FILE, JSON.stringify(entry) + "\n", () => {});
+}
+
+app.get("/api/shell-log", (req, res) => {
+  const type = req.query.type; // filter by type
+  const entries = type ? _shellLog.filter(e => e.type === type) : _shellLog;
+  res.json(entries);
+});
+
+app.delete("/api/shell-log", (req, res) => {
+  _shellLog.length = 0;
+  fs.writeFile(SHELL_LOG_FILE, "", () => {});
+  res.json({ ok: true });
+});
+
+// --- URL Opener Wrapper ---
+const URL_OPENER_PATH = path.join(os.homedir(), ".local", "bin", "open");
+const URL_OPENER_SCRIPT = `#!/bin/bash
+# CEO Dashboard wrapper for /usr/bin/open
+# Only intercepts HTTP(S) URLs when running inside the dashboard's embedded terminal.
+# All other contexts pass through to the real /usr/bin/open immediately.
+
+if [[ "$CEO_DASHBOARD" == "1" && $# -eq 1 && "$1" =~ ^https?:// ]]; then
+  if curl -s -f -X POST http://localhost:${PORT}/api/shell/open-url \\
+    -H 'Content-Type: application/json' \\
+    -d "{\\"url\\":\\"$1\\"}" > /dev/null 2>&1; then
+    exit 0
+  fi
+fi
+
+/usr/bin/open "$@"
+`;
+
+app.get("/api/url-opener", (req, res) => {
+  try {
+    if (!fs.existsSync(URL_OPENER_PATH)) return res.json({ installed: false });
+    const content = fs.readFileSync(URL_OPENER_PATH, "utf8");
+    const isOurs = content.includes("CEO_DASHBOARD") && content.includes("api/shell/open-url");
+    res.json({ installed: isOurs, path: URL_OPENER_PATH });
+  } catch {
+    res.json({ installed: false });
+  }
+});
+
+app.post("/api/url-opener/install", (req, res) => {
+  try {
+    const dir = path.dirname(URL_OPENER_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(URL_OPENER_PATH, URL_OPENER_SCRIPT, { mode: 0o755 });
+    res.json({ ok: true, path: URL_OPENER_PATH });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/url-opener", (req, res) => {
+  try {
+    if (fs.existsSync(URL_OPENER_PATH)) fs.unlinkSync(URL_OPENER_PATH);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- Image Upload API ---
 
 app.post("/api/upload", (req, res) => {
@@ -2695,6 +2855,59 @@ app.get("/api/todos/by-agent/:agent", (req, res) => {
     createdBy: l.createdBy,
     lastModifiedBy: l.lastModifiedBy,
   })));
+});
+
+// --- Favorites / Bookmarks ---
+
+app.get("/api/favorites", (req, res) => {
+  res.json(loadFavorites());
+});
+
+app.post("/api/favorites", (req, res) => {
+  const { url, title } = req.body;
+  if (!url) return res.status(400).json({ error: "Missing url" });
+  const favs = loadFavorites();
+  // Deduplicate by URL
+  if (favs.find((f) => f.url === url)) return res.json({ ok: true, duplicate: true });
+  let domain;
+  try { domain = new URL(url).hostname; } catch { domain = ""; }
+  const fav = {
+    id: generateFavId(),
+    url,
+    title: title || url,
+    favicon: domain ? `https://www.google.com/s2/favicons?domain=${domain}&sz=32` : "",
+    addedAt: Date.now(),
+  };
+  favs.unshift(fav);
+  saveFavorites(favs);
+  broadcastFavorites();
+  res.json({ ok: true, favorite: fav });
+});
+
+app.put("/api/favorites/:id", (req, res) => {
+  const favs = loadFavorites();
+  const fav = favs.find((f) => f.id === req.params.id);
+  if (!fav) return res.status(404).json({ error: "Not found" });
+  if (req.body.title !== undefined) fav.title = req.body.title;
+  saveFavorites(favs);
+  broadcastFavorites();
+  res.json({ ok: true });
+});
+
+app.delete("/api/favorites/:id", (req, res) => {
+  let favs = loadFavorites();
+  favs = favs.filter((f) => f.id !== req.params.id);
+  saveFavorites(favs);
+  broadcastFavorites();
+  res.json({ ok: true });
+});
+
+app.get("/api/favorites/check", (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).json({ error: "Missing url" });
+  const favs = loadFavorites();
+  const fav = favs.find((f) => f.url === url);
+  res.json({ favorited: !!fav, id: fav ? fav.id : null });
 });
 
 // --- Auto-update check ---
@@ -2874,14 +3087,57 @@ app.post("/api/update", async (req, res) => {
       } catch {}
       if (conflicts.length > 0) {
         try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
-        return res.status(409).json({ error: "merge-conflict", conflicts, cwd: __dirname });
+        // Capture local diffs — prioritize conflicting files, cap total size
+        let localDiff = "";
+        let diffTruncated = false;
+        const DIFF_MAX = 80000; // ~80KB ≈ ~20K tokens, leaves plenty of room for agent reasoning
+        try {
+          // First: get diffs for just the conflicting files (most important)
+          const conflictDiff = execSync(`git diff HEAD -- ${conflicts.map(f => `"${f}"`).join(" ")}`, { cwd: __dirname, encoding: "utf8", maxBuffer: 1024 * 512 });
+          if (conflictDiff.length <= DIFF_MAX) {
+            // Fits — try to include the rest too
+            const fullDiff = execSync("git diff HEAD", { cwd: __dirname, encoding: "utf8", maxBuffer: 1024 * 512 });
+            if (fullDiff.length <= DIFF_MAX) {
+              localDiff = fullDiff;
+            } else {
+              // Full diff too big — use conflict files diff + summary of the rest
+              const otherFiles = execSync("git diff HEAD --name-only", { cwd: __dirname, encoding: "utf8" })
+                .trim().split("\n").filter(f => f && !conflicts.includes(f));
+              localDiff = conflictDiff;
+              if (otherFiles.length > 0) {
+                localDiff += `\n\n# Also modified locally (not shown — non-conflicting):\n${otherFiles.map(f => `# - ${f}`).join("\n")}\n`;
+              }
+              diffTruncated = true;
+            }
+          } else {
+            // Even conflict diffs are huge — truncate
+            localDiff = conflictDiff.slice(0, DIFF_MAX);
+            diffTruncated = true;
+          }
+        } catch {}
+        return res.status(409).json({ error: "merge-conflict", conflicts, cwd: __dirname, localDiff, diffTruncated });
       }
 
       try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
 
       // Dirty working tree
-      if (/uncommitted changes|overwritten by merge|local changes|please commit or stash/i.test(combined))
-        return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that conflict with the update.", cwd: __dirname });
+      if (/uncommitted changes|overwritten by merge|local changes|please commit or stash/i.test(combined)) {
+        let localDiff = "";
+        let diffTruncated = false;
+        const DIFF_MAX = 80000;
+        try {
+          const fullDiff = execSync("git diff HEAD", { cwd: __dirname, encoding: "utf8", maxBuffer: 1024 * 512 });
+          if (fullDiff.length <= DIFF_MAX) {
+            localDiff = fullDiff;
+          } else {
+            // Too big — include stat summary + truncated diff
+            const stat = execSync("git diff HEAD --stat", { cwd: __dirname, encoding: "utf8" });
+            localDiff = `# Diff is large — showing stat summary first:\n${stat}\n\n# Truncated diff (first ${DIFF_MAX} chars):\n${fullDiff.slice(0, DIFF_MAX)}`;
+            diffTruncated = true;
+          }
+        } catch {}
+        return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that conflict with the update.", cwd: __dirname, localDiff, diffTruncated });
+      }
 
       // Network
       if (/could not resolve|unable to access|connection refused|network is unreachable|repository.*not found/i.test(combined))
@@ -2912,11 +3168,28 @@ app.post("/api/update", async (req, res) => {
         return res.status(500).json({ error: "npm-failed", message: "Code updated but npm install failed.", cwd: __dirname });
       }
     }
+    // Check if native-app/ files changed in this update
+    const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+    let nativeChanged = false;
+    try {
+      const changed = execSync("git diff HEAD~1 --name-only", { cwd: __dirname, encoding: "utf8" });
+      nativeChanged = changed.includes("native-app/");
+    } catch {}
+
     res.json({ ok: true });
     // Notify clients and restart
     for (const client of wss.clients) {
       try { client.send(JSON.stringify({ type: "server-restarting" })); } catch {}
     }
+
+    // If native app needs rebuild: tell the app to launch the progress-window rebuild flow
+    // The app handles quitting itself, showing progress, rebuilding, and relaunching
+    if (fs.existsSync(nativeAppDir) && nativeChanged) {
+      for (const client of wss.clients) {
+        try { client.send(JSON.stringify({ type: "native-rebuild-required" })); } catch {}
+      }
+    }
+
     const child = require("child_process").spawn(
       process.execPath, [path.join(__dirname, "server.js")],
       { cwd: __dirname, detached: true, stdio: "ignore", env: { ...process.env, CLAUDECODE: undefined } }
@@ -3016,6 +3289,44 @@ app.post("/api/bug-report", (req, res) => {
     const issueUrl = stdout.trim();
     res.json({ ok: true, issueUrl });
   });
+});
+
+// --- Native app rebuild ---
+app.post("/api/rebuild-native-app", (req, res) => {
+  const buildScript = path.join(__dirname, "native-app", "build.sh");
+  const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+  if (!fs.existsSync(buildScript)) {
+    return res.status(404).json({ error: "build.sh not found" });
+  }
+  res.json({ ok: true });
+
+  // Run build in background with step-by-step macOS notifications
+  // The server stays alive so the build always completes and reopens the app
+  const notify = (msg) => `osascript -e 'display notification "${msg}" with title "CEO Dashboard"'`;
+  const script = [
+    notify("Rebuilding app — compiling Swift..."),
+    `bash "${buildScript}" 2>&1`,
+    `if [ $? -eq 0 ]; then`,
+    `  ${notify("Build complete — reopening app")}`,
+    `  sleep 0.5`,
+    `  open "${nativeAppDir}"`,
+    `else`,
+    `  ${notify("Build failed — check the terminal for details")}`,
+    `fi`,
+  ].join("\n");
+
+  const child = require("child_process").spawn("/bin/bash", ["-c", script],
+    { cwd: __dirname, detached: true, stdio: "ignore" });
+  child.unref();
+});
+
+// Reopen native app (called by the app itself after rebuild, before it quits)
+app.post("/api/reopen-native-app", (req, res) => {
+  const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+  res.json({ ok: true });
+  const child = require("child_process").spawn("/bin/bash", ["-c",
+    `sleep 1 && open "${nativeAppDir}"`
+  ], { detached: true, stdio: "ignore" });
 });
 
 // --- Server self-restart ---
@@ -3199,6 +3510,7 @@ wss.on("connection", (ws) => {
       ws.send(JSON.stringify({ type: "sessions", sessions: sessionInfos }));
       // Send initial todo state
       ws.send(JSON.stringify({ type: "todo-update", data: loadTodos() }));
+      ws.send(JSON.stringify({ type: "favorites-update", data: loadFavorites() }));
     }
   })();
 
@@ -3269,8 +3581,22 @@ wss.on("connection", (ws) => {
         const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
         if (buf.length > 0 && buf[0] === 0x01) {
           // 0x01 prefix = shell stdin
+          const text = buf.toString("utf8", 1);
+          // Log shell commands (accumulate until Enter)
+          if (!ws._shellCmdBuf) ws._shellCmdBuf = "";
+          if (text === "\r" || text === "\n") {
+            if (ws._shellCmdBuf.trim()) shellLog("shell-cmd", { cmd: ws._shellCmdBuf.trim() });
+            ws._shellCmdBuf = "";
+          } else if (text === "\x7f") { // backspace
+            ws._shellCmdBuf = ws._shellCmdBuf.slice(0, -1);
+          } else if (text.length === 1 && text.charCodeAt(0) >= 32) {
+            ws._shellCmdBuf += text;
+          } else if (text.length > 1 && !text.startsWith("\x1b")) {
+            // Pasted text
+            ws._shellCmdBuf += text;
+          }
           ensureShellPty();
-          if (shellPty) shellPty.write(buf.toString("utf8", 1));
+          if (shellPty) shellPty.write(text);
           return;
         }
       }
@@ -3563,7 +3889,7 @@ function ensureShellPty() {
         cols: 120,
         rows: 24,
         cwd,
-        env: { ...process.env, TERM: "xterm-256color" },
+        env: { ...process.env, TERM: "xterm-256color", CEO_DASHBOARD: "1" },
       });
       console.log(`[shell] Spawned PTY (pid ${shellPty.pid}) using ${shell} in ${cwd}`);
       break;
@@ -3624,6 +3950,13 @@ function ensureShellPty() {
   let _osc7GitTimer = null; // Debounce timer for async git lookup
 
   shellPty.onData((data) => {
+    // Log URLs in shell output (detect what gt/gh/etc. are trying to open)
+    const urlMatches = data.match(/https?:\/\/[^\s\x1b\x07\]"'<>]+/g);
+    if (urlMatches) {
+      for (const url of urlMatches) {
+        shellLog("url-in-output", { url, snippet: data.substring(0, 200).replace(/[\x1b\x07]/g, "") });
+      }
+    }
     // Adaptive send: immediate if idle (keystrokes), batch during bursts (command output)
     const now = Date.now();
     if (now - _shellLastSend >= SHELL_BATCH_MS) {
@@ -3882,10 +4215,15 @@ app.get("/api/version", (req, res) => {
     return false;
   }
 
+  let lastReloadTime = 0;
+  const RELOAD_COOLDOWN = 10000; // 10s cooldown between hot-reloads
+
   function doReload() {
     if (!pendingReload) return;
     if (isAnyCeoDashboardAgentBusy()) return; // still busy — poll will retry
+    if (Date.now() - lastReloadTime < RELOAD_COOLDOWN) return; // cooldown — avoid reload loops
     pendingReload = false;
+    lastReloadTime = Date.now();
     hotReloadVersion = Date.now();
     console.log("[hot-reload] agents done, reloading browsers");
     for (const client of wss.clients) {

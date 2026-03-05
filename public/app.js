@@ -475,9 +475,50 @@ function reorderCards() {
     return aFav - bFav;
   });
 
-  // Re-append in sorted order (moves DOM nodes without recreating)
-  for (const card of cards) {
-    grid.appendChild(card);
+  // Check if order actually changed — skip DOM moves if already correct
+  const currentOrder = Array.from(grid.querySelectorAll(".agent-card"));
+  let orderChanged = cards.length !== currentOrder.length;
+  if (!orderChanged) {
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i] !== currentOrder[i]) { orderChanged = true; break; }
+    }
+  }
+
+  if (orderChanged) {
+    // Save focused element + cursor position before DOM moves (appendChild causes blur)
+    const focused = document.activeElement;
+    const focusedInGrid = focused && grid.contains(focused);
+    const cursorStart = focusedInGrid ? focused.selectionStart : null;
+    const cursorEnd = focusedInGrid ? focused.selectionEnd : null;
+
+    // Save terminal scroll positions before DOM moves (appendChild can reset scrollTop)
+    const scrollPositions = new Map();
+    for (const card of cards) {
+      const t = card.querySelector(".terminal");
+      if (t) scrollPositions.set(t, t.scrollTop);
+    }
+
+    // Re-append in sorted order (moves DOM nodes without recreating)
+    for (const card of cards) {
+      grid.appendChild(card);
+    }
+
+    // Restore terminal scroll positions displaced by DOM re-append
+    for (const [t, pos] of scrollPositions) {
+      if (!t._userScrolledUp) {
+        t.scrollTop = t.scrollHeight;
+      } else {
+        t.scrollTop = pos;
+      }
+    }
+
+    // Restore focus stolen by DOM re-append
+    if (focusedInGrid && focused !== document.activeElement) {
+      focused.focus({ preventScroll: true });
+      if (cursorStart != null) {
+        try { focused.setSelectionRange(cursorStart, cursorEnd); } catch {}
+      }
+    }
   }
   saveCardOrder();
 
@@ -511,6 +552,7 @@ function reorderCards() {
 let ws;
 let reconnectTimer;
 let _knownVersion = null; // tracks hot-reload version; if it changes on reconnect, reload
+let _reloadingPage = false; // set true when reload is triggered — suppresses hotkeys during transition
 
 // Build reload-persist state (used by hot-reload, server-restart, and manual restart)
 function buildReloadState() {
@@ -536,37 +578,56 @@ function buildReloadState() {
   }
   // Capture active focus (which input the cursor is in)
   const focused = document.activeElement;
-  if (focused && (focused.tagName === "TEXTAREA" || focused.tagName === "INPUT")) {
-    // Agent card input
+  if (focused && (focused.tagName === "TEXTAREA" || focused.tagName === "INPUT" || focused.isContentEditable)) {
+    state.focusCursorStart = focused.selectionStart ?? null;
+    state.focusCursorEnd = focused.selectionEnd ?? null;
+    // Identify by ID first (most reliable)
+    if (focused.id) {
+      state.focusedId = focused.id;
+    }
+    // Agent card input — identify by agent name
     const card = focused.closest(".agent-card");
     if (card) {
       const agentName = card.querySelector(".agent-name")?.textContent;
-      if (agentName) {
-        state.focusedAgent = agentName;
-        state.focusCursorStart = focused.selectionStart;
-        state.focusCursorEnd = focused.selectionEnd;
-      }
+      if (agentName) state.focusedAgent = agentName;
     }
-    // Modal inputs
-    if (focused.id === "agent-prompt" || focused.id === "agent-name") {
-      state.focusedModal = focused.id;
-      state.focusCursorStart = focused.selectionStart;
-      state.focusCursorEnd = focused.selectionEnd;
-    }
-    // Todo inputs
+    // Todo inputs — identify by class
     if (focused.closest(".todo-view")) {
-      if (focused.classList.contains("todo-title-input")) {
-        state.focusedTodo = "title";
-      } else if (focused.classList.contains("todo-editor")) {
-        state.focusedTodo = "editor";
-      }
-      state.focusCursorStart = focused.selectionStart;
-      state.focusCursorEnd = focused.selectionEnd;
+      if (focused.classList.contains("todo-title-input")) state.focusedTodo = "title";
+      else if (focused.classList.contains("todo-editor")) state.focusedTodo = "editor";
     }
-    // Rich editor (contenteditable)
     if (focused.closest("#todo-rich-editor") || focused.id === "todo-rich-editor") {
       state.focusedTodo = "rich-editor";
     }
+    // Agent doc edit area — identify by agent name + doc name
+    const docSection = focused.closest(".agent-doc-section");
+    if (docSection && focused.classList.contains("agent-doc-edit-area")) {
+      const docCard = focused.closest(".agent-card");
+      const docAgent = docCard?.querySelector(".agent-name")?.textContent;
+      if (docAgent) state.focusedDocAgent = docAgent;
+    }
+  }
+  // Save files panel state
+  if (filesPanel.classList.contains("visible")) {
+    state.filesOpen = true;
+    if (currentFilePath) {
+      state.fileEditor = {
+        path: currentFilePath,
+        name: fileEditorName.textContent,
+        content: fileEditorContent.value,
+        cursorStart: fileEditorContent.selectionStart,
+        cursorEnd: fileEditorContent.selectionEnd,
+        rawMode: fileEditorToggle?.classList.contains("active") || false,
+      };
+    }
+  }
+  // Save settings panel state
+  if (document.getElementById("settings-panel")?.classList.contains("visible")) {
+    state.settingsOpen = true;
+  }
+  // Save bookmarks panel state
+  if (_bmPanel && _bmPanel.classList.contains("visible")) {
+    state.bookmarksOpen = true;
   }
   for (const [name, agent] of agents) {
     const textarea = agent.card.querySelector(".card-input textarea");
@@ -627,7 +688,7 @@ function connect() {
     fetch("/api/version").then(r => r.json()).then(data => {
       if (_knownVersion === null) {
         _knownVersion = data.version;
-      } else if (data.version !== _knownVersion) {
+      } else if (data.version !== _knownVersion && !_updateErrorShowing) {
         location.reload();
       }
     }).catch(() => {});
@@ -683,12 +744,16 @@ function connect() {
     }
 
     if (msg.type === "reload") {
+      if (_updateErrorShowing) return;
+      _reloadingPage = true;
       sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
       location.reload();
       return;
     }
 
     if (msg.type === "server-restarting") {
+      if (_updateErrorShowing) return;
+      _reloadingPage = true;
       sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
       const pollUntilReady = () => {
         fetch("/api/sessions", { signal: AbortSignal.timeout(2000) })
@@ -754,6 +819,11 @@ function connect() {
     }
 
 
+    if (msg.type === "favorites-update") {
+      if (typeof renderBookmarks === "function") renderBookmarks(msg.data);
+      return;
+    }
+
     if (msg.type === "sessions") {
       for (const s of msg.sessions) {
         addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
@@ -796,6 +866,7 @@ function connect() {
       // Force scroll to bottom on first content received (handles reload/reconnect)
       if (isFirstContent) {
         agent.terminal._forceScrollUntil = Date.now() + 5000;
+        agent.terminal._wheelGraceUntil = Date.now() + 1500;
       }
       updateTerminal(agent.terminal, msg.lines);
       // Track that this agent has received its first output (for page loader)
@@ -1031,12 +1102,17 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   terminal.setAttribute("tabindex", "-1");
   // Force scroll to bottom for new/reloaded cards until content settles
   terminal._forceScrollUntil = Date.now() + 5000;
+  // Short grace period: ignore wheel/touch during first 1.5s to prevent
+  // trackpad momentum from a previous page view from locking scroll at top
+  terminal._wheelGraceUntil = Date.now() + 1500;
 
   // Scroll trapping: when terminal is at bottom, don't immediately let page scroll
   setupScrollTrapping(terminal);
 
   // Touch tracking: suppress auto-scroll while user is touching the terminal
   terminal.addEventListener("touchstart", () => {
+    // During grace period, don't let stale momentum cancel force-scroll
+    if (terminal._wheelGraceUntil && Date.now() < terminal._wheelGraceUntil) return;
     terminal._userTouching = true;
     terminal._forceScrollUntil = 0; // cancel any active force-scroll
   }, { passive: true });
@@ -1049,6 +1125,9 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   // Cleared when they scroll back to bottom
   terminal.addEventListener("wheel", (e) => {
     if (e.deltaY < 0) {
+      // During grace period after card creation/reload, ignore upward wheel
+      // to prevent macOS trackpad momentum from canceling force-scroll
+      if (terminal._wheelGraceUntil && Date.now() < terminal._wheelGraceUntil) return;
       terminal._userScrolledUp = true;
       terminal._forceScrollUntil = 0;
     }
@@ -2146,6 +2225,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
 
   // Force scroll-to-bottom for first 5s after card creation (covers page refresh)
   terminal._forceScrollUntil = Date.now() + 5000;
+  terminal._wheelGraceUntil = Date.now() + 1500;
 
   grid.appendChild(card);
   applyLayout(name, card);
@@ -3556,8 +3636,8 @@ document.addEventListener("keydown", (e) => {
 // --- Keyboard shortcuts ---
 
 document.addEventListener("keydown", (e) => {
-  // Suppress all hotkeys while page loader is showing (user may be mid-typing during reload)
-  if (!_loaderDismissed) return;
+  // Suppress all hotkeys while page loader is showing or reload is in flight
+  if (!_loaderDismissed || _reloadingPage) return;
 
   const inShell = !!e.target.closest("#shell-panel");
   const inFilesPanel = !!e.target.closest("#files-panel");
@@ -3593,6 +3673,7 @@ document.addEventListener("keydown", (e) => {
     if (_ueOverlay && !_ueOverlay.classList.contains("hidden")) {
       e.preventDefault();
       _ueOverlay.classList.add("hidden");
+      _updateErrorShowing = false;
       return;
     }
     if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
@@ -3621,6 +3702,13 @@ document.addEventListener("keydown", (e) => {
     if (typeof currentView !== "undefined" && currentView === "todo") {
       e.preventDefault();
       showAgentsView();
+      return;
+    }
+    // Bookmarks panel
+    if (_bmPanel && _bmPanel.classList.contains("visible")) {
+      e.preventDefault();
+      closeBookmarksPanel();
+      if (_bmBtn) _bmBtn.focus();
       return;
     }
     // Settings panel
@@ -3683,6 +3771,11 @@ document.addEventListener("keydown", (e) => {
     if (!filesPanel.classList.contains("visible")) filesBtn.focus();
     return;
   }
+  if (key === "b" && !inInput) {
+    e.preventDefault();
+    toggleBookmarksPanel();
+    return;
+  }
   if (key === "s" && !inInput) {
     e.preventDefault();
     settingsBtn.click();
@@ -3703,7 +3796,7 @@ document.addEventListener("keydown", (e) => {
     restartServer();
     return;
   }
-  if (key === "b") {
+  if (key === "!") {
     e.preventDefault();
     document.getElementById("bug-report-btn").click();
     return;
@@ -4001,11 +4094,13 @@ function toggleFilesPanel() {
   if (isOpen) {
     closeFilesPanel();
   } else {
-    // Close settings panel if open
+    // Close other panels if open
     const sp = document.getElementById("settings-panel");
     if (sp && sp.classList.contains("visible")) closeSettingsPanel();
+    if (_bmPanel && _bmPanel.classList.contains("visible")) closeBookmarksPanel();
     filesPanel.classList.add("visible");
     filesBackdrop.classList.add("visible");
+    filesBtn.classList.add("panel-active");
     loadClaudeFiles();
     // Focus the close button so Tab navigation starts inside the panel
     setTimeout(() => filesClose.focus(), 100);
@@ -4015,6 +4110,7 @@ function toggleFilesPanel() {
 function closeFilesPanel() {
   filesPanel.classList.remove("visible");
   filesBackdrop.classList.remove("visible");
+  filesBtn.classList.remove("panel-active");
   closeFileEditor();
 }
 
@@ -4287,7 +4383,9 @@ const restartServerBtn = document.getElementById("restart-server-btn");
 
 async function restartServer() {
   restartServerBtn.disabled = true;
-  restartServerBtn.textContent = "Restarting...";
+  const restartLabel = restartServerBtn.querySelector(".dock-label");
+  if (restartLabel) restartLabel.textContent = "Restarting...";
+  else restartServerBtn.textContent = "Restarting...";
   sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
 
   try {
@@ -4360,6 +4458,8 @@ updateBtn.addEventListener("click", async () => {
   setTimeout(pollUntilReady, 800);
 });
 
+let _updateErrorShowing = false; // suppress auto-reload while error modal is visible
+
 // Update error modal — handles all error types from /api/update and /api/install-version
 const _ueOverlay = document.getElementById("update-error-overlay");
 const _ueTitle = document.getElementById("update-error-title");
@@ -4368,33 +4468,174 @@ const _ueFiles = document.getElementById("update-error-files");
 const _uePromptWrap = document.getElementById("update-error-prompt-wrap");
 const _uePrompt = document.getElementById("update-error-prompt");
 const _ueCopy = document.getElementById("update-error-copy");
+const _ueAgentBtn = document.getElementById("update-error-agent-btn");
+const _ueAgentDesc = document.getElementById("update-error-agent-desc");
+const _ueManual = document.getElementById("update-error-manual");
+const _uePromptLegacy = document.getElementById("update-error-prompt-legacy");
+const _ueCopyLegacy = document.getElementById("update-error-copy-legacy");
 const _ueRetry = document.getElementById("update-error-retry");
 const _ueClose = document.getElementById("update-error-close");
 
-function _buildConflictPrompt(files, cwd) {
-  const fileList = files.join("\n- ");
-  return `The CEO Dashboard at ${cwd} failed to auto-update due to merge conflicts. Fix this completely — run every command yourself.
-
-Conflicting files:
-- ${fileList}
-
-Steps — run all of these:
-1. cd ${cwd}
-2. git fetch origin main
-3. git -c merge.ff=false merge origin/main --no-edit
-4. Read each conflicting file and resolve every conflict block. Rules:
-   - KEEP ALL upstream (origin/main) changes — every single one. These are required version updates.
-   - KEEP ALL of my local changes too — merge both together so nothing is lost from either side.
-   - If both sides changed the same line and you can combine them (e.g. both added different code), include both.
-   - If both sides changed the same line and they truly cannot coexist (one removes something the other modifies), ask me which to keep before continuing. Show me both versions so I can decide.
-5. After resolving every file: git add ${files.join(" ")}
-6. git commit -m "Merge origin/main — resolve conflicts"
-
-Once done, tell me it's ready and I'll click Update in the dashboard to restart with the new code.`;
+function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated) {
+  const fileList = files.map(f => `- ${f}`).join("\n");
+  const parts = [
+    `You are in the CEO Dashboard repository at ${cwd}. An update from origin/main caused merge conflicts.`,
+    ``,
+    `## The user's local customizations`,
+    `Below is the diff of local changes this user has made. Study it carefully — these are their personal customizations (hotkeys, styles, layout tweaks, etc.) and you MUST preserve them.`,
+  ];
+  if (localDiff) {
+    parts.push(``, `\`\`\`diff`, localDiff.trimEnd(), `\`\`\``);
+    if (diffTruncated) {
+      parts.push(``, `**NOTE: The diff above was truncated because it's very large. The conflicting files are fully shown, but some non-conflicting files may be summarized. Run \`git diff HEAD\` on any file you need to see in full, and read the actual file contents before resolving conflicts.**`);
+    }
+  } else {
+    parts.push(``, `(Diff was not captured — run \`git diff HEAD\` to see local changes before proceeding.)`);
+  }
+  parts.push(
+    ``,
+    `## Step 0: Save a backup of local changes to memory`,
+    `Before touching ANYTHING, save the above diff to your memory file. Include:`,
+    `- Every file and what was modified`,
+    `- Full code snippets for every change`,
+    `- Your interpretation of each change's purpose (e.g. "changed accent color to blue", "added custom Ctrl+K hotkey for X", "restyled header to be more compact")`,
+    `This is the safety net — if the merge goes wrong, these exact snippets let us restore everything.`,
+    ``,
+    `## Conflicting files:`,
+    fileList,
+    ``,
+    `## Step 1: Start the merge`,
+    `\`git fetch origin main && git merge origin/main --no-edit\``,
+    ``,
+    `## Step 2: Resolve each conflict INTELLIGENTLY`,
+    `You already know exactly what the user changed (from the diff above). Use that knowledge to make smart decisions.`,
+    ``,
+    `For each \`<<<<<<<\` / \`>>>>>>>\` block:`,
+    ``,
+    `**If both sides added different things** (e.g. both added a new function, CSS rule, or feature):`,
+    `→ KEEP BOTH. Include the upstream addition AND the local addition.`,
+    ``,
+    `**If upstream changed something the user also customized:**`,
+    `→ ASK THE USER with full context. You know what their change does — explain it back to them. Examples:`,
+    `  - "You changed the accent color to #3B82F6 (blue). Upstream changed it to #10B981 (green). Want to keep your blue, take the new green, or pick a different color?"`,
+    `  - "You added a Ctrl+K hotkey for killing agents. Upstream also added Ctrl+K but for search. Want to keep yours and I'll rebind the upstream one to a different key? Or take theirs and I'll move yours?"`,
+    `  - "You made the header more compact (removed padding, smaller font). Upstream redesigned the header with a new layout. Want me to apply your compact style to the new layout, keep yours as-is, or take theirs?"`,
+    ``,
+    `**If upstream changed something the user didn't touch:**`,
+    `→ Take the upstream version (it's a required update).`,
+    ``,
+    `**If the user changed something upstream didn't touch:**`,
+    `→ Keep the user's version (it's their customization).`,
+    ``,
+    `## Step 3: Show me the result BEFORE committing`,
+    `Do NOT commit yet. Instead:`,
+    `1. Show a summary of every conflict and how you resolved it`,
+    `2. For each file, show the key changes you made`,
+    `3. Ask: "Does this look good? I can commit this, or if something looks wrong I can undo the entire merge with \`git merge --abort\` and we start fresh."`,
+    ``,
+    `## Step 4: Commit only after approval`,
+    `Only after I confirm:`,
+    `\`git add ${files.join(" ")} && git commit -m "Merge origin/main — resolve conflicts"\``,
+    ``,
+    `If I say something looks wrong:`,
+    `- Run \`git merge --abort\` to undo everything`,
+    `- Tell me what happened and ask how I want to proceed`,
+    `- My local changes from the memory backup can be restored if needed`,
+    ``,
+    `## Step 5: Restart the server`,
+    `Once committed, the code on disk is updated but the running server is still using the old code. Restart it:`,
+    `1. If \`package.json\` changed upstream, run: \`cd ${cwd} && npm install\``,
+    `2. Run: \`curl -s -X POST http://localhost:9145/api/restart-server\``,
+    `3. Tell me: "Merge complete and server is restarting! The page will reload automatically in a few seconds. After it reloads, verify your customizations are intact. If anything looks off, let me know — I have the full backup of your changes in memory."`,
+  );
+  return parts.join("\n");
 }
 
-function _buildDirtyWorkdirPrompt(cwd) {
-  return `cd ${cwd} && git stash && git fetch origin main && git -c merge.ff=false merge origin/main --no-edit && git stash pop`;
+function _buildConflictManualSteps(files, cwd) {
+  return [
+    `cd ${cwd}`,
+    `git fetch origin main`,
+    `git merge origin/main --no-edit`,
+    `# Resolve conflicts in each file`,
+    `git add ${files.join(" ")}`,
+    `git commit -m "Merge origin/main — resolve conflicts"`,
+  ].join("\n");
+}
+
+function _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated) {
+  const parts = [
+    `You are in the CEO Dashboard repository at ${cwd}. There are uncommitted local changes blocking an auto-update from origin/main.`,
+    ``,
+    `## The user's local customizations`,
+    `Below is the diff of local changes this user has made. Study it carefully — these are their personal customizations and you MUST preserve them.`,
+  ];
+  if (localDiff) {
+    parts.push(``, `\`\`\`diff`, localDiff.trimEnd(), `\`\`\``);
+    if (diffTruncated) {
+      parts.push(``, `**NOTE: The diff above was truncated because it's very large. Run \`git diff\` to see the full changes for any file you need, and read the actual file contents before resolving conflicts.**`);
+    }
+  } else {
+    parts.push(``, `(Diff was not captured — run \`git diff\` to see local changes before proceeding.)`);
+  }
+  parts.push(
+    ``,
+    `## Step 0: Save a backup of local changes to memory`,
+    `Before touching ANYTHING, save the above diff to your memory file. Include:`,
+    `- Every file and what was modified`,
+    `- Full code snippets for every change`,
+    `- Your interpretation of each change's purpose (e.g. "changed accent color to blue", "added custom Ctrl+K hotkey for X", "restyled header to be more compact")`,
+    `This is the safety net — if the merge goes wrong, these exact snippets let us restore everything.`,
+    ``,
+    `## Step 1: Stash and update`,
+    `\`\`\``,
+    `git stash`,
+    `git fetch origin main && git merge origin/main --no-edit`,
+    `git stash pop`,
+    `\`\`\``,
+    ``,
+    `## Step 2: If conflicts after stash pop — resolve INTELLIGENTLY`,
+    `You already know exactly what the user changed (from the diff above). Use that knowledge to make smart decisions.`,
+    ``,
+    `For each conflict:`,
+    ``,
+    `**If both sides added different things:**`,
+    `→ KEEP BOTH.`,
+    ``,
+    `**If upstream changed something the user also customized:**`,
+    `→ ASK THE USER with full context. You know what their change does — explain it back to them:`,
+    `  - "You changed X to Y for [reason]. Upstream changed it to Z. Want to keep yours, take theirs, or combine them?"`,
+    ``,
+    `**If only one side changed a given line:**`,
+    `→ Keep that side's version.`,
+    ``,
+    `## Step 3: Show me the result BEFORE finalizing`,
+    `Do NOT just say "done". Instead:`,
+    `1. Show a summary of what changed and any conflicts you resolved`,
+    `2. Ask: "Does this look good? Or should I undo everything with \`git checkout -- . && git stash pop\` to restore your original state?"`,
+    ``,
+    `## Step 4: Only finalize after approval`,
+    `If I say something looks wrong:`,
+    `- Undo: \`git reset --hard HEAD\` then \`git stash pop\` to restore the original local state`,
+    `- My local changes from the memory backup can be restored manually if the stash is lost`,
+    ``,
+    `## Step 5: Restart the server`,
+    `Once I confirm, the code on disk is updated but the running server is still using the old code. Restart it:`,
+    `1. If \`package.json\` changed upstream, run: \`cd ${cwd} && npm install\``,
+    `2. Run: \`curl -s -X POST http://localhost:9145/api/restart-server\``,
+    `3. Tell me: "Update complete and server is restarting! The page will reload automatically in a few seconds. After it reloads, verify your customizations are intact. If anything looks off, let me know — I have the full backup of your changes in memory."`,
+  );
+  return parts.join("\n");
+}
+
+function _buildDirtyWorkdirManualSteps(cwd) {
+  return [
+    `cd ${cwd}`,
+    `git stash`,
+    `git fetch origin main`,
+    `git merge origin/main --no-edit`,
+    `git stash pop`,
+    `# Resolve any conflicts if needed`,
+  ].join("\n");
 }
 
 function _buildUnknownPrompt(message, cwd) {
@@ -4402,36 +4643,57 @@ function _buildUnknownPrompt(message, cwd) {
 }
 
 function showUpdateError(data) {
+  _updateErrorShowing = true;
   const errorType = data.error || "unknown";
   const cwd = data.cwd || ".";
   const message = data.message || "";
   const files = data.conflicts || [];
+  const localDiff = data.localDiff || "";
+  const diffTruncated = data.diffTruncated || false;
 
   // Reset all sections
   _ueFiles.classList.add("hidden");
   _ueFiles.innerHTML = "";
   _uePromptWrap.classList.add("hidden");
-  _uePrompt.textContent = "";
+  _uePromptLegacy.textContent = "";
   _ueRetry.classList.add("hidden");
   _ueCopy.textContent = "Copy";
+  _ueCopyLegacy.textContent = "Copy";
+  _ueAgentBtn.classList.add("hidden");
+  _ueAgentDesc.classList.add("hidden");
+  _ueManual.classList.add("hidden");
+  _ueManual.removeAttribute("open");
+  _uePrompt.textContent = "";
+  _ueAgentBtn.disabled = false;
+  _ueAgentBtn.textContent = "Launch Resolver Agent";
+  _ueAgentBtn._agentPrompt = null;
+  _ueAgentBtn._agentCwd = null;
 
   switch (errorType) {
     case "merge-conflict":
       _ueTitle.textContent = "Merge Conflict";
       _ueTitle.style.color = "var(--red)";
-      _ueDesc.innerHTML = "Your local changes conflict with the latest update. The dashboard is still running — nothing broke. Copy this prompt and paste it into a terminal (<code>claude</code>) or one of your agents:";
+      _ueDesc.textContent = "Your local changes conflict with the latest update. Nothing is broken \u2014 the dashboard is still running.";
+      _ueAgentBtn.classList.remove("hidden");
+      _ueAgentDesc.classList.remove("hidden");
+      _ueAgentBtn._agentPrompt = _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated);
+      _ueAgentBtn._agentCwd = cwd;
       _ueFiles.innerHTML = files.map(f => `<li>${escapeHtml(f)}</li>`).join("");
       _ueFiles.classList.remove("hidden");
-      _uePrompt.textContent = _buildConflictPrompt(files, cwd);
-      _uePromptWrap.classList.remove("hidden");
+      _uePrompt.textContent = _buildConflictManualSteps(files, cwd);
+      _ueManual.classList.remove("hidden");
       break;
 
     case "dirty-workdir":
       _ueTitle.textContent = "Uncommitted Changes";
       _ueTitle.style.color = "var(--accent)";
-      _ueDesc.textContent = "You have local changes that prevent the update. Stash them first, then retry. Copy this command:";
-      _uePrompt.textContent = _buildDirtyWorkdirPrompt(cwd);
-      _uePromptWrap.classList.remove("hidden");
+      _ueDesc.textContent = "Your local changes prevent the update. Nothing is broken \u2014 the dashboard is still running.";
+      _ueAgentBtn.classList.remove("hidden");
+      _ueAgentDesc.classList.remove("hidden");
+      _ueAgentBtn._agentPrompt = _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated);
+      _ueAgentBtn._agentCwd = cwd;
+      _uePrompt.textContent = _buildDirtyWorkdirManualSteps(cwd);
+      _ueManual.classList.remove("hidden");
       break;
 
     case "network":
@@ -4452,7 +4714,7 @@ function showUpdateError(data) {
       _ueTitle.textContent = "Wrong Branch";
       _ueTitle.style.color = "var(--accent)";
       _ueDesc.innerHTML = "You must be on the <code>main</code> branch to update. Run this command first:";
-      _uePrompt.textContent = `cd ${cwd} && git checkout main`;
+      _uePromptLegacy.textContent = `cd ${cwd} && git checkout main`;
       _uePromptWrap.classList.remove("hidden");
       break;
 
@@ -4460,7 +4722,7 @@ function showUpdateError(data) {
       _ueTitle.textContent = "Install Failed";
       _ueTitle.style.color = "var(--red)";
       _ueDesc.textContent = "The code was updated, but npm install failed. Run this manually:";
-      _uePrompt.textContent = `cd ${cwd} && npm install`;
+      _uePromptLegacy.textContent = `cd ${cwd} && npm install`;
       _uePromptWrap.classList.remove("hidden");
       break;
 
@@ -4469,7 +4731,7 @@ function showUpdateError(data) {
       _ueTitle.style.color = "var(--red)";
       _ueDesc.textContent = message || "An unexpected error occurred during the update.";
       if (cwd) {
-        _uePrompt.textContent = _buildUnknownPrompt(message, cwd);
+        _uePromptLegacy.textContent = _buildUnknownPrompt(message, cwd);
         _uePromptWrap.classList.remove("hidden");
       }
       break;
@@ -4486,13 +4748,66 @@ _ueCopy.addEventListener("click", () => {
   });
 });
 
+_ueCopyLegacy.addEventListener("click", () => {
+  navigator.clipboard.writeText(_uePromptLegacy.textContent).then(() => {
+    _ueCopyLegacy.textContent = "Copied!";
+    setTimeout(() => { _ueCopyLegacy.textContent = "Copy"; }, 2000);
+  });
+});
+
+_ueAgentBtn.addEventListener("click", async () => {
+  const prompt = _ueAgentBtn._agentPrompt;
+  const workdir = _ueAgentBtn._agentCwd;
+  if (!prompt || !workdir) return;
+
+  _ueAgentBtn.disabled = true;
+  _ueAgentBtn.textContent = "Creating\u2026";
+
+  try {
+    const res = await fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "update-fix", workdir, prompt }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      addAgentCard(data.name, data.workdir, data.branch, data.isWorktree, false);
+      _ueOverlay.classList.add("hidden");
+      _updateErrorShowing = false;
+      setTimeout(() => {
+        const agent = agents.get(data.name);
+        if (agent) agent.card.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 300);
+    } else {
+      _ueAgentBtn.textContent = "Launch Resolver Agent";
+      _ueAgentBtn.disabled = false;
+      const err = await res.json().catch(() => ({}));
+      alert(err.error || "Failed to create resolver agent");
+    }
+  } catch {
+    _ueAgentBtn.textContent = "Launch Resolver Agent";
+    _ueAgentBtn.disabled = false;
+    alert("Failed to create resolver agent");
+  }
+});
+
 _ueRetry.addEventListener("click", () => {
   _ueOverlay.classList.add("hidden");
+  _updateErrorShowing = false;
   updateBtn.click();
 });
 
 _ueClose.addEventListener("click", () => {
   _ueOverlay.classList.add("hidden");
+  _updateErrorShowing = false;
+});
+
+// Click backdrop (overlay) to close update error modal
+_ueOverlay.addEventListener("click", (e) => {
+  if (e.target === _ueOverlay) {
+    _ueOverlay.classList.add("hidden");
+    _updateErrorShowing = false;
+  }
 });
 
 // --- Code Diff Viewer ---
@@ -4625,10 +4940,12 @@ function toggleSettingsPanel() {
   if (isOpen) {
     closeSettingsPanel();
   } else {
-    // Close files panel if open
+    // Close other panels if open
     if (filesPanel.classList.contains("visible")) closeFilesPanel();
+    if (_bmPanel && _bmPanel.classList.contains("visible")) closeBookmarksPanel();
     settingsPanel.classList.add("visible");
     settingsBackdrop.classList.add("visible");
+    settingsBtn.classList.add("panel-active");
     loadSettings();
     setTimeout(() => settingsClose.focus(), 100);
   }
@@ -4637,6 +4954,7 @@ function toggleSettingsPanel() {
 function closeSettingsPanel() {
   settingsPanel.classList.remove("visible");
   settingsBackdrop.classList.remove("visible");
+  settingsBtn.classList.remove("panel-active");
 }
 
 settingsBtn.addEventListener("click", toggleSettingsPanel);
@@ -5010,6 +5328,134 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// --- Bookmarks Panel (slide-out) ---
+
+const _bmPanel = document.getElementById("bookmarks-panel");
+const _bmBackdrop = document.getElementById("bookmarks-backdrop");
+const _bmClose = document.getElementById("bookmarks-close");
+const _bmList = document.getElementById("bookmarks-list");
+const _bmAddToggle = document.getElementById("bookmarks-add-toggle");
+const _bmAddForm = document.getElementById("bookmarks-add-form");
+const _bmAddUrl = document.getElementById("bookmark-add-url");
+const _bmAddTitle = document.getElementById("bookmark-add-title");
+const _bmAddSave = document.getElementById("bookmark-add-save");
+const _bmAddCancel = document.getElementById("bookmark-add-cancel");
+const _bmBtn = document.getElementById("bookmarks-btn");
+
+function toggleBookmarksPanel() {
+  if (_bmPanel.classList.contains("visible")) {
+    closeBookmarksPanel();
+  } else {
+    // Close other panels
+    const sp = document.getElementById("settings-panel");
+    if (sp && sp.classList.contains("visible")) closeSettingsPanel();
+    if (filesPanel && filesPanel.classList.contains("visible")) closeFilesPanel();
+    _bmPanel.classList.add("visible");
+    _bmBackdrop.classList.add("visible");
+    if (_bmBtn) _bmBtn.classList.add("panel-active");
+    _bmAddForm.classList.add("hidden");
+    _bmAddUrl.value = "";
+    _bmAddTitle.value = "";
+    loadBookmarks();
+    setTimeout(() => _bmClose.focus(), 100);
+  }
+}
+
+function closeBookmarksPanel() {
+  _bmPanel.classList.remove("visible");
+  _bmBackdrop.classList.remove("visible");
+  if (_bmBtn) _bmBtn.classList.remove("panel-active");
+  _bmAddForm.classList.add("hidden");
+}
+
+async function loadBookmarks() {
+  try {
+    const res = await fetch("/api/favorites");
+    const favs = await res.json();
+    renderBookmarks(favs);
+  } catch {}
+}
+
+function renderBookmarks(favs) {
+  if (!favs.length) {
+    _bmList.innerHTML = '<div class="bookmarks-empty">No bookmarks yet. Click <strong>+</strong> to add one.</div>';
+    return;
+  }
+  _bmList.innerHTML = favs.map(f => `
+    <div class="bookmark-item" data-id="${escapeAttr(f.id)}">
+      <img class="bookmark-favicon" src="${escapeAttr(f.favicon || "")}" alt="" onerror="this.style.display='none'">
+      <div class="bookmark-info">
+        <span class="bookmark-title" data-url="${escapeAttr(f.url)}" title="${escapeAttr(f.url)}">${escapeHtml(f.title || f.url)}</span>
+        <span class="bookmark-url">${escapeHtml(f.url)}</span>
+      </div>
+      <button class="bookmark-remove" title="Remove">&times;</button>
+    </div>
+  `).join("");
+
+  // Click anywhere on bookmark row → open in browser
+  _bmList.querySelectorAll(".bookmark-item").forEach(el => {
+    el.style.cursor = "pointer";
+    el.addEventListener("click", () => {
+      const url = el.querySelector(".bookmark-title").dataset.url;
+      if (url) window.open(url, "_blank");
+    });
+  });
+
+  // Click remove → delete
+  _bmList.querySelectorAll(".bookmark-remove").forEach(btn => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const id = btn.closest(".bookmark-item").dataset.id;
+      try {
+        await fetch(`/api/favorites/${id}`, { method: "DELETE" });
+        loadBookmarks();
+      } catch {}
+    });
+  });
+}
+
+// Add form toggle
+_bmAddToggle.addEventListener("click", () => {
+  _bmAddForm.classList.toggle("hidden");
+  if (!_bmAddForm.classList.contains("hidden")) _bmAddUrl.focus();
+});
+_bmAddCancel.addEventListener("click", () => {
+  _bmAddForm.classList.add("hidden");
+  _bmAddUrl.value = "";
+  _bmAddTitle.value = "";
+});
+
+// Save new bookmark
+_bmAddSave.addEventListener("click", async () => {
+  const url = _bmAddUrl.value.trim();
+  if (!url) return;
+  const title = _bmAddTitle.value.trim();
+  try {
+    await fetch("/api/favorites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, title }),
+    });
+    _bmAddUrl.value = "";
+    _bmAddTitle.value = "";
+    _bmAddForm.classList.add("hidden");
+    loadBookmarks();
+  } catch {}
+});
+_bmAddUrl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); _bmAddSave.click(); }
+});
+_bmAddTitle.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { e.preventDefault(); _bmAddSave.click(); }
+});
+
+if (_bmBtn) _bmBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleBookmarksPanel(); });
+_bmClose.addEventListener("click", closeBookmarksPanel);
+_bmBackdrop.addEventListener("click", closeBookmarksPanel);
+_bmPanel.addEventListener("keydown", (e) => {
+  if (_bmPanel.classList.contains("visible")) trapFocus(_bmPanel, e);
+});
+
 // --- Version Manager ---
 
 const _versionSection = document.getElementById("version-toggle").closest(".settings-collapse");
@@ -5279,6 +5725,7 @@ function _applyRestoredState(state) {
     if (agent.terminal) {
       agent.terminal._userScrolledUp = false;
       agent.terminal._forceScrollUntil = Date.now() + 5000;
+      agent.terminal._wheelGraceUntil = Date.now() + 1500;
       scrollTerminalToBottom(agent.terminal);
     }
   }
@@ -5330,40 +5777,105 @@ function _applyRestoredState(state) {
       header.click();
     }
   }
-  // 8. Restore focus + cursor position (do this last so layout is settled)
+  // 8. Restore side panels (files, settings, bookmarks)
+  if (state.filesOpen) {
+    if (!filesPanel.classList.contains("visible")) {
+      filesPanel.classList.add("visible");
+      filesBackdrop.classList.add("visible");
+      filesBtn.classList.add("panel-active");
+      loadClaudeFiles();
+    }
+    // Restore file editor with content + cursor
+    if (state.fileEditor) {
+      const fe = state.fileEditor;
+      currentFilePath = fe.path;
+      fileEditorName.textContent = fe.name || "";
+      fileEditorHint.style.display = fe.path === "__ceo_md__" ? "" : "none";
+      fileEditorContent.value = fe.content;
+      filesCategories.style.display = "none";
+      fileEditor.classList.remove("hidden");
+      // Restore raw/rendered mode
+      const isMd = fe.path.endsWith(".md") || fe.path === "__ceo_md__";
+      if (isMd && !fe.rawMode) {
+        fileEditorRendered.innerHTML = marked.parse(fe.content);
+        fileEditorRendered.style.display = "";
+        fileEditorContent.style.display = "none";
+        fileEditorToggle.style.display = "";
+        fileEditorToggle.textContent = "Raw";
+        fileEditorToggle.classList.remove("active");
+      } else {
+        fileEditorRendered.style.display = "none";
+        fileEditorContent.style.display = "";
+        if (isMd) {
+          fileEditorToggle.style.display = "";
+          fileEditorToggle.textContent = "Rendered";
+          fileEditorToggle.classList.add("active");
+        } else {
+          fileEditorToggle.style.display = "none";
+        }
+      }
+    }
+  }
+  if (state.settingsOpen) {
+    const sp = document.getElementById("settings-panel");
+    const sb = document.getElementById("settings-backdrop");
+    if (sp && !sp.classList.contains("visible")) {
+      sp.classList.add("visible");
+      if (sb) sb.classList.add("visible");
+      settingsBtn.classList.add("panel-active");
+      loadSettings();
+    }
+  }
+  if (state.bookmarksOpen && _bmPanel) {
+    if (!_bmPanel.classList.contains("visible")) {
+      _bmPanel.classList.add("visible");
+      _bmBackdrop.classList.add("visible");
+      if (_bmBtn) _bmBtn.classList.add("panel-active");
+      loadBookmarks();
+    }
+  }
+  // 9. Restore focus + cursor position (do this last so layout is settled)
   requestAnimationFrame(() => {
     // Re-apply page scroll (layout changes from modal/shell/todo may have shifted it)
     window.scrollTo(0, state.scrollY || 0);
-    if (state.focusedModal) {
-      const el = document.getElementById(state.focusedModal);
-      if (el) {
-        el.focus();
-        if (state.focusCursorStart != null) {
-          el.setSelectionRange(state.focusCursorStart, state.focusCursorEnd ?? state.focusCursorStart);
-        }
+
+    // Helper: focus an element and restore cursor position
+    function restoreFocus(el) {
+      if (!el) return false;
+      el.focus({ preventScroll: true });
+      if (state.focusCursorStart != null && el.setSelectionRange) {
+        try { el.setSelectionRange(state.focusCursorStart, state.focusCursorEnd ?? state.focusCursorStart); } catch {}
       }
-    } else if (state.focusedTodo) {
-      // Restore todo focus
+      return true;
+    }
+
+    // Try to restore by element ID first (covers modal inputs, settings inputs, file editor, etc.)
+    if (state.focusedId) {
+      const el = document.getElementById(state.focusedId);
+      if (el && restoreFocus(el)) return;
+    }
+    // Todo inputs (identified by class, not ID — they're dynamic)
+    if (state.focusedTodo) {
       let el = null;
       if (state.focusedTodo === "title") el = document.querySelector(".todo-title-input");
       else if (state.focusedTodo === "editor") el = document.querySelector(".todo-editor");
       else if (state.focusedTodo === "rich-editor") el = document.getElementById("todo-rich-editor");
-      if (el) {
-        el.focus();
-        if (state.focusCursorStart != null && el.setSelectionRange) {
-          el.setSelectionRange(state.focusCursorStart, state.focusCursorEnd ?? state.focusCursorStart);
-        }
-      }
-    } else if (state.focusedAgent) {
+      if (el && restoreFocus(el)) return;
+    }
+    // Agent card input (identified by agent name)
+    if (state.focusedAgent) {
       const agent = agents.get(state.focusedAgent);
       if (agent) {
         const textarea = agent.card.querySelector(".card-input textarea");
-        if (textarea) {
-          textarea.focus();
-          if (state.focusCursorStart != null) {
-            textarea.setSelectionRange(state.focusCursorStart, state.focusCursorEnd ?? state.focusCursorStart);
-          }
-        }
+        if (textarea && restoreFocus(textarea)) return;
+      }
+    }
+    // Agent doc edit area
+    if (state.focusedDocAgent) {
+      const agent = agents.get(state.focusedDocAgent);
+      if (agent) {
+        const editArea = agent.card.querySelector(".agent-doc-edit-area");
+        if (editArea && editArea.style.display !== "none" && restoreFocus(editArea)) return;
       }
     }
   });
@@ -5417,6 +5929,58 @@ function _applyRestoredState(state) {
   const webLinksAddon = new WebLinksAddon.WebLinksAddon();
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
+
+  // --- URL Opener wrapper detection + install ---
+  const urlOpenerWrap = document.getElementById("url-opener-wrap");
+  const urlOpenerBtn = document.getElementById("url-opener-btn");
+  const urlOpenerTooltip = document.getElementById("url-opener-tooltip");
+  const urlOpenerDeleteBtn = document.getElementById("url-opener-delete-btn");
+  urlOpenerWrap.addEventListener("click", (e) => e.stopPropagation());
+  async function checkUrlOpener() {
+    try {
+      const res = await fetch("/api/url-opener");
+      const data = await res.json();
+      if (data.installed) {
+        urlOpenerBtn.textContent = "URL Opener Active";
+        urlOpenerBtn.classList.add("installed");
+        urlOpenerWrap.style.display = "";
+        urlOpenerBtn.onclick = null;
+        urlOpenerTooltip.querySelector(".url-opener-tooltip-title").textContent = "URL Opener — Active";
+        urlOpenerDeleteBtn.style.display = "";
+        urlOpenerDeleteBtn.onclick = async () => {
+          urlOpenerDeleteBtn.textContent = "Removing...";
+          urlOpenerDeleteBtn.disabled = true;
+          try {
+            await fetch("/api/url-opener", { method: "DELETE" });
+            checkUrlOpener();
+          } catch {
+            urlOpenerDeleteBtn.textContent = "Failed";
+            setTimeout(checkUrlOpener, 2000);
+          }
+          urlOpenerDeleteBtn.disabled = false;
+        };
+      } else {
+        urlOpenerBtn.textContent = "Enable URL Opener";
+        urlOpenerBtn.classList.remove("installed");
+        urlOpenerWrap.style.display = "";
+        urlOpenerTooltip.querySelector(".url-opener-tooltip-title").textContent = "URL Opener — Not Installed";
+        urlOpenerDeleteBtn.style.display = "none";
+        urlOpenerBtn.onclick = async () => {
+          urlOpenerBtn.textContent = "Installing...";
+          urlOpenerBtn.disabled = true;
+          try {
+            await fetch("/api/url-opener/install", { method: "POST" });
+            checkUrlOpener();
+          } catch {
+            urlOpenerBtn.textContent = "Install Failed";
+            setTimeout(checkUrlOpener, 2000);
+          }
+          urlOpenerBtn.disabled = false;
+        };
+      }
+    } catch {}
+  }
+  checkUrlOpener();
 
   let shellInitialized = false;
 

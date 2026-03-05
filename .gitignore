@@ -2,6 +2,7 @@ node_modules/
 config.json
 sessions.json
 todos.json
+favorites.json
 docs/
 firebase-debug.log
 *.log
