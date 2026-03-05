@@ -80,8 +80,9 @@ Supporting files:
 - "Move to Local Docs" copies to `~/.claude/docs/`
 - Doc section is resizable (drag handle) and collapsible
 
-**Image Drag-and-Drop**:
+**Image Drag-and-Drop & Clipboard Paste**:
 - Drop images on terminal or input area → uploads via `POST /api/upload`
+- Paste images from clipboard (e.g. screenshots) into agent input or new agent modal textarea
 - Saved to `/tmp/ceo-dashboard-uploads/` with timestamp prefix
 - Shows as chips with X to remove before sending
 - File paths are prepended to the next message sent to Claude
