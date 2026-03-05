@@ -884,6 +884,13 @@ function killSession(name) {
   tmuxExec(`kill-session -t ${session}`);
   invalidateTmuxSessionsCache();
 
+  // Clean up terminal PTY wrapper if it exists
+  const entry = terminalPtys.get(name);
+  if (entry) {
+    try { entry.pty.kill(); } catch {}
+    terminalPtys.delete(name);
+  }
+
   const meta = loadSessionsMeta();
   delete meta[name];
   saveSessionsMeta(meta);
@@ -1184,6 +1191,7 @@ app.get("/api/sessions", async (req, res) => {
       isWorktree: git?.isWorktree || false,
       favorite: meta[name]?.favorite || false,
       minimized: meta[name]?.minimized || false,
+      type: meta[name]?.type || "agent",
     };
   }));
 
@@ -1650,7 +1658,7 @@ app.get("/api/claude-sessions", async (req, res) => {
 });
 
 app.post("/api/sessions", async (req, res) => {
-  const { name, prompt, workdir, resumeSessionId, initialImages, initialImageText } = req.body;
+  const { name, prompt, workdir, resumeSessionId, initialImages, initialImageText, type } = req.body;
 
   if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
     return res.status(400).json({ error: "Invalid name (alphanumeric, dash, underscore only)" });
@@ -1663,6 +1671,31 @@ app.post("/api/sessions", async (req, res) => {
     let i = 1;
     while (existing.includes(`${PREFIX}${finalName}-${i}`)) i++;
     finalName = `${finalName}-${i}`;
+  }
+
+  // Terminal card: bare tmux shell, no Claude CLI
+  if (type === "terminal") {
+    try {
+      ensureTmuxServer();
+      const dir = workdir || DEFAULT_WORKDIR;
+      if (!isValidWorkdir(dir)) {
+        return res.status(400).json({ error: "Invalid working directory" });
+      }
+      const session = `${PREFIX}${finalName}`;
+      execSync(
+        `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
+        { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+      );
+      const meta = loadSessionsMeta();
+      meta[finalName] = { workdir: dir, created: new Date().toISOString(), type: "terminal" };
+      saveSessionsMeta(meta);
+      invalidateTmuxSessionsCache();
+      const git = await getCachedGitInfo(dir);
+      res.json({ name: finalName, workdir: dir, type: "terminal", branch: git?.branch || null, isWorktree: git?.isWorktree || false });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+    return;
   }
 
   // If resuming, derive workdir from the Claude session's projectPath
@@ -3366,10 +3399,16 @@ async function broadcastOutputs() {
     syncClaudeSessionIds();
 
     const sessions = await listTmuxSessionsAsync();
+    const meta = loadSessionsMeta();
 
     // Capture all panes in parallel — async, never blocks event loop
+    // Skip terminal-type sessions (they use binary WS, not JSON polling)
+    const agentSessions = sessions.filter((s) => {
+      const n = s.replace(PREFIX, "");
+      return meta[n]?.type !== "terminal";
+    });
     const captures = await Promise.all(
-      sessions.map(async (session) => {
+      agentSessions.map(async (session) => {
         const output = await capturePaneAsync(session);
         return { session, output };
       })
@@ -3471,29 +3510,33 @@ wss.on("connection", (ws) => {
     const sessionInfos = [];
     for (const { session, output } of captures) {
       const name = session.replace(PREFIX, "");
-      prevOutputs.set(session, output);
+      const isTerminal = meta[name]?.type === "terminal";
+      const liveCwd = isTerminal ? null : await getEffectiveCwdAsync(session, output);
+      const git = isTerminal ? null : await getCachedGitInfo(liveCwd);
 
-      const liveCwd = await getEffectiveCwdAsync(session, output);
-      const git = await getCachedGitInfo(liveCwd);
+      // Skip JSON output push for terminal-type sessions (they use binary WS)
+      if (!isTerminal) {
+        prevOutputs.set(session, output);
 
-      const initStatus = detectStatus(output, "");
-      const filteredOutput = stripCeoPreamble(output);
-      const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
-      const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
-      if (ws.readyState === 1) {
-        ws.send(
-          JSON.stringify({
-            type: "output",
-            session: name,
-            lines: filterOutputForDisplay(output.split("\n")),
-            status: initStatus,
-            promptType: initPromptType,
-            promptOptions: initPromptOptions,
-            workdir: liveCwd || null,
-            branch: git?.branch || null,
-            isWorktree: git?.isWorktree || false,
-          })
-        );
+        const initStatus = detectStatus(output, "");
+        const filteredOutput = stripCeoPreamble(output);
+        const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
+        const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
+        if (ws.readyState === 1) {
+          ws.send(
+            JSON.stringify({
+              type: "output",
+              session: name,
+              lines: filterOutputForDisplay(output.split("\n")),
+              status: initStatus,
+              promptType: initPromptType,
+              promptOptions: initPromptOptions,
+              workdir: liveCwd || null,
+              branch: git?.branch || null,
+              isWorktree: git?.isWorktree || false,
+            })
+          );
+        }
       }
       sessionInfos.push({
         name,
@@ -3503,6 +3546,7 @@ wss.on("connection", (ws) => {
         isWorktree: git?.isWorktree || false,
         favorite: meta[name]?.favorite || false,
         minimized: meta[name]?.minimized || false,
+        type: meta[name]?.type || "agent",
       });
     }
 
@@ -3516,7 +3560,13 @@ wss.on("connection", (ws) => {
 
   // Register this client for shell PTY output
   shellClients.add(ws);
-  ws.on("close", () => shellClients.delete(ws));
+  ws.on("close", () => {
+    shellClients.delete(ws);
+    // Clean up terminal card subscriptions
+    for (const [tName] of terminalPtys) {
+      detachTerminalClient(tName, ws);
+    }
+  });
   // Ensure shell PTY is running and start info polling
   ensureShellPty();
   if (!shellPty) {
@@ -3524,7 +3574,7 @@ wss.on("connection", (ws) => {
   }
   startShellInfoPolling();
   // Replay buffered scrollback as binary chunks (no JSON overhead)
-  const scrollback = getShellScrollback();
+  const scrollback = getScrollback(_shellScrollback);
   if (scrollback) {
     const buf = Buffer.from(scrollback, "utf8");
     const CHUNK = 32768; // 32KB — larger chunks since binary has less per-frame overhead
@@ -3599,6 +3649,31 @@ wss.on("connection", (ws) => {
           if (shellPty) shellPty.write(text);
           return;
         }
+        // 0x03 prefix = terminal card stdin: 0x03 + nameLen(1B) + name + data
+        if (buf.length > 2 && buf[0] === 0x03) {
+          const nameLen = buf[1];
+          if (buf.length >= 2 + nameLen) {
+            const tName = buf.toString("utf8", 2, 2 + nameLen);
+            const tData = buf.toString("utf8", 2 + nameLen);
+            if (/^[a-zA-Z0-9_-]+$/.test(tName)) {
+              writeTerminalStdin(tName, tData);
+            }
+          }
+          return;
+        }
+        // 0x04 prefix = terminal card resize: 0x04 + nameLen(1B) + name + cols(2B) + rows(2B)
+        if (buf.length > 2 && buf[0] === 0x04) {
+          const nameLen = buf[1];
+          if (buf.length >= 2 + nameLen + 4) {
+            const tName = buf.toString("utf8", 2, 2 + nameLen);
+            const cols = buf.readUInt16BE(2 + nameLen);
+            const rows = buf.readUInt16BE(2 + nameLen + 2);
+            if (/^[a-zA-Z0-9_-]+$/.test(tName) && cols > 0 && rows > 0) {
+              resizeTerminalPty(tName, cols, rows);
+            }
+          }
+          return;
+        }
       }
 
       const msg = JSON.parse(data);
@@ -3655,6 +3730,17 @@ wss.on("connection", (ws) => {
         if (shellPty && msg.cols && msg.rows) {
           shellPty.resize(Math.max(1, msg.cols), Math.max(1, msg.rows));
         }
+      }
+
+      // --- Terminal card subscribe/unsubscribe ---
+      if (msg.type === "terminal-subscribe" && msg.session) {
+        const meta = loadSessionsMeta();
+        if (meta[msg.session]?.type === "terminal") {
+          attachTerminalClient(msg.session, ws);
+        }
+      }
+      if (msg.type === "terminal-unsubscribe" && msg.session) {
+        detachTerminalClient(msg.session, ws);
       }
 
       // Client requests a fresh output snapshot (pull-based backup for push failures)
@@ -3748,8 +3834,8 @@ function restoreSessions() {
     // tmux session still alive (survives server restarts) — keep it, no recreation needed
     if (liveNames.has(name)) {
       kept++;
-      // Try to backfill session ID if missing
-      if (!info.resumeSessionId) {
+      // Try to backfill session ID if missing (agents only, not terminal cards)
+      if (!info.resumeSessionId && info.type !== "terminal") {
         const workdir = info.workdir || DEFAULT_WORKDIR;
         const sessionId = detectClaudeSessionIdForAgent(workdir, info.created);
         if (sessionId) {
@@ -3766,6 +3852,20 @@ function restoreSessions() {
     if (!isValidWorkdir(dir)) {
       console.warn(`[restore] Skipping agent "${name}" — invalid workdir: ${dir}`);
       delete meta[name];
+      continue;
+    }
+
+    // Terminal card: recreate bare tmux shell (no Claude)
+    if (info.type === "terminal") {
+      try {
+        execSync(
+          `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
+          { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+        );
+        restored++;
+      } catch {
+        delete meta[name];
+      }
       continue;
     }
 
@@ -3811,33 +3911,152 @@ function restoreSessions() {
 
 // --- Start ---
 
+// --- Shared scrollback management ---
+const SCROLLBACK_LIMIT = 50000;
+
+function createScrollback() {
+  return { chunks: [], size: 0 };
+}
+
+function getScrollback(sb) {
+  return sb.chunks.join("");
+}
+
+function appendScrollback(sb, data) {
+  sb.chunks.push(data);
+  sb.size += data.length;
+  if (sb.size > SCROLLBACK_LIMIT * 1.2) {
+    const full = sb.chunks.join("").slice(-SCROLLBACK_LIMIT);
+    sb.chunks.length = 0;
+    sb.chunks.push(full);
+    sb.size = full.length;
+  }
+}
+
+function clearScrollback(sb) {
+  sb.chunks.length = 0;
+  sb.size = 0;
+}
+
+// --- Terminal card PTY manager (tmux ↔ xterm.js bridge) ---
+// Each terminal card gets a node-pty running `tmux attach-session` — this provides a PTY
+// that xterm.js can drive via binary WS, while tmux provides persistence across restarts.
+const terminalPtys = new Map(); // name → { pty, clients: Set<ws>, scrollback: createScrollback() }
+
+function attachTerminalClient(name, ws) {
+  let entry = terminalPtys.get(name);
+  if (!entry) {
+    if (!pty) {
+      console.error("[terminal-card] node-pty not available");
+      return;
+    }
+    const session = `${PREFIX}${name}`;
+    // Spawn node-pty that attaches to the tmux session
+    let termPty;
+    try {
+      termPty = pty.spawn("tmux", ["attach-session", "-t", session], {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 50,
+        env: { ...process.env, TERM: "xterm-256color" },
+      });
+    } catch (err) {
+      console.error(`[terminal-card] Failed to attach to tmux session ${session}: ${err.message}`);
+      return;
+    }
+    entry = { pty: termPty, clients: new Set(), scrollback: createScrollback(), ready: false };
+    terminalPtys.set(name, entry);
+
+    // Delay relaying output until tmux's DA (device attributes) exchange completes.
+    // tmux queries terminal capabilities on attach; the DA responses leak as visible
+    // garbage if relayed before the exchange settles.
+    setTimeout(() => {
+      entry.ready = true;
+      // Clear scrollback of any DA garbage accumulated during startup
+      clearScrollback(entry.scrollback);
+      // Send a clear-screen + redraw so the shell prompt appears clean
+      termPty.write("\x0c"); // Ctrl+L
+    }, 500);
+
+    termPty.onData((data) => {
+      if (!entry.ready) return; // suppress DA exchange noise
+      appendScrollback(entry.scrollback, data);
+      // Build 0x02-prefixed binary frame: 0x02 + nameLen(1B) + name + data
+      const nameBuf = Buffer.from(name, "utf8");
+      const dataBuf = Buffer.from(data, "utf8");
+      const frame = Buffer.alloc(2 + nameBuf.length + dataBuf.length);
+      frame[0] = 0x02;
+      frame[1] = nameBuf.length;
+      nameBuf.copy(frame, 2);
+      dataBuf.copy(frame, 2 + nameBuf.length);
+      for (const client of entry.clients) {
+        if (client.readyState === 1 && client.bufferedAmount < 1048576) {
+          client.send(frame);
+        }
+      }
+    });
+
+    termPty.onExit(() => {
+      console.log(`[terminal-card] PTY wrapper for ${name} exited`);
+      terminalPtys.delete(name);
+    });
+
+    console.log(`[terminal-card] Attached PTY wrapper for ${name} (pid ${termPty.pid})`);
+  }
+
+  entry.clients.add(ws);
+
+  // Replay scrollback
+  const scrollback = getScrollback(entry.scrollback);
+  if (scrollback) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const dataBuf = Buffer.from(scrollback, "utf8");
+    const CHUNK = 32768;
+    let offset = 0;
+    const sendChunk = () => {
+      if (offset >= dataBuf.length || ws.readyState !== 1) return;
+      const end = Math.min(offset + CHUNK, dataBuf.length);
+      const chunk = dataBuf.subarray(offset, end);
+      const frame = Buffer.alloc(2 + nameBuf.length + chunk.length);
+      frame[0] = 0x02;
+      frame[1] = nameBuf.length;
+      nameBuf.copy(frame, 2);
+      chunk.copy(frame, 2 + nameBuf.length);
+      ws.send(frame);
+      offset = end;
+      if (offset < dataBuf.length) setImmediate(sendChunk);
+    };
+    sendChunk();
+  }
+}
+
+function detachTerminalClient(name, ws) {
+  const entry = terminalPtys.get(name);
+  if (!entry) return;
+  entry.clients.delete(ws);
+  // If no clients remain, kill the PTY wrapper (tmux session stays alive)
+  if (entry.clients.size === 0) {
+    try { entry.pty.kill(); } catch {}
+    terminalPtys.delete(name);
+    console.log(`[terminal-card] Detached last client for ${name}, killed PTY wrapper`);
+  }
+}
+
+function writeTerminalStdin(name, data) {
+  const entry = terminalPtys.get(name);
+  if (entry) entry.pty.write(data);
+}
+
+function resizeTerminalPty(name, cols, rows) {
+  const entry = terminalPtys.get(name);
+  if (entry) entry.pty.resize(Math.max(1, cols), Math.max(1, rows));
+}
+
 // --- Embedded shell terminal (node-pty) ---
 let shellPty = null;
 const shellClients = new Set(); // WebSocket clients subscribed to shell output
 
-// Scrollback: use array of chunks instead of string concatenation (avoids GC pressure)
-const _shellScrollChunks = [];
-let _shellScrollSize = 0;
-const SHELL_SCROLLBACK_LIMIT = 50000; // ~50KB — enough for replay, less GC pressure
-
-function getShellScrollback() {
-  return _shellScrollChunks.join("");
-}
-function appendShellScrollback(data) {
-  _shellScrollChunks.push(data);
-  _shellScrollSize += data.length;
-  // Compact more frequently to avoid big GC spikes (was 1.5x, now 1.2x)
-  if (_shellScrollSize > SHELL_SCROLLBACK_LIMIT * 1.2) {
-    const full = _shellScrollChunks.join("").slice(-SHELL_SCROLLBACK_LIMIT);
-    _shellScrollChunks.length = 0;
-    _shellScrollChunks.push(full);
-    _shellScrollSize = full.length;
-  }
-}
-function clearShellScrollback() {
-  _shellScrollChunks.length = 0;
-  _shellScrollSize = 0;
-}
+const _shellScrollback = createScrollback();
 
 // Adaptive data broadcast: send first chunk immediately (zero latency for keystrokes),
 // then batch subsequent chunks during bursts (avoids JSON spam during heavy output).
@@ -3981,7 +4200,7 @@ function ensureShellPty() {
     }
 
     // Append to scrollback (chunked array — no string concat GC pressure)
-    appendShellScrollback(data);
+    appendScrollback(_shellScrollback, data);
 
     // OSC 7 parsing — only when data contains the escape prefix
     if (data.indexOf("\x1b]7;") >= 0 || _osc7Buffer.length > 0) {
@@ -4024,7 +4243,7 @@ function ensureShellPty() {
   shellPty.onExit(() => {
     console.log("[shell] PTY exited, will respawn on next use");
     shellPty = null;
-    clearShellScrollback();
+    clearScrollback(_shellScrollback);
     sendShellData("\r\n[Shell exited. Reopening will start a new session.]\r\n");
   });
 }
