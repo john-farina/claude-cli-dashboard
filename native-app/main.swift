@@ -743,7 +743,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
     }
 
     func launchRebuild(title: String, step1Message: String) {
-        let ceoDir = NSHomeDirectory() + "/ceo-dashboard"
+        let ceoDir = CEO_DASHBOARD_DIR
         // Read app name from config.json so rebuild reopens the correct (possibly renamed) app
         var appName = "CEO Dashboard"
         let configPath = ceoDir + "/config.json"
@@ -896,7 +896,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
     func startServer(completion: @escaping () -> Void) {
         DispatchQueue.global().async {
-            let ceoDir = NSHomeDirectory() + "/ceo-dashboard"
+            let ceoDir = CEO_DASHBOARD_DIR
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["node", ceoDir + "/server.js"]

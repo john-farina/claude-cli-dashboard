@@ -39,6 +39,7 @@
   --modal-bg: #1e1e1e;
   --scrollbar-thumb: #333028;
   --scrollbar-hover: #44403a;
+  --font-mono: "SF Mono", "Fira Code", "Consolas", monospace;
   --status-working-bg: rgba(126, 184, 218, 0.1);
   --status-working-color: #7eb8da;
   --status-waiting-bg: rgba(217, 83, 79, 0.1);
@@ -219,7 +220,7 @@ header {
   white-space: pre-wrap;
   word-break: break-word;
   margin: 0;
-  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .contribute-spawn-btn {
   padding: 2px 8px;
@@ -1007,7 +1008,7 @@ header h1 {
   border-bottom: 1px solid var(--border);
   font-size: 11px;
   color: var(--text-dim);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1041,13 +1042,56 @@ header h1 {
 .branch-info:empty { display: none; }
 .branch-info.worktree { color: var(--green); }
 
+.token-usage-wrap {
+  display: flex;
+  gap: 12px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.4s ease;
+  user-select: none;
+}
+.token-usage-wrap:hover .token-usage-label {
+  opacity: 0.55;
+  transition: opacity 0.4s ease;
+}
+.token-usage-wrap:hover .token-usage-value {
+  opacity: 0.7;
+  transition: opacity 0.4s ease;
+}
+.token-usage-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+.token-usage-label {
+  font-size: 9px;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.45;
+  transition: opacity 0.4s ease;
+}
+.token-usage-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  opacity: 0.55;
+  transition: opacity 0.4s ease;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
 
 /* ═══════════════════════════════════════════════════
    TERMINAL OUTPUT
    ═══════════════════════════════════════════════════ */
 .terminal {
   background: var(--terminal-bg);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.2;
   padding: 12px;
@@ -1421,7 +1465,7 @@ header h1 {
   padding: 5px 10px;
   color: var(--text);
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -1548,7 +1592,7 @@ header h1 {
   padding: 10px 16px;
   color: var(--text);
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   outline: none;
   resize: none;
   line-height: 1.4;
@@ -1641,7 +1685,7 @@ header h1 {
   padding: 10px 14px;
   color: var(--text);
   font-size: 13px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -1680,7 +1724,7 @@ header h1 {
   background: transparent;
   color: var(--text-dim);
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1706,7 +1750,7 @@ header h1 {
   padding: 10px 14px;
   color: var(--text);
   font-size: 13px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   outline: none;
   transition: border-color 0.15s;
 }
@@ -1930,7 +1974,7 @@ header h1 {
 .diff-workdir {
   font-size: 12px;
   color: var(--text-dim);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2097,7 +2141,7 @@ header h1 {
 .diff-modal .d2h-file-list-wrapper .d2h-file-list-line a {
   color: var(--text);
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 .diff-modal .d2h-file-list-wrapper .d2h-file-list-line a:hover {
   color: var(--accent);
@@ -2132,7 +2176,7 @@ header h1 {
 }
 .diff-modal .d2h-file-name {
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 .diff-modal .d2h-tag {
   background: var(--accent-subtle);
@@ -2154,7 +2198,7 @@ header h1 {
 }
 .diff-modal .d2h-diff-table {
   border-color: var(--border);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .diff-modal .d2h-diff-tbody tr {
@@ -2427,7 +2471,7 @@ header h1 {
   align-items: baseline;
   gap: 12px;
   font-size: 13px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   transition: background 0.1s;
 }
 
@@ -2605,7 +2649,7 @@ header h1 {
 .bug-system-info-content {
   padding: 10px 14px;
   font-size: 11px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--text-dim);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -2631,10 +2675,7 @@ header h1 {
   border: 2.5px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
-  animation: bugSpin 0.7s linear infinite;
-}
-@keyframes bugSpin {
-  to { transform: rotate(360deg); }
+  animation: diffSpin 0.7s linear infinite;
 }
 .bug-sysinfo-state .btn-secondary {
   font-size: 11px;
@@ -2711,7 +2752,7 @@ header h1 {
 .files-panel-header h2 {
   font-size: 15px;
   font-weight: 700;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 
 .files-categories {
@@ -2775,7 +2816,7 @@ header h1 {
   padding: 8px 20px 8px 36px;
   cursor: pointer;
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--text);
   transition: background 0.1s;
 }
@@ -2858,7 +2899,7 @@ header h1 {
 
 .file-editor-name {
   font-size: 13px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
@@ -2875,7 +2916,7 @@ header h1 {
   flex: 1;
   background: var(--terminal-bg);
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   padding: 12px 16px;
@@ -3128,7 +3169,7 @@ header h1 {
   padding: 8px 14px;
   cursor: pointer;
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--text);
   border-bottom: 1px solid var(--border);
   transition: background 0.1s;
@@ -3173,7 +3214,7 @@ header h1 {
 
 .agent-doc-detail-name {
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--accent);
   white-space: nowrap;
   overflow: hidden;
@@ -3216,7 +3257,7 @@ header h1 {
   min-height: 0;
   background: var(--terminal-bg);
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   padding: 10px 14px;
@@ -3537,7 +3578,7 @@ header h1 {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: "SF Mono", "Menlo", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
@@ -3581,7 +3622,7 @@ header h1 {
   overflow-y: auto;
   min-width: 200px;
   max-width: 420px;
-  font-family: 'SF Mono', 'Menlo', monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   box-shadow: 0 8px 30px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04);
   animation: shell-ac-in 0.12s ease-out;
@@ -3641,7 +3682,7 @@ header h1 {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-family: "SF Mono", "Menlo", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
   padding: 2px 10px;
@@ -3988,7 +4029,7 @@ header h1 {
   border: 1px solid rgba(217, 83, 79, 0.2);
   color: var(--red);
   font-size: 11px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   line-height: 1.5;
   white-space: pre-wrap;
 }
@@ -4125,7 +4166,7 @@ header h1 {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
 }
 .workspace-row-label {
@@ -4200,7 +4241,7 @@ header h1 {
   color: var(--text);
   font-size: 11px;
   padding: 5px 8px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
 }
 .workspace-input:focus {
   border-color: var(--accent);
@@ -4332,7 +4373,7 @@ header h1 {
   border-color: var(--green);
 }
 .version-tag {
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-weight: 600;
   font-size: 12px;
   color: var(--text);
@@ -4480,7 +4521,7 @@ header h1 {
 
 .tailscale-detail-value {
   font-size: 12px;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   color: var(--text);
 }
 
@@ -4884,7 +4925,7 @@ header .btn-primary kbd {
   background: transparent;
   border: none;
   color: var(--text);
-  font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.7;
   padding: 16px;
@@ -4965,7 +5006,7 @@ header .btn-primary kbd {
   background: rgba(255, 255, 255, 0.06);
   padding: 1px 5px;
   border-radius: 3px;
-  font-family: "SF Mono", "Fira Code", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 
@@ -5583,11 +5624,6 @@ header .btn-primary kbd {
 }
 .terminal-loading-text .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
 .terminal-loading-text .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes dot-blink {
-  0%, 80%, 100% { opacity: 0; }
-  40% { opacity: 1; }
-}
-
 /* ═══════════════════════════════════════════════════
    EMBEDDED AGENT TERMINAL
    ═══════════════════════════════════════════════════ */
@@ -5623,7 +5659,7 @@ header .btn-primary kbd {
   gap: 6px;
   min-width: 0;
   overflow: hidden;
-  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 400;
 }

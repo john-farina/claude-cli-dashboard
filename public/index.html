@@ -22,7 +22,7 @@
     // Apply saved accent color before paint to prevent flash
     (function(){function L(h){var x=parseInt(h.replace("#",""),16);return((x>>16&255)*0.299+(x>>8&255)*0.587+(x&255)*0.114)>128}var m={gold:"#c9a84c",cyan:"#00e5ff",rose:"#c64c75",violet:"#894cc6",green:"#4cc67f",orange:"#c67f4c",blue:"#4c7fc6",coral:"#c6614c"};var k=localStorage.getItem("accentColor");if(k){var c=m[k]||(/^#[0-9a-fA-F]{6}$/.test(k)?k:null);if(c)document.documentElement.style.setProperty("--accent",c)}var bg=localStorage.getItem("bgColor");if(bg&&/^#[0-9a-fA-F]{6}$/.test(bg)){var s=document.documentElement.style;s.setProperty("--bg",bg);s.setProperty("--bg-gradient","linear-gradient(135deg,"+bg+" 0%,"+bg+" 100%)");if(L(bg))s.setProperty("--text","#1a1a1a")}var tc=localStorage.getItem("terminalColor");if(tc&&/^#[0-9a-fA-F]{6}$/.test(tc)){document.documentElement.style.setProperty("--terminal-bg",tc);if(L(tc))document.documentElement.style.setProperty("--terminal-text","#1a1a1a")}var sc=localStorage.getItem("shellColor");if(sc&&/^#[0-9a-fA-F]{6}$/.test(sc)){var ss=document.documentElement.style;ss.setProperty("--shell-bg",sc);if(L(sc)){ss.setProperty("--shell-text-dim","#555");ss.setProperty("--shell-pill-bg","rgba(0,0,0,0.06)");ss.setProperty("--shell-pill-border","rgba(0,0,0,0.08)")}}})();
   </script>
-  <link rel="stylesheet" href="style.css?v=20260305b" id="main-css">
+  <link rel="stylesheet" href="style.css?v=20260305d" id="main-css">
   <script>
     // Retry loading style.css if it fails (e.g. server restart timing)
     document.getElementById('main-css').onerror = function() {
@@ -97,6 +97,11 @@
           </div>
         </div>
       </span>
+      <div id="token-usage-wrap" class="token-usage-wrap">
+        <span class="token-usage-item"><span class="token-usage-label">Today</span><span id="token-usage-today" class="token-usage-value">—</span></span>
+        <span class="token-usage-item"><span class="token-usage-label">Month</span><span id="token-usage-month" class="token-usage-value">—</span></span>
+        <span class="token-usage-item"><span class="token-usage-label">All Time</span><span id="token-usage-total" class="token-usage-value">—</span></span>
+      </div>
     </div>
     <div class="header-right">
       <span id="update-wrapper" class="update-wrapper" style="display:none">
@@ -119,7 +124,7 @@
   <div id="minimized-bar" class="minimized-bar"></div>
 
   <main id="agents-grid" class="agents-grid">
-    <div id="empty-state" class="empty-state">
+    <div id="empty-state" class="empty-state" style="display:none">
       <p>No agents running. Click <strong>+ New Agent</strong> to start one.</p>
     </div>
   </main>
@@ -681,6 +686,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js" integrity="sha384-S1biLeI8L/bFduIVvCxbn/l4EtaG4nTqQjGF7qCYTbsGXGFe8KgIKXtw4+UWxprv" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js" integrity="sha384-suTk5GfzCaPxAJRzhqzQQvM81UskMll+stLgqXpay997ORTnMRm1IAJi143VfhXU" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js" integrity="sha384-1tVmtFdzvhqVP3vQWJmKYvD0uTtR0r+FhlLWw+vG6F/vNDS7yegNMNNHRS12fSyR" crossorigin="anonymous"></script>
-  <script src="app.js?v=20260305b"></script>
+  <script src="js/theme.js?v=20260305e"></script>
+  <script src="js/modals.js?v=20260305e"></script>
+  <script src="js/todos.js?v=20260305e"></script>
+  <script src="js/settings.js?v=20260305e"></script>
+  <script src="js/shell.js?v=20260305e"></script>
+  <script src="app.js?v=20260305f"></script>
 </body>
 </html>
