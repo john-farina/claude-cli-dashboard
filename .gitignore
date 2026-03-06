@@ -3,6 +3,7 @@ config.json
 sessions.json
 todos.json
 favorites.json
+token-usage.json
 docs/
 firebase-debug.log
 *.log

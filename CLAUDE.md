@@ -6,12 +6,14 @@
 
 ## Architecture
 
-Single-page Node.js app with 4 files:
+Single-page Node.js app — modular backend (`lib/`) and frontend (`public/js/`), no build tools.
 
 | File | Purpose |
 |------|---------|
-| `server.js` | Express + WebSocket server, tmux management, all API endpoints |
-| `public/app.js` | Frontend logic — cards, WebSocket, modals, doc viewer |
+| `server.js` | Thin orchestrator — Express routes + WebSocket wiring, imports `lib/` modules |
+| `lib/*.js` | 10 backend modules (security, tmux, git, output, session, claude-sessions, update, scrollback, terminal-cards, shell-pty) |
+| `public/app.js` | Core frontend — DOM init, WebSocket, agent cards, xterm infra, layout |
+| `public/js/*.js` | 5 frontend modules (theme, modals, todos, settings, shell) |
 | `public/style.css` | All styles (dark theme, CSS variables in `:root`) |
 | `public/index.html` | Shell HTML — modals, file browser panel, CDN scripts |
 
@@ -20,6 +22,8 @@ Supporting files:
 - `sessions.json` — Persisted agent metadata (name, workdir, created, resumeSessionId)
 - `docs/` — Agent-generated documents, organized as `docs/<agent-name>/<doc>.md`
 - `todos.json` — Persisted todo lists with agent attribution (`createdBy`, `lastModifiedBy`, `agentHistory`)
+
+**Full module breakdown:** Read `dev-docs/code-cleanup.md`
 
 ## How It Works
 

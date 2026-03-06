@@ -42,12 +42,20 @@ CACHE_DIR="$SCRIPT_DIR/.build-cache"
 mkdir -p "$CACHE_DIR" "$MACOS" "$RESOURCES"
 
 # 1. Compile Swift (skip if main.swift unchanged)
-SWIFT_HASH=$(shasum -a 256 "$SCRIPT_DIR/main.swift" | cut -d' ' -f1)
+
+# Generate a small Swift file that embeds the dashboard directory path at compile time.
+# This way the binary works regardless of where the repo was cloned.
+GENERATED_SWIFT="$TMP_DIR/GeneratedConfig.swift"
+cat > "$GENERATED_SWIFT" << SWIFT
+let CEO_DASHBOARD_DIR = "$CEO_DIR"
+SWIFT
+
+SWIFT_HASH="$(shasum -a 256 "$SCRIPT_DIR/main.swift" | cut -d' ' -f1)|$CEO_DIR"
 SWIFT_CACHE="$CACHE_DIR/swift.hash"
 if [ -f "$SWIFT_CACHE" ] && [ "$(cat "$SWIFT_CACHE")" = "$SWIFT_HASH" ] && [ -f "$MACOS/CEODashboard" ]; then
     echo "Swift binary unchanged — skipped compilation"
 else
-    swiftc "$SCRIPT_DIR/main.swift" \
+    swiftc "$SCRIPT_DIR/main.swift" "$GENERATED_SWIFT" \
         -o "$MACOS/CEODashboard" \
         -framework Cocoa \
         -framework WebKit \
