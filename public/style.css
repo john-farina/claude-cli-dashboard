@@ -27,6 +27,10 @@
   --orange: #c9a84c;
   --input-bg: #151514;
   --terminal-bg: #0e0e0d;
+  --terminal-text: var(--text);
+  --terminal-text-dim: var(--text-dim);
+  --terminal-link-color: inherit;
+  --shell-bg: #0d1117;
   --card-shadow: 0 4px 24px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
   --card-shadow-hover: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 24px rgba(201, 168, 76, 0.07);
   --header-bg: linear-gradient(180deg, #1a1a18 0%, #161614 100%);
@@ -47,6 +51,9 @@
 /* ═══════════════════════════════════════════════════
    BASE STYLES
    ═══════════════════════════════════════════════════ */
+html {
+  background: var(--bg);
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
   background: var(--bg);
@@ -72,9 +79,17 @@ body {
   align-items: center;
   justify-content: center;
   gap: 28px;
-  background: var(--bg);
+  /* Solid color base ensures full opacity even if gradient has transparency */
+  background-color: var(--bg);
   background-image: var(--bg-gradient);
   transition: opacity 0.4s ease, visibility 0.4s ease;
+  /* pointer-events:none lets keyboard events reach focused inputs beneath,
+     because keyboard events go to the focused element, not what's under the mouse */
+  pointer-events: none;
+}
+/* Inline CSS hides children until style.css loads — reveal them now */
+.page-loader > * {
+  visibility: visible;
 }
 .page-loader.fade-out {
   opacity: 0;
@@ -111,11 +126,14 @@ header {
   gap: 12px;
 }
 
+.claude-star-svg {
+  color: var(--accent);
+}
 .header-logo {
   width: 28px;
   height: 28px;
   opacity: 0.9;
-  transition: opacity 0.2s, transform 0.2s;
+  transition: opacity 0.2s, transform 0.2s, color 0.3s;
 }
 
 .header-logo:hover {
@@ -906,8 +924,8 @@ header h1 {
 .minimized-bar {
   display: none;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 10px 24px;
+  gap: 6px;
+  padding: 6px 24px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
@@ -922,7 +940,8 @@ header h1 {
 .agent-card.minimized .resize-grip,
 .agent-card.minimized .prompt-actions,
 .agent-card.minimized .attachment-chips,
-.agent-card.minimized .popout-placeholder {
+.agent-card.minimized .popout-placeholder,
+.agent-card.minimized .agent-terminal-section {
   display: none;
 }
 
@@ -933,6 +952,7 @@ header h1 {
   width: auto;
   border-radius: 8px;
   flex-shrink: 0;
+  margin-bottom: 0;
 }
 
 .agent-card.minimized .card-header {
@@ -1035,7 +1055,7 @@ header h1 {
   min-height: 80px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  color: var(--text);
+  color: var(--terminal-text);
   user-select: text;
   -webkit-user-select: text;
   cursor: text;
@@ -1043,9 +1063,9 @@ header h1 {
 
 /* Clickable paths & URLs in terminal output */
 .terminal-link {
-  color: inherit;
+  color: var(--terminal-link-color);
   text-decoration: underline;
-  text-decoration-color: var(--text-dim);
+  text-decoration-color: var(--terminal-text-dim);
   text-underline-offset: 2px;
   cursor: pointer;
   transition: color 0.1s;
@@ -1134,7 +1154,7 @@ header h1 {
   width: 40px;
   height: 40px;
   transform: translate(-50%, -50%);
-  filter: drop-shadow(0 0 8px rgba(217, 119, 87, 0.4));
+  filter: drop-shadow(0 0 8px var(--accent-glow));
   animation: logo-pulse 2.5s ease-in-out infinite;
 }
 
@@ -1149,7 +1169,7 @@ header h1 {
   inset: 0;
   border-radius: 50%;
   border: 1px solid transparent;
-  border-top-color: rgba(201, 168, 76, 0.4);
+  border-top-color: var(--accent-glow);
   animation: ring-spin 3s linear infinite;
 }
 .loading-ring-2 {
@@ -1968,7 +1988,7 @@ header h1 {
 }
 .diff-icon-btn:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--accent-subtle);
   border-color: var(--border);
 }
 .diff-close-btn:hover {
@@ -2010,14 +2030,14 @@ header h1 {
   margin-bottom: 8px;
 }
 .diff-empty .diff-state-icon {
-  background: rgba(92, 184, 92, 0.1);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
   color: var(--green);
-  border: 1px solid rgba(92, 184, 92, 0.2);
+  border: 1px solid color-mix(in srgb, var(--green) 20%, transparent);
 }
 .diff-error .diff-state-icon {
-  background: rgba(217, 83, 79, 0.1);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
   color: var(--red);
-  border: 1px solid rgba(217, 83, 79, 0.2);
+  border: 1px solid color-mix(in srgb, var(--red) 20%, transparent);
 }
 .diff-state-text {
   font-size: 14px;
@@ -2115,7 +2135,7 @@ header h1 {
   font-family: "SF Mono", "Fira Code", "Consolas", monospace;
 }
 .diff-modal .d2h-tag {
-  background: rgba(201, 168, 76, 0.12);
+  background: var(--accent-subtle);
   color: var(--accent);
   border: none;
   border-radius: 4px;
@@ -2126,7 +2146,12 @@ header h1 {
   padding: 2px 6px;
 }
 
-/* Table layout */
+/* Table layout — override diff2html's absolute-positioning scheme with
+   normal table-cell flow so line numbers scroll with the content */
+.diff-modal .d2h-file-diff {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
 .diff-modal .d2h-diff-table {
   border-color: var(--border);
   font-family: "SF Mono", "Fira Code", "Consolas", monospace;
@@ -2136,59 +2161,92 @@ header h1 {
   border-color: var(--border);
 }
 
-/* Code lines */
-.diff-modal .d2h-code-line,
-.diff-modal .d2h-code-side-line {
-  background: var(--terminal-bg);
-  color: var(--text);
-  width: 100%;
-  padding: 0 12px;
-}
-
-/* Line numbers */
+/* Line numbers — override position:absolute to normal table-cell flow */
 .diff-modal .d2h-code-linenumber {
+  position: static !important;
+  display: table-cell !important;
+  width: auto !important;
+  min-width: 3em;
+  padding: 0 0.6em !important;
   background: var(--surface);
   color: var(--text-dim);
   border-color: var(--border);
+  border-right: 1px solid var(--border);
+  text-align: right;
+  vertical-align: top;
+  white-space: nowrap;
+  direction: ltr;
 }
 .diff-modal .d2h-code-linenumber::after {
   border-color: var(--border);
 }
 
+/* Side-by-side line numbers — same table-cell fix */
+.diff-modal .d2h-code-side-linenumber {
+  position: static !important;
+  display: table-cell !important;
+  width: auto !important;
+  min-width: 2.5em;
+  padding: 0 0.5em !important;
+  background: var(--surface);
+  color: var(--text-dim);
+  border-color: var(--border);
+  border-right: 1px solid var(--border);
+  text-align: right;
+  vertical-align: top;
+  white-space: nowrap;
+  direction: ltr;
+}
+.diff-modal .d2h-code-side-linenumber::after {
+  border-color: var(--border);
+}
+
+/* Code lines — remove the large padding that compensated for absolute line numbers */
+.diff-modal .d2h-code-line,
+.diff-modal .d2h-code-side-line {
+  display: table-cell !important;
+  background: var(--terminal-bg);
+  color: var(--text);
+  padding: 0 12px !important;
+  width: 100%;
+}
+
 /* Deletions */
 .diff-modal .d2h-del {
-  background: rgba(248, 81, 73, 0.1);
-  border-color: rgba(248, 81, 73, 0.2);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  border-color: color-mix(in srgb, var(--red) 20%, transparent);
 }
 .diff-modal .d2h-del .d2h-code-line,
 .diff-modal .d2h-del .d2h-code-side-line {
   background: transparent;
 }
 .diff-modal .d2h-del .d2h-code-line-ctn del {
-  background: rgba(248, 81, 73, 0.25);
+  background: color-mix(in srgb, var(--red) 25%, transparent);
   text-decoration: none;
 }
-.diff-modal .d2h-del .d2h-code-linenumber {
-  background: rgba(248, 81, 73, 0.12);
-  border-color: rgba(248, 81, 73, 0.2);
+.diff-modal .d2h-del .d2h-code-linenumber,
+.diff-modal .d2h-del .d2h-code-side-linenumber {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  border-color: color-mix(in srgb, var(--red) 20%, transparent);
 }
 
 /* Insertions */
 .diff-modal .d2h-ins {
-  background: rgba(63, 185, 80, 0.1);
-  border-color: rgba(63, 185, 80, 0.2);
+  background: color-mix(in srgb, var(--green) 10%, transparent);
+  border-color: color-mix(in srgb, var(--green) 20%, transparent);
 }
 .diff-modal .d2h-ins .d2h-code-line,
 .diff-modal .d2h-ins .d2h-code-side-line {
   background: transparent;
 }
 .diff-modal .d2h-ins .d2h-code-line-ctn ins {
-  background: rgba(63, 185, 80, 0.25);
+  background: color-mix(in srgb, var(--green) 25%, transparent);
   text-decoration: none;
 }
-.diff-modal .d2h-ins .d2h-code-linenumber {
-  background: rgba(63, 185, 80, 0.12);
-  border-color: rgba(63, 185, 80, 0.2);
+.diff-modal .d2h-ins .d2h-code-linenumber,
+.diff-modal .d2h-ins .d2h-code-side-linenumber {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  border-color: color-mix(in srgb, var(--green) 20%, transparent);
 }
 
 /* Hunk info row (@@ ... @@) */
@@ -2201,7 +2259,7 @@ header h1 {
 
 /* Empty placeholders (side-by-side) */
 .diff-modal .d2h-emptyplaceholder {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--input-bg);
   border-color: var(--border);
 }
 
@@ -3228,10 +3286,30 @@ header h1 {
   border-bottom: none;
 }
 
-/* Hidden on desktop, shown on mobile */
-.expand-btn { display: none; }
+/* Fullscreen back button — only visible in fullscreen mode */
+.fullscreen-back-btn {
+  display: none;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 8px 2px 4px;
+  border-radius: 6px;
+  line-height: 1;
+  transition: all 0.15s;
+  margin-right: 2px;
+}
+.fullscreen-back-btn:hover {
+  background: var(--accent-subtle);
+}
+.agent-card.fullscreen .fullscreen-back-btn {
+  display: inline-flex;
+  align-items: center;
+}
+.agent-card.fullscreen .expand-btn { display: none; }
 
-/* Fullscreen agent card (mobile expand) */
+/* Fullscreen agent card */
 .agent-card.fullscreen {
   position: fixed;
   inset: 0;
@@ -3420,14 +3498,14 @@ header h1 {
   padding: 0 14px;
   height: 36px;
   min-height: 36px;
-  background: #161b22;
+  background: var(--shell-header-bg, #161b22);
   flex-shrink: 0;
   gap: 10px;
   cursor: pointer;
   user-select: none;
 }
 .shell-panel-header:hover {
-  background: #1c2129;
+  background: var(--shell-header-hover, #1c2129);
 }
 .shell-panel-header-left {
   display: flex;
@@ -3442,13 +3520,13 @@ header h1 {
 .shell-panel-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-dim);
+  color: var(--shell-text-dim, var(--text-dim));
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .shell-chevron {
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--shell-text-dim, var(--text-dim));
   line-height: 1;
 }
 .shell-panel.open .shell-chevron {
@@ -3463,17 +3541,17 @@ header h1 {
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(255,255,255,0.06);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: var(--shell-pill-bg, rgba(255,255,255,0.06));
+  border: 1px solid var(--shell-pill-border, rgba(255,255,255,0.06));
   white-space: nowrap;
   line-height: 1.4;
-  color: var(--text-dim);
+  color: var(--shell-text-dim, var(--text-dim));
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s;
 }
 .shell-info-pill:hover {
-  background: rgba(255,255,255,0.12);
-  border-color: rgba(255,255,255,0.15);
+  background: var(--shell-pill-hover, rgba(255,255,255,0.12));
+  border-color: var(--shell-pill-hover-border, rgba(255,255,255,0.15));
 }
 .shell-cwd-pill:before {
   content: "\1F4C2";
@@ -3680,7 +3758,7 @@ header h1 {
   min-height: 0;
   padding: 4px 0 0 8px;
   overflow: hidden;
-  background: #0d1117;
+  background: var(--shell-bg);
   clip-path: inset(0);
 }
 /* When collapsed, terminal has zero height and is invisible */
@@ -3747,6 +3825,84 @@ header h1 {
   border-bottom: 1px solid var(--border);
 }
 
+.accent-color-grid {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.accent-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  position: relative;
+  box-shadow: 0 0 0 0 transparent;
+}
+.accent-swatch:hover {
+  transform: scale(1.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+.accent-swatch.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 3px rgba(255,255,255,0.85);
+  transform: scale(1.1);
+}
+.accent-swatch-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.accent-swatch-delete {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  border: none;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 0;
+}
+.accent-swatch-wrap:hover .accent-swatch-delete {
+  opacity: 1;
+}
+.accent-swatch-add {
+  background: var(--surface-raised);
+  border: 2px dashed var(--border);
+  color: var(--text-dim);
+  font-size: 18px;
+  line-height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.accent-swatch-add:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+.accent-picker-container {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+}
+.accent-picker-container.hidden { display: none; }
+.accent-picker-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .settings-section-title {
   font-size: 11px;
   font-weight: 600;
@@ -3806,6 +3962,15 @@ header h1 {
   opacity: 0.5;
   cursor: default;
   transform: none;
+}
+.btn-settings-action.armed {
+  background: #e04040;
+  animation: pulse-red 0.4s ease;
+}
+@keyframes pulse-red {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+  100% { transform: scale(1); }
 }
 .btn-settings-action.installed,
 .btn-settings-action.btn-authorized {
@@ -3869,6 +4034,20 @@ header h1 {
   padding-top: 12px;
 }
 .settings-collapse-body.hidden { display: none; }
+#customize-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+#customize-body.hidden { display: none; }
+.customize-color-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.customize-color-section .settings-desc {
+  margin-bottom: 4px;
+}
 
 /* Inline settings rows */
 .settings-inline-row {
@@ -3915,6 +4094,7 @@ header h1 {
   color: var(--text-dim);
   margin-top: 8px;
 }
+.settings-hint.hidden { display: none; }
 
 /* Workspace editor in settings */
 .workspace-list {
@@ -5110,7 +5290,7 @@ header .btn-primary kbd {
     display: none !important;
   }
   .expand-btn {
-    display: flex !important;
+    display: flex;
   }
 
   /* Minimized bar — scrolls normally on mobile (sticky wastes too much screen space) */
@@ -5321,4 +5501,205 @@ header .btn-primary kbd {
     min-width: 36px;
     min-height: 36px;
   }
+}
+
+/* ═══════════════════════════════════════════════════
+   TERMINAL CARD (xterm.js)
+   ═══════════════════════════════════════════════════ */
+.terminal-card {
+  display: flex;
+  flex-direction: column;
+}
+.terminal-card .terminal-xterm-container {
+  flex: 1 1 0;
+  min-height: 80px;
+  overflow: hidden;
+  background: var(--shell-bg);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.terminal-card .terminal-xterm-container .xterm {
+  height: 100% !important;
+  width: 100% !important;
+}
+.terminal-card .terminal-xterm-container .xterm-viewport {
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+}
+.terminal-card .terminal-icon {
+  color: var(--text-dim);
+  font-family: monospace;
+  font-weight: bold;
+  margin-right: 4px;
+  font-size: 13px;
+}
+
+/* Terminal card loading state */
+.terminal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 200px;
+  gap: 18px;
+  transition: opacity 0.3s;
+}
+.terminal-loading.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+.terminal-loading-anim {
+  position: relative;
+  width: 100px;
+  height: 100px;
+}
+.terminal-loading-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  transform: translate(-50%, -50%);
+  color: var(--accent);
+  filter: drop-shadow(0 0 10px var(--accent-glow));
+  animation: term-load-pulse 2.5s ease-in-out infinite;
+}
+.terminal-loading-icon svg {
+  width: 100%;
+  height: 100%;
+}
+@keyframes term-load-pulse {
+  0%, 100% { filter: drop-shadow(0 0 8px var(--accent-glow)); transform: translate(-50%, -50%) scale(1); }
+  50% { filter: drop-shadow(0 0 20px var(--accent-glow)); transform: translate(-50%, -50%) scale(1.1); }
+}
+.terminal-loading-text {
+  font-size: 15px;
+  color: var(--accent);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.terminal-loading-text .loading-dots span {
+  animation: dot-blink 1.4s infinite both;
+}
+.terminal-loading-text .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.terminal-loading-text .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes dot-blink {
+  0%, 80%, 100% { opacity: 0; }
+  40% { opacity: 1; }
+}
+
+/* ═══════════════════════════════════════════════════
+   EMBEDDED AGENT TERMINAL
+   ═══════════════════════════════════════════════════ */
+.agent-terminal-section {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* When terminal is open, offset grip above the terminal section */
+.card-body-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+.agent-terminal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.agent-terminal-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-family: "SF Mono", "Fira Code", "Consolas", monospace;
+  font-size: 11px;
+  font-weight: 400;
+}
+.agent-terminal-header-left .workdir-link {
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.agent-terminal-header-left .branch-info {
+  font-size: 10px;
+  min-width: 0;
+}
+.agent-term-pr-btn {
+  flex-shrink: 0;
+  line-height: 1.3;
+}
+.agent-terminal-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--accent);
+}
+.agent-terminal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.agent-terminal-close,
+.agent-terminal-expand {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  border-radius: 4px;
+}
+.agent-terminal-close:hover {
+  color: var(--red);
+}
+.agent-terminal-expand:hover {
+  color: var(--accent);
+}
+.agent-terminal-resize {
+  height: 6px;
+  cursor: ns-resize;
+  background: var(--border);
+  transition: background 0.15s;
+  border-radius: 0 0 12px 12px;
+  flex-shrink: 0;
+}
+.agent-terminal-resize:hover {
+  background: var(--accent);
+}
+.agent-terminal-container {
+  height: 200px;
+  min-height: 80px;
+  overflow: hidden;
+  background: var(--shell-bg);
+  position: relative;
+  flex: 1;
+}
+.agent-terminal-container .xterm-screen {
+  padding: 4px 0 0 4px;
+}
+.agent-terminal-container > .terminal-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: var(--shell-bg);
+  min-height: 0;
+}
+.agent-terminal-container .xterm {
+  height: 100% !important;
+  width: 100% !important;
+}
+.agent-terminal-container .xterm-viewport {
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
 }

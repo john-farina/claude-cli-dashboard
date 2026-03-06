@@ -7,3 +7,5 @@ docs/
 firebase-debug.log
 *.log
 .DS_Store
+native-app/.build-cache/
+native-app/ceo-dashboard

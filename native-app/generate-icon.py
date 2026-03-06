@@ -13,8 +13,25 @@ import sys
 SIZE = 1024
 CORNER_RADIUS = int(SIZE * 0.22)  # macOS-style rounded corners
 
-# Claude star color — dashboard accent gold
+# Claude star color — dashboard accent (default: gold)
+# Override with --color RRGGBB (hex, no #)
 STAR_R, STAR_G, STAR_B = 0xC9, 0xA8, 0x4C
+
+# Background color — dashboard base bg (default: #121212)
+# Override with --bg RRGGBB (hex, no #)
+BG_R, BG_G, BG_B = 0x12, 0x12, 0x12
+BG_CUSTOM = False
+
+for i, arg in enumerate(sys.argv):
+    if arg == "--color" and i + 1 < len(sys.argv):
+        h = sys.argv[i + 1].lstrip("#")
+        if len(h) == 6:
+            STAR_R, STAR_G, STAR_B = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    elif arg == "--bg" and i + 1 < len(sys.argv):
+        h = sys.argv[i + 1].lstrip("#")
+        if len(h) == 6:
+            BG_R, BG_G, BG_B = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+            BG_CUSTOM = True
 
 # Parse the Claude star SVG path into line segments for rasterization
 # The path data from claude-symbol.svg (viewBox 0 0 1200 1200)
@@ -129,15 +146,24 @@ def main():
     shadow_px = [(px + shadow_dx, py + shadow_dy) for px, py in star_px]
     shadow_blur = 18  # how far the shadow extends beyond the shape
 
-    # Background gradient: dashboard bg #121212 center → much darker #060606 at edges
-    center_r, center_g, center_b = 0x16, 0x16, 0x16
-    edge_r, edge_g, edge_b = 0x04, 0x04, 0x04
+    # Background gradient: slightly brighter center → bg color at edges
+    # Keeps the chosen bg color prominent across the entire icon
+    center_r = min(255, int(BG_R * 1.35))
+    center_g = min(255, int(BG_G * 1.35))
+    center_b = min(255, int(BG_B * 1.35))
+    edge_r = max(0, int(BG_R * 0.65))
+    edge_g = max(0, int(BG_G * 0.65))
+    edge_b = max(0, int(BG_B * 0.65))
     cx, cy = SIZE / 2, SIZE / 2
     max_dist = math.sqrt(cx * cx + cy * cy)
 
-    # Star gradient: lighter gold top (#dabb6a) → deeper gold bottom (#a88a30)
-    star_top_r, star_top_g, star_top_b = 0xDA, 0xBB, 0x6A
-    star_bot_r, star_bot_g, star_bot_b = 0xA8, 0x8A, 0x30
+    # Star gradient: lighter top → deeper bottom (derived from accent color)
+    star_top_r = min(255, int(STAR_R * 1.1))
+    star_top_g = min(255, int(STAR_G * 1.1))
+    star_top_b = min(255, int(STAR_B * 1.1))
+    star_bot_r = int(STAR_R * 0.82)
+    star_bot_g = int(STAR_G * 0.82)
+    star_bot_b = int(STAR_B * 0.82)
 
     # Precompute a shadow mask using multi-sample distance field
     # For performance, compute star coverage at each pixel first

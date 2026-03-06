@@ -884,6 +884,13 @@ function killSession(name) {
   tmuxExec(`kill-session -t ${session}`);
   invalidateTmuxSessionsCache();
 
+  // Clean up terminal PTY wrapper if it exists
+  const entry = terminalPtys.get(name);
+  if (entry) {
+    try { entry.pty.kill(); } catch {}
+    terminalPtys.delete(name);
+  }
+
   const meta = loadSessionsMeta();
   delete meta[name];
   saveSessionsMeta(meta);
@@ -1061,7 +1068,30 @@ function parsePromptOptions(output) {
 // --- REST API ---
 
 app.use(express.json({ limit: "10mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+// Serve index.html with dynamic cache-busting for JS/CSS (defeats WKWebView cache)
+// Cache-bust query params use file mtime (see app.js/style.css serving below)
+app.get("/", (req, res) => {
+  const htmlPath = path.join(__dirname, "public", "index.html");
+  let html = fs.readFileSync(htmlPath, "utf8");
+  // Inject cache-bust param based on file mtime
+  const appJsMtime = fs.statSync(path.join(__dirname, "public", "app.js")).mtimeMs | 0;
+  const cssMtime = fs.statSync(path.join(__dirname, "public", "style.css")).mtimeMs | 0;
+  html = html.replace(/src="app\.js[^"]*"/, `src="app.js?v=${appJsMtime}"`);
+  html = html.replace(/href="style\.css[^"]*" id="main-css"/, `href="style.css?v=${cssMtime}" id="main-css"`);
+  res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+});
+app.use(express.static(path.join(__dirname, "public"), {
+  setHeaders: (res, filePath) => {
+    // Prevent WKWebView from caching JS/CSS — always serve fresh
+    if (filePath.endsWith(".js") || filePath.endsWith(".css") || filePath.endsWith(".html")) {
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    }
+  }
+}));
 
 // --- Security: CSRF protection for API endpoints ---
 // The IP allowlist (above) blocks external attackers. This blocks cross-origin requests
@@ -1107,6 +1137,8 @@ app.get("/api/config", (req, res) => {
     defaultAgentName: userConfig.defaultAgentName || "agent",
     shellCommand: userConfig.shellCommand || "ceo",
     title: userConfig.title || "CEO Dashboard",
+    accentColor: userConfig.accentColor || "gold",
+    bgColor: userConfig.bgColor || null,
     needsSetup: _configMissing,
     shellAvailable: !!pty,
   });
@@ -1129,6 +1161,11 @@ app.put("/api/config", (req, res) => {
     }
   }
   if (updates.title !== undefined) userConfig.title = updates.title;
+  if (updates.accentColor !== undefined) userConfig.accentColor = updates.accentColor;
+  if (updates.bgColor !== undefined) {
+    if (updates.bgColor === null) delete userConfig.bgColor;
+    else userConfig.bgColor = updates.bgColor;
+  }
   if (updates.dismissedOriginHead !== undefined) {
     if (updates.dismissedOriginHead === null) delete userConfig.dismissedOriginHead;
     else userConfig.dismissedOriginHead = updates.dismissedOriginHead;
@@ -1184,6 +1221,7 @@ app.get("/api/sessions", async (req, res) => {
       isWorktree: git?.isWorktree || false,
       favorite: meta[name]?.favorite || false,
       minimized: meta[name]?.minimized || false,
+      type: meta[name]?.type || "agent",
     };
   }));
 
@@ -1650,7 +1688,7 @@ app.get("/api/claude-sessions", async (req, res) => {
 });
 
 app.post("/api/sessions", async (req, res) => {
-  const { name, prompt, workdir, resumeSessionId, initialImages, initialImageText } = req.body;
+  const { name, prompt, workdir, resumeSessionId, initialImages, initialImageText, type } = req.body;
 
   if (!name || !/^[a-zA-Z0-9_-]+$/.test(name)) {
     return res.status(400).json({ error: "Invalid name (alphanumeric, dash, underscore only)" });
@@ -1663,6 +1701,37 @@ app.post("/api/sessions", async (req, res) => {
     let i = 1;
     while (existing.includes(`${PREFIX}${finalName}-${i}`)) i++;
     finalName = `${finalName}-${i}`;
+  }
+
+  // Terminal card: bare tmux shell, no Claude CLI
+  if (type === "terminal") {
+    try {
+      ensureTmuxServer();
+      const dir = workdir || DEFAULT_WORKDIR;
+      if (!isValidWorkdir(dir)) {
+        return res.status(400).json({ error: "Invalid working directory" });
+      }
+      // Reuse existing tmux session if it exists (e.g. close + reopen terminal)
+      const wantedSession = `${PREFIX}${name}`;
+      const alreadyExists = existing.includes(wantedSession);
+      const session = alreadyExists ? wantedSession : `${PREFIX}${finalName}`;
+      if (!alreadyExists) {
+        execSync(
+          `tmux new-session -d -s ${session} -x 120 -y 50 -c ${shellQuote(dir)}`,
+          { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+        );
+        // Disable tmux status bar for terminal cards — it shows as an ugly colored bar
+        try { execSync(`tmux set-option -t ${session} status off`, { stdio: "ignore" }); } catch {}
+      }
+      const usedName = alreadyExists ? name : finalName;
+      // Terminal sessions are ephemeral — do NOT persist to sessions.json
+      invalidateTmuxSessionsCache();
+      const git = await getCachedGitInfo(dir);
+      res.json({ name: usedName, workdir: dir, type: "terminal", branch: git?.branch || null, isWorktree: git?.isWorktree || false });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+    return;
   }
 
   // If resuming, derive workdir from the Claude session's projectPath
@@ -2026,6 +2095,42 @@ app.get("/api/sessions/:name/diff", async (req, res) => {
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// --- PR URL lookup for agent terminals ---
+
+app.get("/api/sessions/:name/pr-url", async (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) {
+    return res.status(400).json({ error: "Invalid session name" });
+  }
+  const meta = loadSessionsMeta();
+  const sessions = listTmuxSessions();
+  const session = sessions.find((s) => s === `${PREFIX}${name}`);
+  let workdir;
+  if (session) {
+    try { workdir = await getEffectiveCwdAsync(session, prevOutputs.get(session)); } catch {}
+  }
+  if (!workdir) workdir = meta[name]?.workdir;
+  if (!workdir) return res.json({ prUrl: null });
+
+  try {
+    const git = await getGitInfoAsync(workdir);
+    if (!git?.branch || git.branch === "main" || git.branch === "master") {
+      return res.json({ prUrl: null });
+    }
+    const result = await new Promise((resolve) => {
+      exec(`gh pr view "${git.branch}" --json url -q .url 2>/dev/null`, {
+        cwd: workdir, encoding: "utf8", timeout: 5000,
+      }, (err, stdout) => {
+        const url = (stdout || "").trim();
+        resolve(url.startsWith("http") ? toPrUrl(url) : null);
+      });
+    });
+    res.json({ prUrl: result });
+  } catch {
+    res.json({ prUrl: null });
   }
 });
 
@@ -2484,7 +2589,7 @@ app.get("/api/settings", (req, res) => {
     } catch {}
 
     // Check if Dock app is installed
-    const dockAppPath = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+    const dockAppPath = getNativeAppDir();
     const dockAppInstalled = fs.existsSync(dockAppPath);
 
     res.json({ sleepPrevention, tailscale, autoStart, dockAppInstalled });
@@ -2566,13 +2671,19 @@ app.post("/api/settings/auto-start", (req, res) => {
 app.post("/api/settings/add-to-dock", (req, res) => {
   const buildScript = path.join(__dirname, "native-app", "build.sh");
   try {
-    execSync(`bash "${buildScript}"`, { timeout: 30000, encoding: "utf8" });
-    const appDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+    execSync(`CEO_NO_OPEN=1 CEO_FORCE_ICON=1 bash "${buildScript}"`, { timeout: 60000, encoding: "utf8" });
+    const appDir = getNativeAppDir();
     res.json({ ok: true, path: appDir });
   } catch (e) {
     res.status(500).json({ error: e.stderr || e.message });
   }
 });
+
+// Native app path — derived from config title so rename/rebuild targets the right .app
+function getNativeAppDir() {
+  const title = userConfig.title || "CEO Dashboard";
+  return path.join(os.homedir(), "Applications", `${title}.app`);
+}
 
 // Send a notification — osascript for macOS banners, WebSocket for browser + native app badge
 const DASHBOARD_TITLE = "CEO Dashboard";
@@ -2919,7 +3030,7 @@ app.get("/api/favorites/check", (req, res) => {
 
 app.get("/api/versions", (req, res) => {
   try {
-    try { execSync("git fetch --tags origin", { cwd: __dirname, timeout: 15000, stdio: "ignore" }); } catch {}
+    try { execSync(`git fetch --tags ${getUpstreamRemote()}`, { cwd: __dirname, timeout: 15000, stdio: "ignore" }); } catch {}
     const tagsRaw = execSync('git tag -l "v*" --sort=-version:refname', { cwd: __dirname, encoding: "utf8" }).trim();
     if (!tagsRaw) return res.json({ versions: [], currentHead: null, minVersion: MIN_DASHBOARD_VERSION });
     const currentHead = execSync("git rev-parse HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
@@ -2942,9 +3053,10 @@ app.post("/api/install-version", (req, res) => {
   try {
     const branch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
     if (branch !== "main") return res.status(400).json({ error: "not-on-main", message: "Must be on the main branch to switch versions.", cwd: __dirname });
-    // Save current origin/main HEAD as dismissed so update button doesn't nag
+    // Save current upstream HEAD as dismissed so update button doesn't nag
     try {
-      const originHead = execSync("git rev-parse origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+      const remote = getUpstreamRemote();
+      const originHead = execSync(`git rev-parse ${remote}/main`, { cwd: __dirname, encoding: "utf8" }).trim();
       userConfig.dismissedOriginHead = originHead;
       fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
     } catch {}
@@ -2976,6 +3088,53 @@ app.post("/api/install-version", (req, res) => {
 
 // --- Update check ---
 
+// Detect the correct remote for upstream (john-farina/claude-cli-dashboard).
+// Users may have:
+//   - origin = upstream repo (direct clone) → use "origin"
+//   - origin = their fork, upstream = upstream repo (fork clone) → use "upstream"
+//   - origin = their fork, no upstream remote → add "upstream" and use it
+const UPSTREAM_REPO_URL = "https://github.com/john-farina/claude-cli-dashboard.git";
+const UPSTREAM_SLUG = "john-farina/claude-cli-dashboard";
+
+function _getUpstreamRemote() {
+  try {
+    // Check all remotes and find one pointing to the upstream repo
+    const remotes = execSync("git remote -v", { cwd: __dirname, encoding: "utf8" });
+    // Prefer "upstream" remote if it exists and points to the right place
+    for (const name of ["upstream", "origin"]) {
+      const re = new RegExp(`^${name}\\s+.*${UPSTREAM_SLUG}`, "m");
+      if (re.test(remotes)) return name;
+    }
+    // Check all remotes for the upstream URL
+    for (const line of remotes.split("\n")) {
+      if (line.includes(UPSTREAM_SLUG) && line.includes("(fetch)")) {
+        return line.split(/\s+/)[0];
+      }
+    }
+    // No remote points to upstream — add one
+    try {
+      execSync(`git remote add upstream ${UPSTREAM_REPO_URL}`, { cwd: __dirname, timeout: 5000, stdio: "ignore" });
+      console.log("[update] Added 'upstream' remote pointing to", UPSTREAM_REPO_URL);
+      return "upstream";
+    } catch (addErr) {
+      // "upstream" remote already exists but points elsewhere — use a unique name
+      try {
+        execSync(`git remote add ceo-upstream ${UPSTREAM_REPO_URL}`, { cwd: __dirname, timeout: 5000, stdio: "ignore" });
+        return "ceo-upstream";
+      } catch { return "origin"; } // last resort
+    }
+  } catch {
+    return "origin";
+  }
+}
+
+// Cache the remote name (only changes if user manually edits remotes)
+let _upstreamRemote = null;
+function getUpstreamRemote() {
+  if (!_upstreamRemote) _upstreamRemote = _getUpstreamRemote();
+  return _upstreamRemote;
+}
+
 let updateCache = { updateAvailable: false, checkedAt: 0, behind: 0, releaseNotes: null, summary: null };
 let _updateCheckPromise = null;
 
@@ -2988,17 +3147,18 @@ function checkForUpdate() {
 
 async function _doUpdateCheck() {
   try {
-    // Fetch latest commits from origin (no merge, just update refs)
-    execSync("git fetch origin main", { cwd: __dirname, timeout: 15000, stdio: "ignore" });
+    const remote = getUpstreamRemote();
+    // Fetch latest commits from upstream (no merge, just update refs)
+    execSync(`git fetch ${remote} main`, { cwd: __dirname, timeout: 15000, stdio: "ignore" });
     // Count how many commits we're behind
-    const behind = execSync("git rev-list --count HEAD..origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+    const behind = execSync(`git rev-list --count HEAD..${remote}/main`, { cwd: __dirname, encoding: "utf8" }).trim();
     const behindCount = parseInt(behind, 10) || 0;
     let updateAvailable = behindCount > 0;
 
-    // Respect intentional downgrades — suppress update if user dismissed this origin/main HEAD
+    // Respect intentional downgrades — suppress update if user dismissed this upstream HEAD
     if (updateAvailable && userConfig.dismissedOriginHead) {
       try {
-        const originHead = execSync("git rev-parse origin/main", { cwd: __dirname, encoding: "utf8" }).trim();
+        const originHead = execSync(`git rev-parse ${remote}/main`, { cwd: __dirname, encoding: "utf8" }).trim();
         if (originHead === userConfig.dismissedOriginHead) {
           // Same origin/main the user already dismissed — suppress
           updateAvailable = false;
@@ -3014,7 +3174,7 @@ async function _doUpdateCheck() {
     let summary = null;
     if (updateAvailable) {
       try {
-        summary = execSync('git log HEAD..origin/main --pretty=format:"%s" --no-merges', { cwd: __dirname, encoding: "utf8" }).trim();
+        summary = execSync(`git log HEAD..${remote}/main --pretty=format:"%s" --no-merges`, { cwd: __dirname, encoding: "utf8" }).trim();
       } catch {}
     }
 
@@ -3070,10 +3230,21 @@ app.get("/api/check-update", async (req, res) => {
 
 app.post("/api/update", async (req, res) => {
   try {
-    // Run git fetch + merge
-    execSync("git fetch origin main", { cwd: __dirname, timeout: 30000 });
+    const remote = getUpstreamRemote();
+    // Ensure we're on main branch — updating a feature branch is wrong
+    const currentBranch = execSync("git rev-parse --abbrev-ref HEAD", { cwd: __dirname, encoding: "utf8" }).trim();
+    if (currentBranch !== "main") {
+      return res.status(409).json({
+        error: "not-on-main",
+        message: `You're on branch "${currentBranch}". Switch to main before updating.`,
+        cwd: __dirname,
+        branch: currentBranch,
+      });
+    }
+    // Run git fetch + merge from upstream
+    execSync(`git fetch ${remote} main`, { cwd: __dirname, timeout: 30000 });
     try {
-      execSync("git -c merge.ff=false -c pull.rebase=false merge origin/main --no-edit", { cwd: __dirname, timeout: 30000 });
+      execSync(`git -c merge.ff=false -c pull.rebase=false merge ${remote}/main --no-edit`, { cwd: __dirname, timeout: 30000 });
     } catch (mergeErr) {
       const stderr = (mergeErr.stderr || "").toString();
       const msg = mergeErr.message || "";
@@ -3115,7 +3286,7 @@ app.post("/api/update", async (req, res) => {
             diffTruncated = true;
           }
         } catch {}
-        return res.status(409).json({ error: "merge-conflict", conflicts, cwd: __dirname, localDiff, diffTruncated });
+        return res.status(409).json({ error: "merge-conflict", conflicts, cwd: __dirname, localDiff, diffTruncated, remote });
       }
 
       try { execSync("git merge --abort", { cwd: __dirname }); } catch {}
@@ -3136,7 +3307,7 @@ app.post("/api/update", async (req, res) => {
             diffTruncated = true;
           }
         } catch {}
-        return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that conflict with the update.", cwd: __dirname, localDiff, diffTruncated });
+        return res.status(409).json({ error: "dirty-workdir", message: "You have uncommitted local changes that conflict with the update.", cwd: __dirname, localDiff, diffTruncated, remote });
       }
 
       // Network
@@ -3148,7 +3319,7 @@ app.post("/api/update", async (req, res) => {
         return res.status(504).json({ error: "timeout", message: "The update timed out. Try again." });
 
       // Fallback
-      return res.status(500).json({ error: "unknown", message: stderr || msg || "Merge failed", cwd: __dirname });
+      return res.status(500).json({ error: "unknown", message: stderr || msg || "Merge failed", cwd: __dirname, remote });
     }
     // Clear version dismissal — user explicitly chose to update
     if (userConfig.dismissedOriginHead) {
@@ -3169,7 +3340,7 @@ app.post("/api/update", async (req, res) => {
       }
     }
     // Check if native-app/ files changed in this update
-    const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+    const nativeAppDir = getNativeAppDir();
     let nativeChanged = false;
     try {
       const changed = execSync("git diff HEAD~1 --name-only", { cwd: __dirname, encoding: "utf8" });
@@ -3208,6 +3379,54 @@ app.post("/api/update", async (req, res) => {
 
 // --- Bug Report ---
 // Collects system info and creates a GitHub issue via `gh` CLI.
+// Delete all git worktrees (except main working tree)
+app.post("/api/worktrees/delete-all", (req, res) => {
+  try {
+    const raw = execSync("git worktree list --porcelain", { encoding: "utf8", timeout: 10000 });
+    const worktrees = [];
+    let current = {};
+    for (const line of raw.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        current = { path: line.slice(9) };
+      } else if (line === "") {
+        if (current.path) worktrees.push(current);
+        current = {};
+      }
+    }
+    if (current.path) worktrees.push(current);
+
+    // First entry is always the main working tree — skip it
+    const toRemove = worktrees.slice(1);
+    if (toRemove.length === 0) {
+      return res.json({ removed: 0, message: "No worktrees to remove" });
+    }
+
+    let removed = 0;
+    const errors = [];
+    for (const wt of toRemove) {
+      try {
+        execSync(`git worktree remove --force ${shellQuote(wt.path)}`, { timeout: 10000, stdio: "pipe" });
+        removed++;
+      } catch (e) {
+        errors.push(`${wt.path}: ${e.message}`);
+      }
+    }
+    try { execSync("git worktree prune", { timeout: 5000, stdio: "pipe" }); } catch {}
+
+    // Also clean up .claude/worktrees directory if it exists
+    // This removes Claude's worktree metadata for ALL projects — acceptable since
+    // the git worktrees themselves were already removed above and orphaned metadata is harmless
+    const claudeWorktrees = path.join(os.homedir(), ".claude", "worktrees");
+    if (fs.existsSync(claudeWorktrees)) {
+      try { fs.rmSync(claudeWorktrees, { recursive: true, force: true }); } catch {}
+    }
+
+    res.json({ removed, total: toRemove.length, errors: errors.length ? errors : undefined });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get("/api/system-info", (req, res) => {
   const info = {};
   try { info.dashboardVersion = execSync("git rev-parse --short HEAD", { cwd: __dirname, encoding: "utf8", timeout: 3000 }).trim(); } catch { info.dashboardVersion = "unknown"; }
@@ -3294,7 +3513,7 @@ app.post("/api/bug-report", (req, res) => {
 // --- Native app rebuild ---
 app.post("/api/rebuild-native-app", (req, res) => {
   const buildScript = path.join(__dirname, "native-app", "build.sh");
-  const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+  const nativeAppDir = getNativeAppDir();
   if (!fs.existsSync(buildScript)) {
     return res.status(404).json({ error: "build.sh not found" });
   }
@@ -3305,7 +3524,7 @@ app.post("/api/rebuild-native-app", (req, res) => {
   const notify = (msg) => `osascript -e 'display notification "${msg}" with title "CEO Dashboard"'`;
   const script = [
     notify("Rebuilding app — compiling Swift..."),
-    `bash "${buildScript}" 2>&1`,
+    `CEO_NO_OPEN=1 CEO_FORCE_ICON=1 bash "${buildScript}" 2>&1`,
     `if [ $? -eq 0 ]; then`,
     `  ${notify("Build complete — reopening app")}`,
     `  sleep 0.5`,
@@ -3322,7 +3541,7 @@ app.post("/api/rebuild-native-app", (req, res) => {
 
 // Reopen native app (called by the app itself after rebuild, before it quits)
 app.post("/api/reopen-native-app", (req, res) => {
-  const nativeAppDir = path.join(os.homedir(), "Applications", "CEO Dashboard.app");
+  const nativeAppDir = getNativeAppDir();
   res.json({ ok: true });
   const child = require("child_process").spawn("/bin/bash", ["-c",
     `sleep 1 && open "${nativeAppDir}"`
@@ -3366,10 +3585,21 @@ async function broadcastOutputs() {
     syncClaudeSessionIds();
 
     const sessions = await listTmuxSessionsAsync();
+    const meta = loadSessionsMeta();
 
     // Capture all panes in parallel — async, never blocks event loop
+    // Skip terminal-type sessions (they use binary WS, not JSON polling)
+    // Terminal sessions are ephemeral and not in sessions.json, so detect by name pattern
+    const agentSessions = sessions.filter((s) => {
+      const n = s.replace(PREFIX, "");
+      if (meta[n]?.type === "terminal") return false;
+      // Ephemeral terminal sessions end with -term or -term-N
+      // NOTE: if a user names an agent ending in "-term", it will be skipped here
+      if (/-term(-\d+)?$/.test(n)) return false;
+      return true;
+    });
     const captures = await Promise.all(
-      sessions.map(async (session) => {
+      agentSessions.map(async (session) => {
         const output = await capturePaneAsync(session);
         return { session, output };
       })
@@ -3471,29 +3701,33 @@ wss.on("connection", (ws) => {
     const sessionInfos = [];
     for (const { session, output } of captures) {
       const name = session.replace(PREFIX, "");
-      prevOutputs.set(session, output);
+      const isTerminal = meta[name]?.type === "terminal";
+      const liveCwd = isTerminal ? null : await getEffectiveCwdAsync(session, output);
+      const git = isTerminal ? null : await getCachedGitInfo(liveCwd);
 
-      const liveCwd = await getEffectiveCwdAsync(session, output);
-      const git = await getCachedGitInfo(liveCwd);
+      // Skip JSON output push for terminal-type sessions (they use binary WS)
+      if (!isTerminal) {
+        prevOutputs.set(session, output);
 
-      const initStatus = detectStatus(output, "");
-      const filteredOutput = stripCeoPreamble(output);
-      const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
-      const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
-      if (ws.readyState === 1) {
-        ws.send(
-          JSON.stringify({
-            type: "output",
-            session: name,
-            lines: filterOutputForDisplay(output.split("\n")),
-            status: initStatus,
-            promptType: initPromptType,
-            promptOptions: initPromptOptions,
-            workdir: liveCwd || null,
-            branch: git?.branch || null,
-            isWorktree: git?.isWorktree || false,
-          })
-        );
+        const initStatus = detectStatus(output, "");
+        const filteredOutput = stripCeoPreamble(output);
+        const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
+        const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
+        if (ws.readyState === 1) {
+          ws.send(
+            JSON.stringify({
+              type: "output",
+              session: name,
+              lines: filterOutputForDisplay(output.split("\n")),
+              status: initStatus,
+              promptType: initPromptType,
+              promptOptions: initPromptOptions,
+              workdir: liveCwd || null,
+              branch: git?.branch || null,
+              isWorktree: git?.isWorktree || false,
+            })
+          );
+        }
       }
       sessionInfos.push({
         name,
@@ -3503,6 +3737,7 @@ wss.on("connection", (ws) => {
         isWorktree: git?.isWorktree || false,
         favorite: meta[name]?.favorite || false,
         minimized: meta[name]?.minimized || false,
+        type: meta[name]?.type || "agent",
       });
     }
 
@@ -3516,7 +3751,13 @@ wss.on("connection", (ws) => {
 
   // Register this client for shell PTY output
   shellClients.add(ws);
-  ws.on("close", () => shellClients.delete(ws));
+  ws.on("close", () => {
+    shellClients.delete(ws);
+    // Clean up terminal card subscriptions
+    for (const [tName] of terminalPtys) {
+      detachTerminalClient(tName, ws);
+    }
+  });
   // Ensure shell PTY is running and start info polling
   ensureShellPty();
   if (!shellPty) {
@@ -3524,7 +3765,7 @@ wss.on("connection", (ws) => {
   }
   startShellInfoPolling();
   // Replay buffered scrollback as binary chunks (no JSON overhead)
-  const scrollback = getShellScrollback();
+  const scrollback = getScrollback(_shellScrollback);
   if (scrollback) {
     const buf = Buffer.from(scrollback, "utf8");
     const CHUNK = 32768; // 32KB — larger chunks since binary has less per-frame overhead
@@ -3599,6 +3840,31 @@ wss.on("connection", (ws) => {
           if (shellPty) shellPty.write(text);
           return;
         }
+        // 0x03 prefix = terminal card stdin: 0x03 + nameLen(1B) + name + data
+        if (buf.length > 2 && buf[0] === 0x03) {
+          const nameLen = buf[1];
+          if (buf.length >= 2 + nameLen) {
+            const tName = buf.toString("utf8", 2, 2 + nameLen);
+            const tData = buf.toString("utf8", 2 + nameLen);
+            if (/^[a-zA-Z0-9_-]+$/.test(tName)) {
+              writeTerminalStdin(tName, tData);
+            }
+          }
+          return;
+        }
+        // 0x04 prefix = terminal card resize: 0x04 + nameLen(1B) + name + cols(2B) + rows(2B)
+        if (buf.length > 2 && buf[0] === 0x04) {
+          const nameLen = buf[1];
+          if (buf.length >= 2 + nameLen + 4) {
+            const tName = buf.toString("utf8", 2, 2 + nameLen);
+            const cols = buf.readUInt16BE(2 + nameLen);
+            const rows = buf.readUInt16BE(2 + nameLen + 2);
+            if (/^[a-zA-Z0-9_-]+$/.test(tName) && cols > 0 && rows > 0) {
+              resizeTerminalPty(tName, cols, rows);
+            }
+          }
+          return;
+        }
       }
 
       const msg = JSON.parse(data);
@@ -3655,6 +3921,15 @@ wss.on("connection", (ws) => {
         if (shellPty && msg.cols && msg.rows) {
           shellPty.resize(Math.max(1, msg.cols), Math.max(1, msg.rows));
         }
+      }
+
+      // --- Terminal card subscribe/unsubscribe ---
+      if (msg.type === "terminal-subscribe" && msg.session) {
+        // Terminal sessions are ephemeral (not in sessions.json) — just check tmux
+        attachTerminalClient(msg.session, ws);
+      }
+      if (msg.type === "terminal-unsubscribe" && msg.session) {
+        detachTerminalClient(msg.session, ws);
       }
 
       // Client requests a fresh output snapshot (pull-based backup for push failures)
@@ -3748,8 +4023,8 @@ function restoreSessions() {
     // tmux session still alive (survives server restarts) — keep it, no recreation needed
     if (liveNames.has(name)) {
       kept++;
-      // Try to backfill session ID if missing
-      if (!info.resumeSessionId) {
+      // Try to backfill session ID if missing (agents only, not terminal cards)
+      if (!info.resumeSessionId && info.type !== "terminal") {
         const workdir = info.workdir || DEFAULT_WORKDIR;
         const sessionId = detectClaudeSessionIdForAgent(workdir, info.created);
         if (sessionId) {
@@ -3765,6 +4040,12 @@ function restoreSessions() {
     // Validate workdir before using in shell commands
     if (!isValidWorkdir(dir)) {
       console.warn(`[restore] Skipping agent "${name}" — invalid workdir: ${dir}`);
+      delete meta[name];
+      continue;
+    }
+
+    // Terminal sessions are ephemeral — skip restore, clean from meta
+    if (info.type === "terminal") {
       delete meta[name];
       continue;
     }
@@ -3811,33 +4092,163 @@ function restoreSessions() {
 
 // --- Start ---
 
+// --- Shared scrollback management ---
+const SCROLLBACK_LIMIT = 50000;
+
+function createScrollback() {
+  return { chunks: [], size: 0 };
+}
+
+function getScrollback(sb) {
+  return sb.chunks.join("");
+}
+
+function appendScrollback(sb, data) {
+  sb.chunks.push(data);
+  sb.size += data.length;
+  if (sb.size > SCROLLBACK_LIMIT * 1.2) {
+    const full = sb.chunks.join("").slice(-SCROLLBACK_LIMIT);
+    sb.chunks.length = 0;
+    sb.chunks.push(full);
+    sb.size = full.length;
+  }
+}
+
+function clearScrollback(sb) {
+  sb.chunks.length = 0;
+  sb.size = 0;
+}
+
+// --- Terminal card PTY manager (tmux ↔ xterm.js bridge) ---
+// Each terminal card gets a node-pty running `tmux attach-session` — this provides a PTY
+// that xterm.js can drive via binary WS, while tmux provides persistence across restarts.
+const terminalPtys = new Map(); // name → { pty, clients: Set<ws>, scrollback: createScrollback() }
+
+function attachTerminalClient(name, ws) {
+  let entry = terminalPtys.get(name);
+  if (!entry) {
+    if (!pty) {
+      console.error("[terminal-card] node-pty not available");
+      return;
+    }
+    const session = `${PREFIX}${name}`;
+    // Ensure tmux status bar is off for terminal cards
+    try { execSync(`tmux set-option -t ${session} status off`, { stdio: "ignore" }); } catch {}
+    // Spawn node-pty that attaches to the tmux session
+    let termPty;
+    try {
+      termPty = pty.spawn("tmux", ["attach-session", "-t", session], {
+        name: "xterm-256color",
+        cols: 120,
+        rows: 50,
+        env: { ...process.env, TERM: "xterm-256color" },
+      });
+    } catch (err) {
+      console.error(`[terminal-card] Failed to attach to tmux session ${session}: ${err.message}`);
+      return;
+    }
+    entry = { pty: termPty, clients: new Set(), scrollback: createScrollback(), ready: false };
+    terminalPtys.set(name, entry);
+
+    // Delay relaying output until tmux's DA (device attributes) exchange completes.
+    // tmux queries terminal capabilities on attach; the DA responses leak as visible
+    // garbage if relayed before the exchange settles.
+    setTimeout(() => {
+      entry.ready = true;
+      // Clear scrollback of any DA garbage accumulated during startup
+      clearScrollback(entry.scrollback);
+      // Send a clear-screen + redraw so the shell prompt appears clean
+      termPty.write("\x0c"); // Ctrl+L
+    }, 500);
+
+    termPty.onData((data) => {
+      if (!entry.ready) return; // suppress DA exchange noise
+      appendScrollback(entry.scrollback, data);
+      // Build 0x02-prefixed binary frame: 0x02 + nameLen(1B) + name + data
+      const nameBuf = Buffer.from(name, "utf8");
+      const dataBuf = Buffer.from(data, "utf8");
+      const frame = Buffer.alloc(2 + nameBuf.length + dataBuf.length);
+      frame[0] = 0x02;
+      frame[1] = nameBuf.length;
+      nameBuf.copy(frame, 2);
+      dataBuf.copy(frame, 2 + nameBuf.length);
+      for (const client of entry.clients) {
+        if (client.readyState === 1 && client.bufferedAmount < 1048576) {
+          client.send(frame);
+        }
+      }
+    });
+
+    termPty.onExit(() => {
+      console.log(`[terminal-card] PTY wrapper for ${name} exited`);
+      terminalPtys.delete(name);
+    });
+
+    console.log(`[terminal-card] Attached PTY wrapper for ${name} (pid ${termPty.pid})`);
+  }
+
+  entry.clients.add(ws);
+  // Cancel any pending kill timer
+  if (entry._killTimer) { clearTimeout(entry._killTimer); entry._killTimer = null; }
+
+  // Replay scrollback
+  const scrollback = getScrollback(entry.scrollback);
+  if (scrollback) {
+    const nameBuf = Buffer.from(name, "utf8");
+    const dataBuf = Buffer.from(scrollback, "utf8");
+    const CHUNK = 32768;
+    let offset = 0;
+    const sendChunk = () => {
+      if (offset >= dataBuf.length || ws.readyState !== 1) return;
+      const end = Math.min(offset + CHUNK, dataBuf.length);
+      const chunk = dataBuf.subarray(offset, end);
+      const frame = Buffer.alloc(2 + nameBuf.length + chunk.length);
+      frame[0] = 0x02;
+      frame[1] = nameBuf.length;
+      nameBuf.copy(frame, 2);
+      chunk.copy(frame, 2 + nameBuf.length);
+      ws.send(frame);
+      offset = end;
+      if (offset < dataBuf.length) setImmediate(sendChunk);
+    };
+    sendChunk();
+  }
+}
+
+function detachTerminalClient(name, ws) {
+  const entry = terminalPtys.get(name);
+  if (!entry) return;
+  entry.clients.delete(ws);
+  // If no clients remain, keep PTY alive for 60s in case user reopens terminal
+  if (entry.clients.size === 0) {
+    if (entry._killTimer) clearTimeout(entry._killTimer);
+    entry._killTimer = setTimeout(() => {
+      // Only kill if still no clients after grace period
+      if (entry.clients.size === 0) {
+        try { entry.pty.kill(); } catch {}
+        terminalPtys.delete(name);
+        console.log(`[terminal-card] Grace period expired for ${name}, killed PTY wrapper`);
+      }
+    }, 60000);
+    console.log(`[terminal-card] Last client detached for ${name}, 60s grace period`);
+  }
+}
+
+function writeTerminalStdin(name, data) {
+  const entry = terminalPtys.get(name);
+  if (entry) entry.pty.write(data);
+}
+
+function resizeTerminalPty(name, cols, rows) {
+  const entry = terminalPtys.get(name);
+  if (entry) entry.pty.resize(Math.max(1, cols), Math.max(1, rows));
+}
+
 // --- Embedded shell terminal (node-pty) ---
 let shellPty = null;
 const shellClients = new Set(); // WebSocket clients subscribed to shell output
 
-// Scrollback: use array of chunks instead of string concatenation (avoids GC pressure)
-const _shellScrollChunks = [];
-let _shellScrollSize = 0;
-const SHELL_SCROLLBACK_LIMIT = 50000; // ~50KB — enough for replay, less GC pressure
-
-function getShellScrollback() {
-  return _shellScrollChunks.join("");
-}
-function appendShellScrollback(data) {
-  _shellScrollChunks.push(data);
-  _shellScrollSize += data.length;
-  // Compact more frequently to avoid big GC spikes (was 1.5x, now 1.2x)
-  if (_shellScrollSize > SHELL_SCROLLBACK_LIMIT * 1.2) {
-    const full = _shellScrollChunks.join("").slice(-SHELL_SCROLLBACK_LIMIT);
-    _shellScrollChunks.length = 0;
-    _shellScrollChunks.push(full);
-    _shellScrollSize = full.length;
-  }
-}
-function clearShellScrollback() {
-  _shellScrollChunks.length = 0;
-  _shellScrollSize = 0;
-}
+const _shellScrollback = createScrollback();
 
 // Adaptive data broadcast: send first chunk immediately (zero latency for keystrokes),
 // then batch subsequent chunks during bursts (avoids JSON spam during heavy output).
@@ -3981,7 +4392,7 @@ function ensureShellPty() {
     }
 
     // Append to scrollback (chunked array — no string concat GC pressure)
-    appendShellScrollback(data);
+    appendScrollback(_shellScrollback, data);
 
     // OSC 7 parsing — only when data contains the escape prefix
     if (data.indexOf("\x1b]7;") >= 0 || _osc7Buffer.length > 0) {
@@ -4024,7 +4435,7 @@ function ensureShellPty() {
   shellPty.onExit(() => {
     console.log("[shell] PTY exited, will respawn on next use");
     shellPty = null;
-    clearShellScrollback();
+    clearScrollback(_shellScrollback);
     sendShellData("\r\n[Shell exited. Reopening will start a new session.]\r\n");
   });
 }

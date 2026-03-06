@@ -1,3 +1,873 @@
+// --- Accent Color Presets ---
+const ACCENT_PRESETS = {
+  gold:   { accent: "#c9a84c", hover: "#d4b55a", r: 201, g: 168, b: 76 },
+  cyan:   { accent: "#00e5ff", hover: "#1ee8ff", r: 0,   g: 229, b: 255 },
+  rose:   { accent: "#c64c75", hover: "#ce6387", r: 198, g: 76,  b: 117 },
+  violet: { accent: "#894cc6", hover: "#9863ce", r: 137, g: 76,  b: 198 },
+  green:  { accent: "#4cc67f", hover: "#63ce90", r: 76,  g: 198, b: 127 },
+  orange: { accent: "#c67f4c", hover: "#ce9063", r: 198, g: 127, b: 76 },
+  blue:   { accent: "#4c7fc6", hover: "#6390ce", r: 76,  g: 127, b: 198 },
+  coral:  { accent: "#c6614c", hover: "#ce7563", r: 198, g: 97,  b: 76 },
+};
+
+const CLAUDE_STAR_PATH = "M 233.96 800.21 L 468.64 668.54 472.59 657.1 468.64 650.74 457.21 650.74 417.99 648.32 283.89 644.7 167.6 639.87 54.93 633.83 26.58 627.79 0 592.75 2.74 575.28 26.58 559.25 60.72 562.23 136.19 567.38 249.42 575.19 331.57 580.03 453.26 592.67 472.59 592.67 475.33 584.86 468.72 580.03 463.57 575.19 346.39 495.79 219.54 411.87 153.1 363.54 117.18 339.06 99.06 316.11 91.25 266.01 123.87 230.09 167.68 233.07 178.87 236.05 223.25 270.2 318.04 343.57 441.83 434.74 459.95 449.8 467.19 444.64 468.08 441.02 459.95 427.41 392.62 305.72 320.78 181.93 288.81 130.63 280.35 99.87 C 277.37 87.22 275.19 76.59 275.19 63.62 L 312.32 13.21 332.86 6.6 382.39 13.21 403.25 31.33 434.01 101.72 483.87 212.54 561.18 363.22 583.81 407.92 595.89 449.32 600.4 461.96 608.21 461.96 608.21 454.71 614.58 369.83 626.34 265.61 637.77 131.52 641.72 93.75 660.4 48.48 697.53 24 726.52 37.85 750.36 72 747.06 94.07 732.89 186.2 705.1 330.52 686.98 427.17 697.53 427.17 709.61 415.09 758.5 350.17 840.64 247.49 876.89 206.74 919.17 161.72 946.31 140.3 997.61 140.3 1035.38 196.43 1018.47 254.42 965.64 321.42 921.83 378.2 859.01 462.77 819.79 530.42 823.41 535.81 832.75 534.93 974.66 504.72 1051.33 490.87 1142.82 475.17 1184.21 494.5 1188.72 514.15 1172.46 554.34 1074.6 578.5 959.84 601.45 788.94 641.88 786.85 643.41 789.26 646.39 866.26 653.64 899.19 655.41 979.81 655.41 1129.93 666.6 1169.15 692.54 1192.67 724.27 1188.72 748.43 1128.32 779.19 1046.82 759.87 856.59 714.6 791.36 698.34 782.34 698.34 782.34 703.73 836.7 756.89 936.32 846.85 1061.07 962.82 1067.44 991.49 1051.41 1014.12 1034.5 1011.7 924.89 929.23 882.6 892.11 786.85 811.49 780.48 811.49 780.48 819.95 802.55 852.24 919.09 1027.41 925.13 1081.13 916.67 1098.6 886.47 1109.15 853.29 1103.11 785.07 1007.36 714.68 899.52 657.91 802.87 650.98 806.82 617.48 1167.7 601.77 1186.15 565.53 1200 535.33 1177.05 519.3 1139.92 535.33 1066.55 554.66 970.79 570.36 894.68 584.54 800.13 592.99 768.72 592.43 766.63 585.5 767.52 514.23 865.37 405.83 1011.87 320.05 1103.68 299.52 1111.81 263.92 1093.37 267.22 1060.43 287.11 1031.11 405.83 880.11 477.42 786.52 523.65 732.48 523.33 724.67 520.59 724.67 205.29 929.4 149.15 936.64 124.99 914.01 127.97 876.89 139.41 864.81 234.2 799.57 233.88 799.89 Z";
+
+function _hexToRgb(hex) {
+  const h = hex.replace("#", "");
+  return { r: parseInt(h.substring(0, 2), 16), g: parseInt(h.substring(2, 4), 16), b: parseInt(h.substring(4, 6), 16) };
+}
+
+function _isLight(hex) {
+  const { r, g, b } = _hexToRgb(hex);
+  return (r * 0.299 + g * 0.587 + b * 0.114) > 128;
+}
+
+function _lightenHex(hex, amount) {
+  const { r, g, b } = _hexToRgb(hex);
+  const lr = Math.min(255, r + amount);
+  const lg = Math.min(255, g + amount);
+  const lb = Math.min(255, b + amount);
+  return "#" + [lr, lg, lb].map(v => v.toString(16).padStart(2, "0")).join("");
+}
+
+function applyAccentColor(key) {
+  // Resolve to accent hex + rgb — either from presets or a raw hex value
+  let accent, hover, r, g, b;
+  const preset = ACCENT_PRESETS[key];
+  if (preset) {
+    ({ accent, hover, r, g, b } = preset);
+  } else if (/^#[0-9a-fA-F]{6}$/.test(key)) {
+    accent = key;
+    hover = _lightenHex(key, 20);
+    ({ r, g, b } = _hexToRgb(key));
+  } else {
+    return;
+  }
+  const s = document.documentElement.style;
+  s.setProperty("--accent", accent);
+  s.setProperty("--accent-hover", hover);
+  s.setProperty("--accent-glow", `rgba(${r}, ${g}, ${b}, 0.22)`);
+  s.setProperty("--accent-subtle", `rgba(${r}, ${g}, ${b}, 0.07)`);
+  s.setProperty("--border-glow", `rgba(${r}, ${g}, ${b}, 0.15)`);
+  s.setProperty("--card-shadow-hover", `0 8px 40px rgba(0,0,0,0.5), 0 0 24px rgba(${r},${g},${b},0.07)`);
+  s.setProperty("--header-border", `rgba(${r}, ${g}, ${b}, 0.12)`);
+  s.setProperty("--status-asking-bg", `rgba(${r}, ${g}, ${b}, 0.1)`);
+  s.setProperty("--status-asking-color", accent);
+  // Update favicon to match accent color
+  const faviconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 1200 1200"><path fill="${accent}" d="${CLAUDE_STAR_PATH}"/></svg>`;
+  const faviconEl = document.querySelector('link[rel="icon"]');
+  if (faviconEl) faviconEl.href = "data:image/svg+xml," + encodeURIComponent(faviconSvg);
+}
+
+// --- Background Color System ---
+// One base color → all surface/border/text-dim variants derived automatically.
+// Offsets match the default theme: #121212 base with warm-tinted lighter layers.
+const BG_PRESETS = {
+  default:  "#121212",
+  midnight: "#11141e",
+  ember:    "#1c120e",
+  plum:     "#18101e",
+  forest:   "#0e1812",
+};
+
+function _getCustomBgColors() {
+  try { return JSON.parse(localStorage.getItem("customBgColors") || "[]"); } catch { return []; }
+}
+
+function _saveCustomBgColors(colors) {
+  localStorage.setItem("customBgColors", JSON.stringify(colors));
+}
+
+// Highlight the active swatch in a color grid via .active class.
+function _highlightSwatch(gridId, dataAttr, activeKey) {
+  const swatches = document.querySelectorAll("#" + gridId + " .accent-swatch");
+  const escaped = CSS.escape(activeKey);
+  const target = document.querySelector("#" + gridId + " [" + dataAttr + '="' + escaped + '"]');
+  swatches.forEach(s => s.classList.remove("active"));
+  if (target) target.classList.add("active");
+  requestAnimationFrame(() => {
+    swatches.forEach(s => { if (s !== target) s.classList.remove("active"); });
+    if (target) target.classList.add("active");
+  });
+}
+
+function _selectBg(key) {
+  const hex = BG_PRESETS[key] || key;
+  if (hex === BG_PRESETS.default) {
+    localStorage.removeItem("bgColor");
+    _removeBgOverrides();
+  } else {
+    localStorage.setItem("bgColor", hex);
+    applyBgColor(hex);
+  }
+  _highlightSwatch("bg-color-grid", "data-bg", key);
+  fetch("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bgColor: hex === BG_PRESETS.default ? null : hex }),
+  }).catch(() => {});
+}
+
+let _iroBgPicker = null;
+let _bgColorBeforeOpen = null;
+
+function renderBgGrid(grid) {
+  const current = localStorage.getItem("bgColor") || "default";
+  grid.innerHTML = "";
+
+  // Built-in presets
+  for (const [key, hex] of Object.entries(BG_PRESETS)) {
+    const isActive = (key === "default" && !localStorage.getItem("bgColor")) || hex === current;
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = key.charAt(0).toUpperCase() + key.slice(1);
+    swatch.setAttribute("data-bg", key);
+    swatch.addEventListener("click", () => {
+      _closeBgPicker();
+      _selectBg(key);
+    });
+    grid.appendChild(swatch);
+  }
+
+  // Custom colors
+  const customs = _getCustomBgColors();
+  for (const hex of customs) {
+    const isActive = hex === current;
+    const wrap = document.createElement("span");
+    wrap.className = "accent-swatch-wrap";
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = hex;
+    swatch.setAttribute("data-bg", hex);
+    swatch.addEventListener("click", () => {
+      _closeBgPicker();
+      _selectBg(hex);
+    });
+    const del = document.createElement("button");
+    del.className = "accent-swatch-delete";
+    del.textContent = "×";
+    del.title = "Remove custom color";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const updated = _getCustomBgColors().filter(c => c !== hex);
+      _saveCustomBgColors(updated);
+      if (current === hex) _selectBg("default");
+      renderBgGrid(grid);
+    });
+    wrap.appendChild(swatch);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
+  }
+
+  // "+" button
+  const addBtn = document.createElement("button");
+  addBtn.className = "accent-swatch accent-swatch-add";
+  addBtn.textContent = "+";
+  addBtn.title = "Add custom background color";
+  addBtn.addEventListener("click", () => _openBgPicker(grid));
+  grid.appendChild(addBtn);
+}
+
+function _openBgPicker(grid) {
+  const container = document.getElementById("bg-picker-container");
+  const wheelEl = document.getElementById("bg-picker-wheel");
+  if (!container || !wheelEl) return;
+
+  _bgColorBeforeOpen = localStorage.getItem("bgColor") || BG_PRESETS.default;
+  container.classList.remove("hidden");
+
+  if (!_iroBgPicker) {
+    _iroBgPicker = new iro.ColorPicker("#bg-picker-wheel", {
+      width: 220,
+      color: _bgColorBeforeOpen,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.1)",
+      handleRadius: 8,
+      layout: [
+        { component: iro.ui.Wheel, options: {} },
+        { component: iro.ui.Slider, options: { sliderType: "value" } },
+      ],
+    });
+    _iroBgPicker.on("color:change", (color) => {
+      applyBgColor(color.hexString);
+    });
+
+  } else {
+    _iroBgPicker.color.hexString = _bgColorBeforeOpen;
+  }
+}
+
+function _closeBgPicker() {
+  const container = document.getElementById("bg-picker-container");
+  if (container) container.classList.add("hidden");
+}
+
+document.getElementById("bg-picker-save").onclick = () => {
+  if (!_iroBgPicker) return;
+  const hex = _iroBgPicker.color.hexString.toLowerCase();
+  const customs = _getCustomBgColors();
+  const isPreset = Object.values(BG_PRESETS).includes(hex);
+  if (!isPreset && !customs.includes(hex)) {
+    customs.push(hex);
+    _saveCustomBgColors(customs);
+  }
+  _selectBg(hex);
+  // Rebuild grid to show new custom swatch
+  const grid = document.getElementById("bg-color-grid");
+  if (grid) renderBgGrid(grid);
+  _closeBgPicker();
+};
+
+document.getElementById("bg-picker-cancel").onclick = () => {
+  if (_bgColorBeforeOpen && _bgColorBeforeOpen !== BG_PRESETS.default) {
+    applyBgColor(_bgColorBeforeOpen);
+  } else {
+    _removeBgOverrides();
+  }
+  _closeBgPicker();
+};
+
+// --- Terminal Color System ---
+// Independent terminal background color. "Auto" = derived from bg color (default behavior).
+const TERMINAL_PRESETS = {
+  auto:     null,       // derived from bg color
+  default:  "#0e0e0d",  // the original CSS default
+  midnight: "#0c0e16",
+  ember:    "#140e0a",
+  plum:     "#120a16",
+};
+
+function applyTerminalColor(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+  document.documentElement.style.setProperty("--terminal-bg", hex);
+  _applyTerminalTextColor(hex);
+}
+
+// Default AnsiUp palette (first 16 entries) — saved on first call
+let _ansiUpDefaultPalette = null;
+const _ansiLightPalette = [
+  // black,       red,         green,       yellow,      blue,        magenta,     cyan,        white
+  [0x1a,0x1a,0x1a],[0xcf,0x22,0x2e],[0x1a,0x7f,0x37],[0x7a,0x6a,0x00],[0x05,0x50,0xae],[0x82,0x50,0xdf],[0x0c,0x7d,0x9d],[0x55,0x55,0x55],
+  // bright: black, red,       green,       yellow,      blue,        magenta,     cyan,        white
+  [0x66,0x66,0x66],[0xd1,0x24,0x2f],[0x1a,0x9f,0x37],[0x8a,0x75,0x00],[0x09,0x69,0xda],[0x82,0x50,0xdf],[0x0c,0x7d,0x9d],[0x1a,0x1a,0x1a],
+];
+
+function _applyTerminalTextColor(hex) {
+  const s = document.documentElement.style;
+  const light = _isLight(hex);
+  if (light) {
+    s.setProperty("--terminal-text", "#1a1a1a");
+    s.setProperty("--terminal-text-dim", "#555");
+    s.setProperty("--terminal-link-color", "#333");
+  } else {
+    s.removeProperty("--terminal-text");
+    s.removeProperty("--terminal-text-dim");
+    s.removeProperty("--terminal-link-color");
+  }
+  // Swap AnsiUp palette for light/dark terminal (ansiUp may not be initialized yet during early theme load)
+  try {
+    if (ansiUp && ansiUp.palette_256) {
+      if (!_ansiUpDefaultPalette) _ansiUpDefaultPalette = ansiUp.palette_256.slice(0, 16).map(c => [...c]);
+      const src = light ? _ansiLightPalette : _ansiUpDefaultPalette;
+      for (let i = 0; i < 16; i++) ansiUp.palette_256[i] = [...src[i]];
+    }
+  } catch (_) { /* ansiUp not yet initialized */ }
+}
+
+function _getCustomTerminalColors() {
+  try { return JSON.parse(localStorage.getItem("customTerminalColors") || "[]"); } catch { return []; }
+}
+
+function _saveCustomTerminalColors(colors) {
+  localStorage.setItem("customTerminalColors", JSON.stringify(colors));
+}
+
+function _selectTerminal(key) {
+  if (key === "auto") {
+    localStorage.removeItem("terminalColor");
+    document.documentElement.style.removeProperty("--terminal-bg");
+    document.documentElement.style.removeProperty("--terminal-text");
+    document.documentElement.style.removeProperty("--terminal-text-dim");
+    document.documentElement.style.removeProperty("--terminal-link-color");
+    const bg = localStorage.getItem("bgColor");
+    if (bg) applyBgColor(bg);
+  } else {
+    const hex = TERMINAL_PRESETS[key] || key;
+    localStorage.setItem("terminalColor", hex);
+    applyTerminalColor(hex);
+  }
+  _highlightSwatch("terminal-color-grid", "data-terminal", key);
+}
+
+let _iroTerminalPicker = null;
+let _terminalColorBeforeOpen = null;
+
+function renderTerminalGrid(grid) {
+  const current = localStorage.getItem("terminalColor");
+  grid.innerHTML = "";
+
+  for (const [key, hex] of Object.entries(TERMINAL_PRESETS)) {
+    const isActive = (key === "auto" && !current) || (hex && hex === current);
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    if (key === "auto") {
+      // Show a gradient/auto indicator
+      swatch.style.background = "conic-gradient(#0e0e0d, #080c18, #0a0a0a, #0e0e0d)";
+      swatch.title = "Auto (derived from background)";
+    } else {
+      swatch.style.background = hex;
+      swatch.title = key.charAt(0).toUpperCase() + key.slice(1);
+    }
+    swatch.setAttribute("data-terminal", key);
+    swatch.addEventListener("click", () => {
+      _closeTerminalPicker();
+      _selectTerminal(key);
+    });
+    grid.appendChild(swatch);
+  }
+
+  const customs = _getCustomTerminalColors();
+  for (const hex of customs) {
+    const isActive = hex === current;
+    const wrap = document.createElement("span");
+    wrap.className = "accent-swatch-wrap";
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = hex;
+    swatch.setAttribute("data-terminal", hex);
+    swatch.addEventListener("click", () => {
+      _closeTerminalPicker();
+      _selectTerminal(hex);
+    });
+    const del = document.createElement("button");
+    del.className = "accent-swatch-delete";
+    del.textContent = "×";
+    del.title = "Remove custom color";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const updated = _getCustomTerminalColors().filter(c => c !== hex);
+      _saveCustomTerminalColors(updated);
+      if (current === hex) _selectTerminal("auto");
+      renderTerminalGrid(grid);
+    });
+    wrap.appendChild(swatch);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
+  }
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "accent-swatch accent-swatch-add";
+  addBtn.textContent = "+";
+  addBtn.title = "Add custom terminal color";
+  addBtn.addEventListener("click", () => _openTerminalPicker(grid));
+  grid.appendChild(addBtn);
+}
+
+function _openTerminalPicker(grid) {
+  const container = document.getElementById("terminal-picker-container");
+  const wheelEl = document.getElementById("terminal-picker-wheel");
+  if (!container || !wheelEl) return;
+
+  _terminalColorBeforeOpen = localStorage.getItem("terminalColor") || TERMINAL_PRESETS.default;
+  container.classList.remove("hidden");
+
+  if (!_iroTerminalPicker) {
+    _iroTerminalPicker = new iro.ColorPicker("#terminal-picker-wheel", {
+      width: 220,
+      color: _terminalColorBeforeOpen,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.1)",
+      handleRadius: 8,
+      layout: [
+        { component: iro.ui.Wheel, options: {} },
+        { component: iro.ui.Slider, options: { sliderType: "value" } },
+      ],
+    });
+    _iroTerminalPicker.on("color:change", (color) => {
+      applyTerminalColor(color.hexString);
+    });
+
+  } else {
+    _iroTerminalPicker.color.hexString = _terminalColorBeforeOpen;
+  }
+}
+
+function _closeTerminalPicker() {
+  const container = document.getElementById("terminal-picker-container");
+  if (container) container.classList.add("hidden");
+}
+
+document.getElementById("terminal-picker-save").onclick = () => {
+  if (!_iroTerminalPicker) return;
+  const hex = _iroTerminalPicker.color.hexString.toLowerCase();
+  const customs = _getCustomTerminalColors();
+  const isPreset = Object.values(TERMINAL_PRESETS).some(v => v === hex);
+  if (!isPreset && !customs.includes(hex)) {
+    customs.push(hex);
+    _saveCustomTerminalColors(customs);
+  }
+  _selectTerminal(hex);
+  const grid = document.getElementById("terminal-color-grid");
+  if (grid) renderTerminalGrid(grid);
+  _closeTerminalPicker();
+};
+
+document.getElementById("terminal-picker-cancel").onclick = () => {
+  if (_terminalColorBeforeOpen) {
+    applyTerminalColor(_terminalColorBeforeOpen);
+  } else {
+    document.documentElement.style.removeProperty("--terminal-bg");
+    document.documentElement.style.removeProperty("--terminal-text");
+    document.documentElement.style.removeProperty("--terminal-text-dim");
+    document.documentElement.style.removeProperty("--terminal-link-color");
+    const bg = localStorage.getItem("bgColor");
+    if (bg) applyBgColor(bg);
+  }
+  _closeTerminalPicker();
+};
+
+// Apply saved terminal color on load
+const _savedTerminal = localStorage.getItem("terminalColor");
+if (_savedTerminal) applyTerminalColor(_savedTerminal);
+
+// --- Shell Terminal Color System ---
+const SHELL_PRESETS = {
+  default:  "#0d1117",
+  midnight: "#0a0e18",
+  ember:    "#160e0a",
+  neutral:  "#101010",
+};
+
+function applyShellColor(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+  const { r, g, b } = _hexToRgb(hex);
+  const light = _isLight(hex);
+  const dir = light ? -1 : 1;
+
+  function shellDerive(offset) {
+    const o = offset * dir;
+    const dr = Math.min(255, Math.max(0, r + o));
+    const dg = Math.min(255, Math.max(0, g + o));
+    const db = Math.min(255, Math.max(0, b + o));
+    return `#${dr.toString(16).padStart(2,"0")}${dg.toString(16).padStart(2,"0")}${db.toString(16).padStart(2,"0")}`;
+  }
+
+  const s = document.documentElement.style;
+  s.setProperty("--shell-bg", hex);
+  s.setProperty("--shell-header-bg", shellDerive(10));
+  s.setProperty("--shell-header-hover", shellDerive(16));
+  s.setProperty("--shell-text-dim", light ? "#555" : "");
+  if (light) {
+    s.setProperty("--shell-pill-bg", "rgba(0,0,0,0.06)");
+    s.setProperty("--shell-pill-border", "rgba(0,0,0,0.08)");
+    s.setProperty("--shell-pill-hover", "rgba(0,0,0,0.12)");
+    s.setProperty("--shell-pill-hover-border", "rgba(0,0,0,0.15)");
+  } else {
+    s.removeProperty("--shell-pill-bg");
+    s.removeProperty("--shell-pill-border");
+    s.removeProperty("--shell-pill-hover");
+    s.removeProperty("--shell-pill-hover-border");
+    s.removeProperty("--shell-text-dim");
+  }
+
+  if (window._shellXterm) {
+    const fg = light ? "#1a1a1a" : "#e6edf3";
+    const theme = Object.assign({}, window._shellXterm.options.theme, {
+      background: hex,
+      foreground: fg,
+      cursor: fg,
+      selectionBackground: light ? "rgba(0,100,200,0.25)" : "rgba(56,139,253,0.4)",
+    });
+    if (light) {
+      // Swap ANSI colors for light background readability
+      theme.black = "#1a1a1a";
+      theme.white = "#555";
+      theme.brightBlack = "#666";
+      theme.brightWhite = "#1a1a1a";
+      theme.yellow = "#7a6a00";
+      theme.brightYellow = "#8a7500";
+      theme.green = "#1a7f37";
+      theme.brightGreen = "#1a9f37";
+      theme.blue = "#0550ae";
+      theme.brightBlue = "#0969da";
+      theme.red = "#cf222e";
+      theme.brightRed = "#d1242f";
+      theme.magenta = "#8250df";
+      theme.brightMagenta = "#8250df";
+      theme.cyan = "#0c7d9d";
+      theme.brightCyan = "#0c7d9d";
+    } else {
+      // Restore default dark ANSI colors
+      theme.black = "#484f58";
+      theme.white = "#b1bac4";
+      theme.brightBlack = "#6e7681";
+      theme.brightWhite = "#f0f6fc";
+      theme.yellow = "#d29922";
+      theme.brightYellow = "#e3b341";
+      theme.green = "#3fb950";
+      theme.brightGreen = "#56d364";
+      theme.blue = "#58a6ff";
+      theme.brightBlue = "#79c0ff";
+      theme.red = "#ff7b72";
+      theme.brightRed = "#ffa198";
+      theme.magenta = "#bc8cff";
+      theme.brightMagenta = "#d2a8ff";
+      theme.cyan = "#39d353";
+      theme.brightCyan = "#56d364";
+    }
+    window._shellXterm.options.theme = theme;
+  }
+}
+
+function _getCustomShellColors() {
+  try { return JSON.parse(localStorage.getItem("customShellColors") || "[]"); } catch { return []; }
+}
+
+function _saveCustomShellColors(colors) {
+  localStorage.setItem("customShellColors", JSON.stringify(colors));
+}
+
+function _selectShell(key) {
+  const hex = SHELL_PRESETS[key] || key;
+  if (hex === SHELL_PRESETS.default) {
+    localStorage.removeItem("shellColor");
+    const s = document.documentElement.style;
+    ["--shell-bg","--shell-header-bg","--shell-header-hover","--shell-text-dim",
+     "--shell-pill-bg","--shell-pill-border","--shell-pill-hover","--shell-pill-hover-border"
+    ].forEach(v => s.removeProperty(v));
+    if (window._shellXterm) {
+      window._shellXterm.options.theme = Object.assign({}, window._shellXterm.options.theme, {
+        background: "#0d1117", foreground: "#e6edf3", cursor: "#e6edf3",
+        selectionBackground: "rgba(56,139,253,0.4)",
+        black:"#484f58",white:"#b1bac4",brightBlack:"#6e7681",brightWhite:"#f0f6fc",
+        yellow:"#d29922",brightYellow:"#e3b341",green:"#3fb950",brightGreen:"#56d364",
+        blue:"#58a6ff",brightBlue:"#79c0ff",red:"#ff7b72",brightRed:"#ffa198",
+        magenta:"#bc8cff",brightMagenta:"#d2a8ff",cyan:"#39d353",brightCyan:"#56d364",
+      });
+    }
+  } else {
+    localStorage.setItem("shellColor", hex);
+    applyShellColor(hex);
+  }
+  _highlightSwatch("shell-color-grid", "data-shell", key);
+}
+
+let _iroShellPicker = null;
+let _shellColorBeforeOpen = null;
+
+function renderShellGrid(grid) {
+  const current = localStorage.getItem("shellColor") || "default";
+  grid.innerHTML = "";
+
+  for (const [key, hex] of Object.entries(SHELL_PRESETS)) {
+    const isActive = (key === "default" && !localStorage.getItem("shellColor")) || hex === current;
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = key.charAt(0).toUpperCase() + key.slice(1);
+    swatch.setAttribute("data-shell", key);
+    swatch.addEventListener("click", () => {
+      _closeShellPicker();
+      _selectShell(key);
+    });
+    grid.appendChild(swatch);
+  }
+
+  const customs = _getCustomShellColors();
+  for (const hex of customs) {
+    const isActive = hex === current;
+    const wrap = document.createElement("span");
+    wrap.className = "accent-swatch-wrap";
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (isActive ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = hex;
+    swatch.setAttribute("data-shell", hex);
+    swatch.addEventListener("click", () => {
+      _closeShellPicker();
+      _selectShell(hex);
+    });
+    const del = document.createElement("button");
+    del.className = "accent-swatch-delete";
+    del.textContent = "×";
+    del.title = "Remove custom color";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const updated = _getCustomShellColors().filter(c => c !== hex);
+      _saveCustomShellColors(updated);
+      if (current === hex) _selectShell("default");
+      renderShellGrid(grid);
+    });
+    wrap.appendChild(swatch);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
+  }
+
+  const addBtn = document.createElement("button");
+  addBtn.className = "accent-swatch accent-swatch-add";
+  addBtn.textContent = "+";
+  addBtn.title = "Add custom shell color";
+  addBtn.addEventListener("click", () => _openShellPicker(grid));
+  grid.appendChild(addBtn);
+}
+
+function _openShellPicker(grid) {
+  const container = document.getElementById("shell-picker-container");
+  const wheelEl = document.getElementById("shell-picker-wheel");
+  if (!container || !wheelEl) return;
+
+  _shellColorBeforeOpen = localStorage.getItem("shellColor") || SHELL_PRESETS.default;
+  container.classList.remove("hidden");
+
+  if (!_iroShellPicker) {
+    _iroShellPicker = new iro.ColorPicker("#shell-picker-wheel", {
+      width: 220,
+      color: _shellColorBeforeOpen,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.1)",
+      handleRadius: 8,
+      layout: [
+        { component: iro.ui.Wheel, options: {} },
+        { component: iro.ui.Slider, options: { sliderType: "value" } },
+      ],
+    });
+    _iroShellPicker.on("color:change", (color) => {
+      applyShellColor(color.hexString);
+    });
+
+  } else {
+    _iroShellPicker.color.hexString = _shellColorBeforeOpen;
+  }
+}
+
+function _closeShellPicker() {
+  const container = document.getElementById("shell-picker-container");
+  if (container) container.classList.add("hidden");
+}
+
+document.getElementById("shell-picker-save").onclick = () => {
+  if (!_iroShellPicker) return;
+  const hex = _iroShellPicker.color.hexString.toLowerCase();
+  const customs = _getCustomShellColors();
+  const isPreset = Object.values(SHELL_PRESETS).includes(hex);
+  if (!isPreset && !customs.includes(hex)) {
+    customs.push(hex);
+    _saveCustomShellColors(customs);
+  }
+  _selectShell(hex);
+  const grid = document.getElementById("shell-color-grid");
+  if (grid) renderShellGrid(grid);
+  _closeShellPicker();
+};
+
+document.getElementById("shell-picker-cancel").onclick = () => {
+  if (_shellColorBeforeOpen && _shellColorBeforeOpen !== SHELL_PRESETS.default) {
+    applyShellColor(_shellColorBeforeOpen);
+  } else {
+    const s = document.documentElement.style;
+    ["--shell-bg","--shell-header-bg","--shell-header-hover","--shell-text-dim",
+     "--shell-pill-bg","--shell-pill-border","--shell-pill-hover","--shell-pill-hover-border"
+    ].forEach(v => s.removeProperty(v));
+  }
+  _closeShellPicker();
+};
+
+// Apply saved shell color on load
+const _savedShell = localStorage.getItem("shellColor");
+if (_savedShell) applyShellColor(_savedShell);
+
+function applyBgColor(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+  const { r, g, b } = _hexToRgb(hex);
+  const lum = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+  const light = lum > 128;
+  // Flip direction for light backgrounds: surfaces go darker, not lighter
+  const dir = light ? -1 : 1;
+
+  const baseWarm = (r - b) / Math.max(lum, 1);
+
+  function derive(offset) {
+    const o = offset * dir;
+    const warm = Math.round(o * 0.15 * (1 + (light ? -baseWarm : baseWarm)));
+    const dr = Math.min(255, Math.max(0, r + o + Math.round(warm * 0.5)));
+    const dg = Math.min(255, Math.max(0, g + o));
+    const db = Math.min(255, Math.max(0, b + o - Math.round(warm * 0.5)));
+    return `#${dr.toString(16).padStart(2,"0")}${dg.toString(16).padStart(2,"0")}${db.toString(16).padStart(2,"0")}`;
+  }
+
+  const s = document.documentElement.style;
+  s.setProperty("--bg", hex);
+  s.setProperty("--bg-gradient", `linear-gradient(135deg, ${hex} 0%, ${derive(8)} 50%, ${derive(2)} 100%)`);
+  if (!localStorage.getItem("terminalColor")) {
+    s.setProperty("--terminal-bg", derive(-4));
+    // Also flip terminal text if auto-derived terminal is light
+    _applyTerminalTextColor(derive(-4));
+  }
+  s.setProperty("--input-bg", derive(3));
+  s.setProperty("--header-bg", `linear-gradient(180deg, ${derive(8)} 0%, ${derive(4)} 100%)`);
+  s.setProperty("--surface", derive(12));
+  s.setProperty("--modal-bg", derive(12));
+  s.setProperty("--surface-raised", derive(20));
+  s.setProperty("--border", derive(33));
+  s.setProperty("--scrollbar-thumb", derive(33));
+  s.setProperty("--scrollbar-hover", derive(50));
+  s.setProperty("--gray", derive(64));
+  s.setProperty("--text-dim", light ? derive(64) : derive(104));
+  // Flip main text color for light/dark
+  s.setProperty("--text", light ? "#1a1a1a" : "#ede8e0");
+  s.setProperty("--header-border", light ? "rgba(0,0,0,0.1)" : "rgba(201,168,76,0.12)");
+  s.setProperty("--modal-backdrop", light ? "rgba(0,0,0,0.3)" : "rgba(0,0,0,0.7)");
+  s.setProperty("--card-shadow", light
+    ? "0 4px 24px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06)"
+    : "0 4px 24px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3)");
+}
+
+const _savedBg = localStorage.getItem("bgColor");
+if (_savedBg) applyBgColor(_savedBg);
+
+function _getCustomColors() {
+  try { return JSON.parse(localStorage.getItem("customAccentColors") || "[]"); } catch { return []; }
+}
+
+function _saveCustomColors(colors) {
+  localStorage.setItem("customAccentColors", JSON.stringify(colors));
+}
+
+function _selectAccent(key) {
+  applyAccentColor(key);
+  localStorage.setItem("accentColor", key);
+  _highlightSwatch("accent-color-grid", "data-accent", key);
+  fetch("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accentColor: key }),
+  }).catch(() => {});
+}
+
+let _iroColorPicker = null;
+let _iroColorBeforeOpen = null;
+
+function renderAccentGrid(grid) {
+  const current = localStorage.getItem("accentColor") || "gold";
+  grid.innerHTML = "";
+
+  // Built-in presets
+  for (const [key, preset] of Object.entries(ACCENT_PRESETS)) {
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (key === current ? " active" : "");
+    swatch.style.background = preset.accent;
+    swatch.title = key.charAt(0).toUpperCase() + key.slice(1);
+    swatch.setAttribute("data-accent", key);
+    swatch.addEventListener("click", () => {
+      _closeAccentPicker();
+      _selectAccent(key);
+    });
+    grid.appendChild(swatch);
+  }
+
+  // Custom colors from localStorage
+  const customs = _getCustomColors();
+  for (const hex of customs) {
+    const wrap = document.createElement("span");
+    wrap.className = "accent-swatch-wrap";
+    const swatch = document.createElement("button");
+    swatch.className = "accent-swatch" + (hex === current ? " active" : "");
+    swatch.style.background = hex;
+    swatch.title = hex;
+    swatch.setAttribute("data-accent", hex);
+    swatch.addEventListener("click", () => {
+      _closeAccentPicker();
+      _selectAccent(hex);
+    });
+    const del = document.createElement("button");
+    del.className = "accent-swatch-delete";
+    del.textContent = "×";
+    del.title = "Remove custom color";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const updated = _getCustomColors().filter(c => c !== hex);
+      _saveCustomColors(updated);
+      if (current === hex) _selectAccent("gold");
+      renderAccentGrid(grid);
+    });
+    wrap.appendChild(swatch);
+    wrap.appendChild(del);
+    grid.appendChild(wrap);
+  }
+
+  // "+" button to open iro.js color picker
+  const addBtn = document.createElement("button");
+  addBtn.className = "accent-swatch accent-swatch-add";
+  addBtn.textContent = "+";
+  addBtn.title = "Add custom color";
+  addBtn.addEventListener("click", () => _openAccentPicker(grid));
+  grid.appendChild(addBtn);
+}
+
+function _openAccentPicker(grid) {
+  const container = document.getElementById("accent-picker-container");
+  const wheelEl = document.getElementById("accent-picker-wheel");
+  if (!container || !wheelEl) return;
+
+  // Remember current color so we can revert on cancel
+  _iroColorBeforeOpen = localStorage.getItem("accentColor") || "gold";
+  const currentHex = ACCENT_PRESETS[_iroColorBeforeOpen]?.accent || _iroColorBeforeOpen;
+
+  container.classList.remove("hidden");
+
+  if (!_iroColorPicker) {
+    _iroColorPicker = new iro.ColorPicker("#accent-picker-wheel", {
+      width: 220,
+      color: currentHex,
+      borderWidth: 2,
+      borderColor: "rgba(255,255,255,0.1)",
+      handleRadius: 8,
+      layout: [
+        { component: iro.ui.Wheel, options: {} },
+        { component: iro.ui.Slider, options: { sliderType: "value" } },
+      ],
+    });
+    _iroColorPicker.on("color:change", (color) => {
+      applyAccentColor(color.hexString);
+    });
+
+  } else {
+    _iroColorPicker.color.hexString = currentHex;
+  }
+}
+
+function _closeAccentPicker() {
+  const container = document.getElementById("accent-picker-container");
+  if (container) container.classList.add("hidden");
+}
+
+document.getElementById("accent-picker-save").onclick = () => {
+  if (!_iroColorPicker) return;
+  const hex = _iroColorPicker.color.hexString.toLowerCase();
+  const customs = _getCustomColors();
+  const isPreset = Object.values(ACCENT_PRESETS).some(p => p.accent === hex);
+  if (!isPreset && !customs.includes(hex)) {
+    customs.push(hex);
+    _saveCustomColors(customs);
+  }
+  _selectAccent(hex);
+  const grid = document.getElementById("accent-color-grid");
+  if (grid) renderAccentGrid(grid);
+  _closeAccentPicker();
+};
+
+document.getElementById("accent-picker-cancel").onclick = () => {
+  applyAccentColor(_iroColorBeforeOpen);
+  _closeAccentPicker();
+};
+
+// Apply immediately from localStorage to prevent flash of default color
+const _savedAccent = localStorage.getItem("accentColor");
+if (_savedAccent) applyAccentColor(_savedAccent);
+
 const grid = document.getElementById("agents-grid");
 const minimizedBar = document.getElementById("minimized-bar");
 const emptyState = document.getElementById("empty-state");
@@ -43,6 +913,96 @@ localStorage.removeItem("ceo-theme");
 
 // --- WebSocket staleness tracking ---
 let _lastWsMessage = Date.now();
+
+// Global focusout listener — catches ALL focus losses from card inputs.
+// If focus jumps to a different card's textarea without user intent, refocus the original.
+let _userClickedAt = 0; // timestamp of last mousedown/touchstart
+let _focusGuardInterval = null; // single global guard — prevents two cards' guards from fighting
+document.addEventListener("mousedown", () => { _userClickedAt = Date.now(); }, true);
+document.addEventListener("touchstart", () => { _userClickedAt = Date.now(); }, true);
+
+document.addEventListener("focusout", (e) => {
+  const textarea = e.target;
+  if (!textarea.matches || !textarea.matches(".card-input textarea")) return;
+
+  // Skip expected blurs (e.g. user submitting input)
+  if (textarea._expectedBlur) {
+    textarea._expectedBlur = false;
+    return;
+  }
+
+  // Guard: if a card textarea loses focus without a recent user click/touch,
+  // it's programmatic — aggressively refocus over the next 500ms.
+  // Uses a SINGLE global guard to prevent two cards' guards from fighting each other.
+  const isUserAction = (Date.now() - _userClickedAt) < 200;
+  if (!isUserAction && !_reloadingPage) {
+    if (_focusGuardInterval) clearInterval(_focusGuardInterval);
+    const guardUntil = Date.now() + 500;
+    const doRestore = () => {
+      if (Date.now() > guardUntil) { clearInterval(_focusGuardInterval); _focusGuardInterval = null; return; }
+      if ((Date.now() - _userClickedAt) < 200) { clearInterval(_focusGuardInterval); _focusGuardInterval = null; return; }
+      if (!textarea.isConnected) { clearInterval(_focusGuardInterval); _focusGuardInterval = null; return; }
+      if (document.activeElement !== textarea) {
+        textarea.focus({ preventScroll: true });
+      }
+    };
+    doRestore();
+    queueMicrotask(doRestore);
+    requestAnimationFrame(doRestore);
+    _focusGuardInterval = setInterval(() => {
+      if (Date.now() > guardUntil || (Date.now() - _userClickedAt) < 200) {
+        clearInterval(_focusGuardInterval);
+        _focusGuardInterval = null;
+        return;
+      }
+      doRestore();
+    }, 50);
+  }
+}, true);
+
+// === LAST-ACTIVE TEXTAREA TRACKER ===
+// Catches ANY focus loss that the per-blur guard misses.
+// If focus ends up on body/document and no user interaction caused it, restore the textarea.
+let _lastActiveTextarea = null;
+let _lastActiveTextareaAt = 0;
+
+// Track when a card textarea gains focus (user-initiated or restored)
+document.addEventListener("focusin", (e) => {
+  if (e.target.matches && e.target.matches(".card-input textarea")) {
+    _lastActiveTextarea = e.target;
+    _lastActiveTextareaAt = Date.now();
+  } else if (e.target !== document.body && e.target !== document.documentElement) {
+    // User intentionally focused something else — clear the tracker
+    // (but not for body/documentElement, which indicates programmatic focus loss)
+    if ((Date.now() - _userClickedAt) < 300) {
+      _lastActiveTextarea = null;
+    }
+  }
+}, true);
+
+// Catch focus arriving at body/non-interactive elements — restore last textarea
+// Uses rAF to let the browser settle (some blur→focus sequences are two-step)
+let _bodyFocusRafId = null;
+document.addEventListener("focusin", (e) => {
+  // Only care about focus landing on body or the document element
+  if (e.target !== document.body && e.target !== document.documentElement) return;
+  if (!_lastActiveTextarea) return;
+  if (_reloadingPage) return;
+  // If user just clicked, they intended to move focus
+  if ((Date.now() - _userClickedAt) < 300) return;
+  // Only restore if the textarea was active recently (within 2s)
+  if (Date.now() - _lastActiveTextareaAt > 2000) return;
+
+  if (_bodyFocusRafId) cancelAnimationFrame(_bodyFocusRafId);
+  _bodyFocusRafId = requestAnimationFrame(() => {
+    _bodyFocusRafId = null;
+    if ((Date.now() - _userClickedAt) < 300) return;
+    if (!_lastActiveTextarea || !_lastActiveTextarea.isConnected) return;
+    if (document.activeElement === document.body || document.activeElement === document.documentElement) {
+      _lastActiveTextarea.focus({ preventScroll: true });
+    }
+  });
+}, true);
 
 // --- Tab notifications (title flash + native/browser notifications + dock badge) ---
 let TAB_TITLE_DEFAULT = "CEO Dashboard";
@@ -212,6 +1172,7 @@ function getCardDefaultHeight() {
 }
 
 function masonryLayout() {
+
   const cards = grid.querySelectorAll(".agent-card");
   for (const card of cards) {
     // Desired height: inline style (from drag-resize / saved layout) or CSS default
@@ -220,10 +1181,14 @@ function masonryLayout() {
       ? parseFloat(inlineH)
       : getCardDefaultHeight();
     // During active resize, respect the user's drag height exactly; otherwise use scrollHeight if content overflows
+    const termOpen = card.querySelector(".agent-terminal-section")?.style.display !== "none";
     const h = card.classList.contains("resizing-height") ? cssH : Math.max(cssH, card.scrollHeight);
     const span = Math.ceil((h + GRID_GAP_PX) / GRID_ROW_PX);
+    if (termOpen) console.log("[masonry]", card.querySelector(".agent-name")?.textContent, { cssH, scrollH: card.scrollHeight, h, span, inlineH });
     card.style.gridRow = `span ${span}`;
   }
+  // Force browser to reflow grid after all spans are set
+  void grid.offsetHeight;
   updateCardNumbers();
 }
 
@@ -236,7 +1201,7 @@ function scheduleMasonry() {
     masonryLayout();
     // After layout completes, scroll any terminals still in force-scroll mode
     for (const agent of agents.values()) {
-      if (agent.terminal._forceScrollUntil && Date.now() < agent.terminal._forceScrollUntil) {
+      if (agent.terminal && agent.terminal._forceScrollUntil && Date.now() < agent.terminal._forceScrollUntil) {
         scrollTerminalToBottom(agent.terminal);
       }
     }
@@ -308,7 +1273,7 @@ popoutChannel.onmessage = (event) => {
     const agent = agents.get(msg.agent);
     if (agent) {
       agent.card.classList.remove("popped-out");
-      agent.terminal._forceScrollUntil = Date.now() + 3000;
+      if (agent.terminal) agent.terminal._forceScrollUntil = Date.now() + 3000;
       scheduleMasonry();
     }
   }
@@ -415,6 +1380,8 @@ function applyLayout(name, card) {
     }
   }
   // Note: minimized state is now server-side, applied separately in addAgentCard
+  // Terminal restore disabled — terminals are only opened by user interaction
+  // (prevents spawning new tmux sessions on every reload)
 }
 
 // --- Dashboard Status Dot ---
@@ -519,7 +1486,7 @@ function reorderCards() {
         try { focused.setSelectionRange(cursorStart, cursorEnd); } catch {}
       }
     }
-  }
+    }
   saveCardOrder();
 
   // INVERT + PLAY: animate from old position to new
@@ -572,6 +1539,11 @@ function buildReloadState() {
     // Save unsaved raw textarea content
     const rawTextarea = document.querySelector(".todo-editor");
     if (rawTextarea) state.todo.rawContent = rawTextarea.value;
+    // Save rich editor content as markdown
+    if (!todoRawMode && typeof richEditorToMarkdown === "function") {
+      const richMd = richEditorToMarkdown();
+      if (richMd != null) state.todo.richContent = richMd;
+    }
     // Save title input value
     const titleInput = document.querySelector(".todo-title-input");
     if (titleInput) state.todo.titleValue = titleInput.value;
@@ -581,6 +1553,7 @@ function buildReloadState() {
   if (focused && (focused.tagName === "TEXTAREA" || focused.tagName === "INPUT" || focused.isContentEditable)) {
     state.focusCursorStart = focused.selectionStart ?? null;
     state.focusCursorEnd = focused.selectionEnd ?? null;
+    state._savedTextLength = focused.value?.length ?? 0;
     // Identify by ID first (most reliable)
     if (focused.id) {
       state.focusedId = focused.id;
@@ -684,6 +1657,25 @@ function connect() {
     if (window._shellXterm && window._shellXterm.cols) {
       ws.send(JSON.stringify({ type: "shell-resize", cols: window._shellXterm.cols, rows: window._shellXterm.rows }));
     }
+    // Re-subscribe all terminal cards + embedded agent terminals on reconnect
+    for (const [tName, agent] of agents) {
+      if (agent.type === "terminal" && !agent.card.classList.contains("minimized")) {
+        ws.send(JSON.stringify({ type: "terminal-subscribe", session: tName }));
+        if (agent.xterm?.cols && agent.xterm?.rows) {
+          _sendTerminalResize(tName, agent.xterm.cols, agent.xterm.rows);
+        }
+      }
+      // Embedded agent terminal
+      if (agent._termXterm && agent._termName) {
+        const section = agent.card.querySelector(".agent-terminal-section");
+        if (section && section.style.display !== "none") {
+          ws.send(JSON.stringify({ type: "terminal-subscribe", session: agent._termName }));
+          if (agent._termXterm.cols && agent._termXterm.rows) {
+            _sendTerminalResize(agent._termName, agent._termXterm.cols, agent._termXterm.rows);
+          }
+        }
+      }
+    }
     // Check if we missed a hot reload while disconnected (iOS Safari suspends WS in background)
     fetch("/api/version").then(r => r.json()).then(data => {
       if (_knownVersion === null) {
@@ -723,11 +1715,40 @@ function connect() {
   ws.onmessage = (event) => {
     _lastWsMessage = Date.now();
 
-    // Binary frame = shell PTY data (hot path — zero JSON overhead)
-    // Server sends raw PTY bytes as binary WebSocket frames.
-    // Uint8Array feeds directly into xterm's UTF-8 parser, skipping JS string decode.
+    // Binary frame = shell PTY data or terminal card data (hot path — zero JSON overhead)
     if (event.data instanceof ArrayBuffer) {
-      if (window._shellXterm) window._shellXterm.write(new Uint8Array(event.data));
+      const buf = new Uint8Array(event.data);
+      // 0x02 prefix = terminal card output: 0x02 + nameLen(1B) + name + data
+      if (buf.length > 1 && buf[0] === 0x02) {
+        const nameLen = buf[1];
+        const tName = new TextDecoder().decode(buf.subarray(2, 2 + nameLen));
+        const tData = buf.subarray(2 + nameLen);
+        // Standalone terminal card
+        const agent = agents.get(tName);
+        if (agent?.xterm) {
+          agent.xterm.write(tData);
+          if (!agent._termReady) {
+            agent._termReady = true;
+            const loader = agent.card.querySelector(".terminal-loading");
+            if (loader) { loader.classList.add("fade-out"); setTimeout(() => loader.remove(), 300); }
+          }
+        }
+        // Embedded agent terminal (name is "<agent>-term")
+        if (tName.endsWith("-term")) {
+          const baseAgent = agents.get(tName.slice(0, -5));
+          if (baseAgent?._termXterm) {
+            baseAgent._termXterm.write(tData);
+            if (!baseAgent._termReady) {
+              baseAgent._termReady = true;
+              const loader = baseAgent.card.querySelector(".agent-terminal-section .terminal-loading");
+              if (loader) { loader.classList.add("fade-out"); setTimeout(() => loader.remove(), 300); }
+            }
+          }
+        }
+        return;
+      }
+      // Default: footer shell (bare binary, no prefix)
+      if (window._shellXterm) window._shellXterm.write(buf);
       return;
     }
 
@@ -825,9 +1846,20 @@ function connect() {
     }
 
     if (msg.type === "sessions") {
+      const activeNames = new Set(msg.sessions.map(s => s.name));
       for (const s of msg.sessions) {
-        addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+        if (s.type === "terminal") {
+          addTerminalCard(s.name, s.workdir);
+        } else {
+          addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+        }
       }
+      // Clear ALL terminalOpen flags — terminals are only opened by user interaction
+      const layouts = loadLayouts();
+      for (const layout of Object.values(layouts)) {
+        if (layout.terminalOpen) layout.terminalOpen = false;
+      }
+      localStorage.setItem(getLayoutKey(), JSON.stringify(layouts));
       reorderCards();
       updateEmptyState();
     }
@@ -858,6 +1890,8 @@ function connect() {
     }
 
     if (msg.type === "output") {
+      const existing = agents.get(msg.session);
+      if (existing?.type === "terminal") return;
       if (!agents.has(msg.session)) {
         addAgentCard(msg.session, "", null, false, false);
       }
@@ -880,9 +1914,13 @@ function connect() {
       if (msg.workdir && msg.workdir !== agent.workdir) {
         agent.workdir = msg.workdir;
         agent.card.querySelector(".workdir-link").textContent = shortPath(msg.workdir);
+        // Also update embedded terminal header if open
+        updateTerminalHeader(agent.card, msg.workdir, undefined, undefined, undefined);
       }
       if (msg.branch !== undefined) {
         updateBranchDisplay(agent.card, msg.branch, msg.isWorktree);
+        // Also update embedded terminal header if open
+        updateTerminalHeader(agent.card, undefined, msg.branch, msg.isWorktree, undefined);
       }
     }
 
@@ -893,8 +1931,8 @@ function connect() {
         const textarea = agent.card.querySelector(".card-input textarea");
         if (textarea && textarea !== document.activeElement) {
           textarea.value = msg.text;
-          // Trigger auto-resize
-          textarea.style.height = "auto";
+          // Trigger auto-resize (use 1px not "auto" to avoid layout thrash)
+          textarea.style.height = "1px";
           textarea.style.height = Math.min(textarea.scrollHeight, 150) + "px";
           // Auto-scroll terminal so input area stays visible (respect user scroll)
           if (msg.text && !agent.terminal._userScrolledUp) scrollTerminalToBottom(agent.terminal);
@@ -990,9 +2028,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   const card = document.createElement("div");
   card.className = "agent-card";
   card.innerHTML = `
+    <div class="card-body-wrapper">
     <div class="card-sticky-top">
       <div class="card-header">
         <div class="card-header-left">
+          <button class="fullscreen-back-btn" tabindex="-1" title="Exit fullscreen">&#x2190;</button>
           <span class="alert-icon" title="Needs input"></span>
           <span class="agent-name">${escapeHtml(name)}</span>
           <span class="status-badge working">working</span>
@@ -1002,6 +2042,8 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           <div class="more-menu-wrap">
             <button class="more-btn" tabindex="-1" title="More actions">&hellip;</button>
             <div class="more-menu">
+              <button class="more-menu-item" data-action="view-diff">View Diff</button>
+              <button class="more-menu-item" data-action="open-terminal">Terminal</button>
               <button class="more-menu-item" data-action="rename">Rename</button>
               <button class="more-menu-item" data-action="header-color">Header Color</button>
               <div class="header-color-picker" style="display:none;">
@@ -1016,7 +2058,6 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
                   <button class="header-color-swatch" data-color="#6bb5a0" title="Teal" style="--swatch:#6bb5a0;"></button>
                 </div>
               </div>
-              <button class="more-menu-item" data-action="view-diff">View Diff</button>
               <button class="more-menu-item" data-action="save-memory">Save Memory</button>
               <button class="more-menu-item" data-action="update-memory">Update Memory</button>
               <button class="more-menu-item more-menu-danger" data-action="clear-memory">Clear Memory</button>
@@ -1095,6 +2136,41 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           <textarea class="agent-doc-edit-area" style="display:none;"></textarea>
         </div>
       </div>
+    </div>
+    </div>
+    <div class="agent-terminal-section" style="display:none;">
+      <div class="agent-terminal-header">
+        <div class="agent-terminal-header-left">
+          <svg class="agent-terminal-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span class="agent-term-workdir workdir-link" title="Working directory"></span>
+          <span class="agent-term-branch branch-info"></span>
+          <a class="agent-term-pr-btn btn-secondary" style="display:none;padding:2px 8px;font-size:10px;text-decoration:none;" target="_blank" rel="noopener">View PR</a>
+        </div>
+        <div class="agent-terminal-header-right">
+          <button class="agent-terminal-expand" title="Expand to card">&#x26F6;</button>
+          <button class="agent-terminal-close" title="Close terminal">&times;</button>
+        </div>
+      </div>
+      <div class="agent-terminal-container">
+        <div class="terminal-loading">
+          <div class="terminal-loading-anim">
+            <div class="loading-ring"></div>
+            <div class="loading-ring loading-ring-2"></div>
+            <div class="loading-ring loading-ring-3"></div>
+            <div class="loading-orb loading-orb-1"></div>
+            <div class="loading-orb loading-orb-2"></div>
+            <div class="loading-orb loading-orb-3"></div>
+            <div class="loading-orb loading-orb-4"></div>
+            <div class="loading-orb loading-orb-5"></div>
+            <div class="loading-orb loading-orb-6"></div>
+            <div class="terminal-loading-icon">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+            </div>
+          </div>
+          <span class="terminal-loading-text">Starting terminal<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></span>
+        </div>
+      </div>
+      <div class="agent-terminal-resize"></div>
     </div>
   `;
 
@@ -1180,6 +2256,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   const restartBtn = card.querySelector(".restart-btn");
   const popoutBtn = card.querySelector(".popout-btn");
   const expandBtn = card.querySelector(".expand-btn");
+  const fullscreenBackBtn = card.querySelector(".fullscreen-back-btn");
   const bringBackBtn = card.querySelector(".popout-bring-back-btn");
   const favoriteBtn = card.querySelector(".favorite-btn");
   const moreBtn = card.querySelector(".more-btn");
@@ -1252,9 +2329,21 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   };
 
   // Auto-resize textarea — card has fixed height, terminal flex-shrinks automatically
+  // Avoid setting height="auto" first — it collapses the textarea to 0 momentarily,
+  // causing the terminal flex sibling to expand then shrink (visible scroll jump).
   const autoResize = () => {
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 150) + "px";
+    const terminal = card.querySelector(".terminal");
+    const savedScroll = terminal ? terminal.scrollTop : 0;
+    // Shrink to 1px to measure natural scrollHeight without the old height constraining it
+    input.style.height = "1px";
+    const newH = Math.min(input.scrollHeight, 150);
+    input.style.height = newH + "px";
+    // Restore terminal scroll position displaced by the height change
+    if (terminal && !terminal._userScrolledUp) {
+      scrollTerminalToBottom(terminal);
+    } else if (terminal) {
+      terminal.scrollTop = savedScroll;
+    }
   };
   input.addEventListener("input", autoResize);
 
@@ -1379,12 +2468,12 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     const hasActiveItem = dropdown && dropdown.querySelector(".slash-item.active");
     if (!dropdownVisible || !hasActiveItem) {
       doSendFinal();
-      input.style.height = "auto";
+      input.style.height = "";
     }
   });
   sendBtn.addEventListener("click", () => {
     doSendFinal();
-    input.style.height = "auto";
+    input.style.height = "";
   });
 
   // Slash command autocomplete
@@ -1640,6 +2729,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     moreMenu.classList.remove("visible");
 
     if (action === "view-diff") { openDiffModal(name); return; }
+    if (action === "open-terminal") { openAgentTerminal(name, card); return; }
     if (action === "rename") {
       const newName = prompt("Rename agent:", name);
       if (!newName || newName === name) return;
@@ -1787,20 +2877,25 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     scheduleMasonry();
   });
 
-  // Fullscreen expand (mobile)
+  // Fullscreen expand/collapse
+  function exitFullscreen() {
+    card.classList.remove("fullscreen");
+    expandBtn.innerHTML = "\u26F6"; // ⛶
+    expandBtn.title = "Fullscreen";
+    document.body.style.overflow = "";
+    scheduleMasonry();
+  }
   expandBtn.addEventListener("click", () => {
-    const isFullscreen = card.classList.toggle("fullscreen");
-    if (isFullscreen) {
+    if (card.classList.contains("fullscreen")) {
+      exitFullscreen();
+    } else {
+      card.classList.add("fullscreen");
       expandBtn.innerHTML = "\u2715"; // ✕
       expandBtn.title = "Exit fullscreen";
       document.body.style.overflow = "hidden";
-    } else {
-      expandBtn.innerHTML = "\u26F6"; // ⛶
-      expandBtn.title = "Fullscreen";
-      document.body.style.overflow = "";
-      scheduleMasonry();
     }
   });
+  fullscreenBackBtn.addEventListener("click", exitFullscreen);
 
   // Minimize / restore — moves card between grid and minimized bar, syncs via server
   minimizeBtn.addEventListener("click", async () => {
@@ -1832,6 +2927,23 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   let killTimer = null;
   const doKill = async () => {
     await fetch(`/api/sessions/${name}`, { method: "DELETE" });
+    // Also kill the embedded terminal tmux session if it exists
+    const agEntry = agents.get(name);
+    if (agEntry?._termName) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: agEntry._termName }));
+      }
+      if (agEntry._termXterm) { try { agEntry._termXterm.dispose(); } catch {} }
+      if (agEntry._termResizeObserver) { try { agEntry._termResizeObserver.disconnect(); } catch {} }
+      fetch(`/api/sessions/${encodeURIComponent(agEntry._termName)}`, { method: "DELETE" }).catch(() => {});
+      // Also remove standalone terminal card if it exists
+      const termCardAgent = agents.get(agEntry._termName);
+      if (termCardAgent?.card) {
+        if (termCardAgent.xterm) { try { termCardAgent.xterm.dispose(); } catch {} }
+        termCardAgent.card.remove();
+        agents.delete(agEntry._termName);
+      }
+    }
     if (poppedOutAgents.has(name)) {
       popoutChannel.postMessage({ type: "kill-agent", agent: name });
       poppedOutAgents.delete(name);
@@ -2086,6 +3198,20 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     let scrollRAF = null;
     let lastMouseY = startY;
 
+    // When terminal is open, track wrapper so we resize agent area only (terminal stays fixed)
+    const bodyWrapper = card.querySelector(".card-body-wrapper");
+    const termSection = card.querySelector(".agent-terminal-section");
+    const termIsOpen = termSection && termSection.style.display !== "none";
+    const startWrapperH = termIsOpen ? bodyWrapper.offsetHeight : 0;
+
+    const applyHeight = (deltaY) => {
+      const newHeight = Math.max(250, startHeight + deltaY);
+      card.style.height = newHeight + "px";
+      if (termIsOpen && bodyWrapper) {
+        bodyWrapper.style.height = Math.max(150, startWrapperH + deltaY) + "px";
+      }
+    };
+
     document.body.style.userSelect = "none";
     card.classList.add("resizing-height");
 
@@ -2097,10 +3223,8 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       if (lastMouseY > viewH - edgeZone) {
         const speed = Math.min(maxSpeed, ((lastMouseY - (viewH - edgeZone)) / edgeZone) * maxSpeed);
         window.scrollBy(0, speed);
-        // Re-apply height since scroll changed the effective delta
         const deltaY = (lastMouseY - startY) + (window.scrollY - startScrollY);
-        const newHeight = Math.max(250, startHeight + deltaY);
-        card.style.height = newHeight + "px";
+        applyHeight(deltaY);
         scheduleMasonry();
       } else if (lastMouseY < edgeZone) {
         const speed = Math.min(maxSpeed, ((edgeZone - lastMouseY) / edgeZone) * maxSpeed);
@@ -2112,10 +3236,8 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
 
     const onMouseMove = (ev) => {
       lastMouseY = ev.clientY;
-      // Height: account for both mouse movement and any auto-scrolling
       const deltaY = (ev.clientY - startY) + (window.scrollY - startScrollY);
-      const newHeight = Math.max(250, startHeight + deltaY);
-      card.style.height = newHeight + "px";
+      applyHeight(deltaY);
 
       // Width: snap to column spans based on horizontal drag distance
       const deltaX = ev.clientX - startX;
@@ -2150,6 +3272,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     const startY = touch.clientY;
     const startHeight = card.offsetHeight;
 
+    const bw = card.querySelector(".card-body-wrapper");
+    const ts = card.querySelector(".agent-terminal-section");
+    const tOpen = ts && ts.style.display !== "none";
+    const startBwH = tOpen ? bw.offsetHeight : 0;
+
     card.classList.add("resizing-height");
 
     const onTouchMove = (ev) => {
@@ -2157,6 +3284,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       const deltaY = t.clientY - startY;
       const newHeight = Math.max(200, startHeight + deltaY);
       card.style.height = newHeight + "px";
+      if (tOpen && bw) bw.style.height = Math.max(150, startBwH + deltaY) + "px";
       scheduleMasonry();
     };
 
@@ -2283,6 +3411,629 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     .catch(() => {});
 }
 
+// --- Shared xterm.js terminal infrastructure ---
+// Build a full xterm theme from a background color (adapts for light/dark)
+function buildXtermTheme(bg) {
+  const light = _isLight(bg);
+  const fg = light ? "#1a1a1a" : "#e6edf3";
+  return {
+    background: bg, foreground: fg, cursor: fg,
+    selectionBackground: light ? "rgba(0,100,200,0.25)" : "rgba(56, 139, 253, 0.4)",
+    black:         light ? "#1a1a1a" : "#484f58",
+    red:           light ? "#cf222e" : "#ff7b72",
+    green:         light ? "#1a7f37" : "#3fb950",
+    yellow:        light ? "#7a6a00" : "#d29922",
+    blue:          light ? "#0550ae" : "#58a6ff",
+    magenta:       light ? "#8250df" : "#bc8cff",
+    cyan:          light ? "#0c7d9d" : "#39d353",
+    white:         light ? "#555"    : "#b1bac4",
+    brightBlack:   light ? "#666"    : "#6e7681",
+    brightRed:     light ? "#d1242f" : "#ffa198",
+    brightGreen:   light ? "#1a9f37" : "#56d364",
+    brightYellow:  light ? "#8a7500" : "#e3b341",
+    brightBlue:    light ? "#0969da" : "#79c0ff",
+    brightMagenta: light ? "#8250df" : "#d2a8ff",
+    brightCyan:    light ? "#0c7d9d" : "#56d364",
+    brightWhite:   light ? "#1a1a1a" : "#f0f6fc",
+  };
+}
+
+const XTERM_THEME = buildXtermTheme("#0d1117");
+
+const XTERM_BASE_CONFIG = {
+  cursorBlink: true,
+  cursorStyle: "bar",
+  fontSize: 13,
+  fontFamily: "'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace",
+  fastScrollModifier: "alt",
+  fastScrollSensitivity: 10,
+  smoothScrollDuration: 0,
+  allowProposedApi: true,
+  theme: XTERM_THEME,
+};
+
+function createXtermInstance(scrollback, themeOverride) {
+  const config = { ...XTERM_BASE_CONFIG, scrollback };
+  if (themeOverride) config.theme = themeOverride;
+  const term = new Terminal(config);
+  const fitAddon = new FitAddon.FitAddon();
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+  term.loadAddon(fitAddon);
+  term.loadAddon(webLinksAddon);
+  return { term, fitAddon };
+}
+
+function initXtermWebGL(term) {
+  try {
+    if (typeof WebglAddon !== "undefined") {
+      const wgl = new WebglAddon.WebglAddon();
+      wgl.onContextLoss(() => { wgl.dispose(); });
+      term.loadAddon(wgl);
+    }
+  } catch (e) {
+    console.warn("[xterm] WebGL addon failed:", e);
+  }
+}
+
+const _xtermEncoder = new TextEncoder();
+
+// Binary WS: footer shell stdin (0x01 prefix)
+function _sendShellStdin(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const payload = _xtermEncoder.encode(data);
+    const frame = new Uint8Array(1 + payload.length);
+    frame[0] = 0x01;
+    frame.set(payload, 1);
+    ws.send(frame);
+  }
+}
+
+// --- Terminal Card (xterm.js + tmux via binary WS) ---
+
+// Binary WS: terminal card stdin (0x03 prefix + name routing)
+function _sendTerminalStdin(name, data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const nameBuf = _xtermEncoder.encode(name);
+    const dataBuf = _xtermEncoder.encode(data);
+    const frame = new Uint8Array(2 + nameBuf.length + dataBuf.length);
+    frame[0] = 0x03;
+    frame[1] = nameBuf.length;
+    frame.set(nameBuf, 2);
+    frame.set(dataBuf, 2 + nameBuf.length);
+    ws.send(frame);
+  }
+}
+
+// Binary WS: terminal card resize (0x04 prefix + name + cols/rows)
+function _updateGripOffset() {
+  // No-op: grip is now inside .card-body-wrapper which has position:relative,
+  // so it naturally stays at the bottom-right of the agent area.
+}
+
+function _sendTerminalResize(name, cols, rows) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    const nameBuf = _xtermEncoder.encode(name);
+    const frame = new Uint8Array(2 + nameBuf.length + 4);
+    frame[0] = 0x04;
+    frame[1] = nameBuf.length;
+    frame.set(nameBuf, 2);
+    const dv = new DataView(frame.buffer);
+    dv.setUint16(2 + nameBuf.length, cols);
+    dv.setUint16(2 + nameBuf.length + 2, rows);
+    ws.send(frame);
+  }
+}
+
+// --- Embedded Agent Terminal ---
+// Opens an xterm.js terminal inside an agent card, anchored below docs.
+// Creates a server-side terminal session named "<agent>-term" in the agent's workdir.
+const _termLoadingHTML = `<div class="terminal-loading"><div class="terminal-loading-anim"><div class="loading-ring"></div><div class="loading-ring loading-ring-2"></div><div class="loading-ring loading-ring-3"></div><div class="loading-orb loading-orb-1"></div><div class="loading-orb loading-orb-2"></div><div class="loading-orb loading-orb-3"></div><div class="loading-orb loading-orb-4"></div><div class="loading-orb loading-orb-5"></div><div class="loading-orb loading-orb-6"></div><div class="terminal-loading-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg></div></div><span class="terminal-loading-text">Starting terminal<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></span></div>`;
+
+function updateTerminalHeader(card, workdir, branch, isWorktree, prUrl) {
+  const wdEl = card.querySelector(".agent-term-workdir");
+  const brEl = card.querySelector(".agent-term-branch");
+  const prEl = card.querySelector(".agent-term-pr-btn");
+  if (wdEl && workdir !== null && workdir !== undefined) wdEl.textContent = shortPath(workdir);
+  if (brEl && branch !== null && branch !== undefined) {
+    if (branch) {
+      brEl.textContent = isWorktree ? `worktree: ${branch}` : branch;
+      brEl.className = isWorktree ? "agent-term-branch branch-info worktree" : "agent-term-branch branch-info";
+    } else {
+      brEl.textContent = "";
+    }
+  }
+  if (prEl && prUrl !== null && prUrl !== undefined) {
+    if (prUrl) {
+      prEl.href = prUrl;
+      prEl.style.display = "";
+    } else {
+      prEl.style.display = "none";
+    }
+  }
+}
+
+function openAgentTerminal(agentName, card, restoreHeight) {
+  const section = card.querySelector(".agent-terminal-section");
+  if (!section) return;
+
+  // If already open, just toggle visibility
+  if (section.style.display !== "none") {
+    closeAgentTerminal(agentName, card);
+    return;
+  }
+
+  const container = section.querySelector(".agent-terminal-container");
+  const loadingEl = section.querySelector(".terminal-loading");
+  const agent = agents.get(agentName);
+  const workdir = agent?.workdir || "";
+  const termH = restoreHeight || 200;
+
+  // BEFORE showing the terminal section: lock the body wrapper height
+  // so the agent area can NEVER shrink when the terminal is added
+  const bodyWrapper = card.querySelector(".card-body-wrapper");
+  const wrapperH = bodyWrapper.offsetHeight;
+  bodyWrapper.style.height = wrapperH + "px";
+  bodyWrapper.style.flexGrow = "0";
+
+  // Now show the section and set the terminal container height
+  section.style.display = "";
+  container.style.height = termH + "px";
+
+  // Grow the card to fit: locked wrapper + terminal section
+  const sectionH = section.offsetHeight;
+  const newCardH = wrapperH + sectionH;
+  card.style.height = newCardH + "px";
+  // Directly set grid-row span — don't wait for masonryLayout
+  const newSpan = Math.ceil((newCardH + GRID_GAP_PX) / GRID_ROW_PX);
+  card.style.gridRow = `span ${newSpan}`;
+  console.log("[terminal-open]", agentName, { wrapperH, sectionH, newCardH, newSpan, scrollH: card.scrollHeight });
+  requestAnimationFrame(() => _updateGripOffset(card));
+  saveLayout(agentName, { terminalOpen: true, terminalHeight: termH });
+  if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+  masonryLayout();
+  requestAnimationFrame(() => masonryLayout());
+  setTimeout(masonryLayout, 150);
+
+  // Populate header with current agent info
+  const branchEl = card.querySelector(".branch-info:not(.agent-term-branch)");
+  const branch = branchEl?.textContent?.replace(/^worktree:\s*/, "") || "";
+  const isWorktree = branchEl?.classList.contains("worktree") || false;
+  updateTerminalHeader(card, workdir, branch, isWorktree, null);
+
+  // Fetch PR URL asynchronously
+  fetch(`/api/sessions/${encodeURIComponent(agentName)}/pr-url`)
+    .then(r => r.json())
+    .then(data => { if (data.prUrl) updateTerminalHeader(card, null, null, null, data.prUrl); })
+    .catch(() => {});
+
+  // If already initialized (reopening with xterm alive), just re-subscribe
+  if (agent?._termXterm) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "terminal-subscribe", session: agent._termName }));
+    }
+    requestAnimationFrame(() => { try { agent._termFitAddon.fit(); } catch {} });
+    return;
+  }
+
+  // Helper: set up xterm for a given terminal session name
+  const initEmbeddedXterm = (sessionName) => {
+    const _termBg = getComputedStyle(document.documentElement).getPropertyValue("--shell-bg").trim() || "#0d1117";
+    const { term, fitAddon } = createXtermInstance(5000, buildXtermTheme(_termBg));
+
+    if (agent) {
+      agent._termXterm = term;
+      agent._termFitAddon = fitAddon;
+      agent._termName = sessionName;
+      agent._termReady = false;
+    }
+
+    requestAnimationFrame(() => {
+      term.open(container);
+      initXtermWebGL(term);
+      term.onData((d) => { _sendTerminalStdin(sessionName, d); });
+      try { fitAddon.fit(); } catch {}
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-subscribe", session: sessionName }));
+        if (term.cols && term.rows) _sendTerminalResize(sessionName, term.cols, term.rows);
+      }
+      const ro = new ResizeObserver(() => {
+        try {
+          fitAddon.fit();
+          if (term.cols && term.rows) _sendTerminalResize(sessionName, term.cols, term.rows);
+        } catch {}
+      });
+      ro.observe(container);
+      if (agent) agent._termResizeObserver = ro;
+      container.addEventListener("click", () => { term.focus(); });
+      setTimeout(() => {
+        if (loadingEl?.parentNode) { loadingEl.classList.add("fade-out"); setTimeout(() => loadingEl.remove(), 300); }
+      }, 5000);
+    });
+  };
+
+  // If tmux session already exists (e.g. after expand→minimize back, or page reload), reuse it
+  if (agent?._termName) {
+    initEmbeddedXterm(agent._termName);
+    return;
+  }
+
+  // Create terminal session on the server (ephemeral — not persisted to sessions.json)
+  const termName = agentName + "-term";
+  fetch("/api/sessions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: termName, type: "terminal", workdir }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) { console.error("[agent-terminal] Create failed:", data.error); return; }
+      initEmbeddedXterm(data.name);
+    })
+    .catch((err) => console.error("[agent-terminal] Create failed:", err));
+
+  // Wire close button
+  const closeBtn = section.querySelector(".agent-terminal-close");
+  if (closeBtn && !closeBtn._wired) {
+    closeBtn._wired = true;
+    closeBtn.addEventListener("click", () => closeAgentTerminal(agentName, card));
+  }
+
+  // Wire expand button → pop out to standalone terminal card
+  const expandBtn = section.querySelector(".agent-terminal-expand");
+  if (expandBtn && !expandBtn._wired) {
+    expandBtn._wired = true;
+    expandBtn.addEventListener("click", () => {
+      const ag = agents.get(agentName);
+      const termName = ag?._termName;
+      const wd = ag?.workdir || "";
+      if (!termName) return;
+
+      // Create standalone terminal card FIRST (subscribes to same PTY, keeps scrollback alive)
+      addTerminalCard(termName, wd);
+
+      // Now clean up embedded terminal (unsubscribe after standalone has subscribed)
+      setTimeout(() => {
+        if (ag?._termXterm) { try { ag._termXterm.dispose(); } catch {} }
+        if (ag?._termResizeObserver) { try { ag._termResizeObserver.disconnect(); } catch {} }
+        ag._termXterm = null;
+        ag._termFitAddon = null;
+        ag._termReady = false;
+        // Reset container with loading state for potential re-open
+        const cont = section.querySelector(".agent-terminal-container");
+        if (cont) cont.innerHTML = _termLoadingHTML;
+        // Hide section + shrink card (without unsubscribing — standalone already subscribed)
+        const sectionH = section.offsetHeight;
+        const cardH = card.offsetHeight;
+        if (sectionH > 0 && cardH > sectionH) card.style.height = (cardH - sectionH) + "px";
+        section.style.display = "none";
+        const bw = card.querySelector(".card-body-wrapper");
+        if (bw) { bw.style.height = ""; bw.style.flexGrow = ""; }
+        _updateGripOffset(card);
+        saveLayout(agentName, { terminalOpen: false, height: card.style.height });
+        scheduleMasonry();
+        // NOW unsubscribe embedded — standalone client keeps PTY alive
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: termName }));
+        }
+      }, 200); // Wait for standalone to subscribe first
+
+      // Scroll to the new card
+      const termAgent = agents.get(termName);
+      if (termAgent?.card) {
+        requestAnimationFrame(() => {
+          termAgent.card.scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+      }
+    });
+  }
+
+  // Wire workdir click → open in Finder
+  const termWdEl = section.querySelector(".agent-term-workdir");
+  if (termWdEl && !termWdEl._wired) {
+    termWdEl._wired = true;
+    termWdEl.addEventListener("click", () => {
+      const ag = agents.get(agentName);
+      if (ag?.workdir) {
+        fetch("/api/shell/open-finder", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cwd: ag.workdir }),
+        });
+      }
+    });
+  }
+
+  // Wire resize handle
+  const resizeHandle = section.querySelector(".agent-terminal-resize");
+  if (resizeHandle && !resizeHandle._wired) {
+    resizeHandle._wired = true;
+    resizeHandle.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const startY = e.clientY;
+      const startTermH = container.offsetHeight;
+      const startCardH = card.offsetHeight;
+      const onMove = (ev) => {
+        const delta = ev.clientY - startY;
+        const newTermH = Math.max(80, startTermH + delta);
+        container.style.height = newTermH + "px";
+        // Grow/shrink card by the same delta
+        card.style.height = (startCardH + (newTermH - startTermH)) + "px";
+        _updateGripOffset(card);
+        scheduleMasonry();
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (agent?._termFitAddon) try { agent._termFitAddon.fit(); } catch {}
+        _updateGripOffset(card);
+        saveLayout(agentName, { terminalHeight: container.offsetHeight, height: card.style.height });
+        if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+        masonryLayout();
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  }
+}
+
+function closeAgentTerminal(agentName, card) {
+  const section = card.querySelector(".agent-terminal-section");
+  if (section) {
+    // Shrink card by the terminal section height before hiding
+    const sectionH = section.offsetHeight;
+    const cardH = card.offsetHeight;
+    if (sectionH > 0 && cardH > sectionH) {
+      card.style.height = (cardH - sectionH) + "px";
+    }
+    section.style.display = "none";
+    // Unlock body wrapper so it can flex normally again
+    const bodyWrapper = card.querySelector(".card-body-wrapper");
+    if (bodyWrapper) { bodyWrapper.style.height = ""; bodyWrapper.style.flexGrow = ""; }
+  }
+  _updateGripOffset(card);
+  saveLayout(agentName, { terminalOpen: false, height: card.style.height });
+  if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+  masonryLayout();
+  requestAnimationFrame(() => { masonryLayout(); });
+  setTimeout(masonryLayout, 100);
+  // Clamp scroll so we don't overshoot past the now-shorter page
+  requestAnimationFrame(() => {
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    if (window.scrollY > maxScroll && maxScroll >= 0) {
+      window.scrollTo({ top: maxScroll, behavior: "auto" });
+    }
+  });
+  // Unsubscribe to save bandwidth
+  const agent = agents.get(agentName);
+  if (agent?._termName && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: agent._termName }));
+  }
+}
+
+function addTerminalCard(name, workdir) {
+  if (agents.has(name)) {
+    // Already exists — just update workdir if changed
+    const agent = agents.get(name);
+    if (workdir && workdir !== agent.workdir) {
+      agent.workdir = workdir;
+      const wdEl = agent.card.querySelector(".workdir-link");
+      if (wdEl) wdEl.textContent = shortPath(workdir);
+    }
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "agent-card terminal-card";
+  card.innerHTML = `
+    <div class="card-sticky-top">
+      <div class="card-header">
+        <div class="card-header-left">
+          <span class="terminal-icon">&gt;_</span>
+          <span class="agent-name">${escapeHtml(name)}</span>
+        </div>
+        <div class="card-actions">
+          <button class="minimize-btn" tabindex="0" title="Minimize">&minus;</button>
+          <button class="kill-btn" tabindex="0" title="Close terminal">&times;</button>
+        </div>
+      </div>
+      <div class="card-subheader">
+        <span class="workdir-link">${escapeHtml(shortPath(workdir))}</span>
+        <span class="branch-info"></span>
+      </div>
+    </div>
+    <div class="terminal-xterm-container">
+      <div class="terminal-loading">
+        <div class="terminal-loading-anim">
+          <div class="loading-ring"></div>
+          <div class="loading-ring loading-ring-2"></div>
+          <div class="loading-ring loading-ring-3"></div>
+          <div class="loading-orb loading-orb-1"></div>
+          <div class="loading-orb loading-orb-2"></div>
+          <div class="loading-orb loading-orb-3"></div>
+          <div class="loading-orb loading-orb-4"></div>
+          <div class="loading-orb loading-orb-5"></div>
+          <div class="loading-orb loading-orb-6"></div>
+          <div class="terminal-loading-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
+            </svg>
+          </div>
+        </div>
+        <span class="terminal-loading-text">Starting terminal<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></span>
+      </div>
+    </div>
+    <div class="resize-grip"></div>
+  `;
+
+  const xtermContainer = card.querySelector(".terminal-xterm-container");
+  const loadingEl = card.querySelector(".terminal-loading");
+
+  // Create xterm.js terminal instance — use shell/terminal bg color from theme
+  const _termBg = getComputedStyle(document.documentElement).getPropertyValue("--shell-bg").trim() || "#0d1117";
+  const { term, fitAddon } = createXtermInstance(5000, buildXtermTheme(_termBg));
+
+  // Store in agents map
+  agents.set(name, { card, xterm: term, fitAddon, type: "terminal", workdir, status: "terminal" });
+
+  // Derive parent agent name from terminal name (e.g. "my-agent-term" → "my-agent")
+  const parentAgentName = name.endsWith("-term") ? name.slice(0, -5) : null;
+
+  // Close button — close standalone card, keep tmux session alive for later re-embed
+  const killBtn = card.querySelector(".kill-btn");
+  killBtn.addEventListener("click", () => {
+    // Unsubscribe + dispose xterm but keep tmux session alive
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: name }));
+    }
+    const agentEntry = agents.get(name);
+    if (agentEntry?.resizeObserver) agentEntry.resizeObserver.disconnect();
+    term.dispose();
+    card.remove();
+    agents.delete(name);
+    // Clear terminalOpen on parent agent so it doesn't re-open on reload
+    if (parentAgentName) saveLayout(parentAgentName, { terminalOpen: false });
+    updateEmptyState();
+    scheduleMasonry();
+  });
+
+  // Minimize button — collapse back into parent agent card as embedded terminal
+  const minBtn = card.querySelector(".minimize-btn");
+  minBtn.addEventListener("click", () => {
+    const parentAgent = parentAgentName ? agents.get(parentAgentName) : null;
+    if (parentAgent?.card) {
+      // Unsubscribe + dispose standalone
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: name }));
+      }
+      const agentEntry = agents.get(name);
+      if (agentEntry?.resizeObserver) agentEntry.resizeObserver.disconnect();
+      term.dispose();
+      card.remove();
+      agents.delete(name);
+      updateEmptyState();
+      scheduleMasonry();
+      // Re-open as embedded terminal in the parent agent card
+      openAgentTerminal(parentAgentName, parentAgent.card);
+    } else {
+      // No parent agent — fall back to standard minimize
+      if (card.classList.contains("minimized")) {
+        card.classList.remove("minimized");
+        minBtn.innerHTML = "\u2212";
+        minBtn.title = "Minimize";
+        grid.appendChild(card);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "terminal-subscribe", session: name }));
+        }
+        reorderCards();
+        updateEmptyState();
+        scheduleMasonry();
+        requestAnimationFrame(() => { try { fitAddon.fit(); } catch {} });
+      } else {
+        card.classList.add("minimized");
+        minBtn.innerHTML = "+";
+        minBtn.title = "Restore";
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: name }));
+        }
+        minimizedBar.appendChild(card);
+        updateEmptyState();
+        scheduleMasonry();
+      }
+    }
+  });
+
+  // Resize grip
+  const grip = card.querySelector(".resize-grip");
+  let resizing = false;
+  grip.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    resizing = true;
+    const startY = e.clientY;
+    const startH = card.offsetHeight;
+    const onMove = (ev) => {
+      const h = startH + (ev.clientY - startY);
+      card.style.height = Math.max(150, h) + "px";
+    };
+    const onUp = () => {
+      resizing = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try { fitAddon.fit(); } catch {}
+      scheduleMasonry();
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+
+  // Populate branch from parent agent if this is a "-term" card
+  if (parentAgentName) {
+    const parentAgent = agents.get(parentAgentName);
+    if (parentAgent?.card) {
+      const srcBranch = parentAgent.card.querySelector(".branch-info:not(.agent-term-branch)");
+      if (srcBranch) {
+        updateBranchDisplay(card, srcBranch.textContent.replace(/^worktree:\s*/, ""), srcBranch.classList.contains("worktree"));
+      }
+    }
+  }
+
+  // Add card to grid
+  grid.appendChild(card);
+  updateEmptyState();
+  scheduleMasonry();
+
+  // Open xterm after card is in DOM
+  requestAnimationFrame(() => {
+    term.open(xtermContainer);
+
+    initXtermWebGL(term);
+
+    // Wire input to binary WS
+    term.onData((data) => {
+      _sendTerminalStdin(name, data);
+    });
+
+    // Fit and subscribe
+    try { fitAddon.fit(); } catch {}
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "terminal-subscribe", session: name }));
+      // Send initial resize
+      if (term.cols && term.rows) {
+        _sendTerminalResize(name, term.cols, term.rows);
+      }
+    }
+
+    // ResizeObserver for auto-fit — store reference for cleanup on kill
+    const ro = new ResizeObserver(() => {
+      if (card.classList.contains("minimized")) return;
+      try {
+        fitAddon.fit();
+        if (term.cols && term.rows) {
+          _sendTerminalResize(name, term.cols, term.rows);
+        }
+      } catch {}
+    });
+    ro.observe(xtermContainer);
+    const agentEntry = agents.get(name);
+    if (agentEntry) agentEntry.resizeObserver = ro;
+
+    // Focus xterm on click
+    xtermContainer.addEventListener("click", () => { term.focus(); });
+
+    // Safety: dismiss loading after 5s even if no data arrives
+    setTimeout(() => {
+      if (loadingEl?.parentNode) { loadingEl.classList.add("fade-out"); setTimeout(() => loadingEl.remove(), 300); }
+    }, 5000);
+
+    // Mark as loaded for page loader
+    if (!_loaderDismissed) {
+      _agentsWithContent.add(name);
+      checkAllAgentsLoaded();
+    }
+
+    // Second fit after layout settles (masonry may shift the card)
+    setTimeout(() => { try { fitAddon.fit(); } catch {} }, 100);
+  });
+}
+
 // Scroll trapping: brief pause when scrolling down hits terminal bottom
 function setupScrollTrapping(el) {
   let _trappedUntil = 0;
@@ -2302,7 +4053,13 @@ function setupScrollTrapping(el) {
 }
 
 function scrollTerminalToBottom(terminal) {
+  // Save and restore focus — setting scrollTop on a tabindex'd scrollable div
+  // can steal focus in some browsers (WebKit).
+  const active = document.activeElement;
   terminal.scrollTop = terminal.scrollHeight;
+  if (active && active !== document.activeElement && active.isConnected) {
+    active.focus({ preventScroll: true });
+  }
 }
 
 function updateTerminal(terminal, lines) {
@@ -2354,7 +4111,17 @@ function updateTerminal(terminal, lines) {
 
   // Suppress scroll-event side effects during innerHTML replacement
   terminal._updatingContent = true;
+  // Save focused element before innerHTML — DOM reconstruction can steal focus
+  // to the terminal (scrollable containers are implicitly focusable in some browsers).
+  const _preInnerFocused = document.activeElement;
+  const _preInnerCursorStart = _preInnerFocused?.selectionStart;
+  const _preInnerCursorEnd = _preInnerFocused?.selectionEnd;
   terminal.innerHTML = `<pre>${html}</pre>`;
+  // Restore focus if innerHTML stole it
+  if (_preInnerFocused && _preInnerFocused !== document.activeElement && _preInnerFocused.isConnected) {
+    _preInnerFocused.focus({ preventScroll: true });
+    try { if (_preInnerCursorStart != null) _preInnerFocused.setSelectionRange(_preInnerCursorStart, _preInnerCursorEnd); } catch {}
+  }
 
   // Restore scroll position if user was reading history
   if (savedScrollTop !== null) {
@@ -2414,9 +4181,9 @@ function updateStatus(agent, status, promptType) {
   // Show/hide prompt action buttons (only for "waiting" status with tool prompts)
   const actionsBar = agent.card.querySelector(".prompt-actions");
   if (status !== "waiting" || !promptType) {
-    actionsBar.innerHTML = "";
+    if (actionsBar.innerHTML !== "") actionsBar.innerHTML = "";
     actionsBar.style.display = "none";
-    return;
+      return;
   }
   // "asking" status doesn't need action buttons — user types in the regular input
 
@@ -2673,7 +4440,7 @@ function startDocPolling() {
         }
       } catch {}
     }
-  }, 8000);
+    }, 8000);
 }
 
 // --- Agent Todo Refs ---
@@ -3256,6 +5023,7 @@ function trapFocus(container, e) {
 
 // Scroll focused element into view — generous positioning so the user always has context
 document.addEventListener("focusin", (e) => {
+  if (!_loaderDismissed) return; // don't scroll during page load
   const el = e.target;
   // Skip elements inside fixed/overlay panels that manage their own scroll
   if (el.closest("#shell-terminal") || el.closest(".modal") || el.closest("#files-panel") || el.closest("#settings-panel")) return;
@@ -3331,6 +5099,27 @@ newAgentBtn.addEventListener("click", () => {
   nameInput.focus();
   nameInput.select();
 });
+
+// + Terminal button — instant create, no modal
+const newTerminalBtn = document.getElementById("new-terminal-btn");
+if (newTerminalBtn) {
+  newTerminalBtn.addEventListener("click", () => {
+    fetch("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "terminal", type: "terminal" }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.error) { console.error("[terminal] Create failed:", data.error); return; }
+        addTerminalCard(data.name, data.workdir);
+        reorderCards();
+        updateEmptyState();
+        scheduleMasonry();
+      })
+      .catch((err) => console.error("[terminal] Create failed:", err));
+  });
+}
 
 function closeNewAgentModal() {
   modalOverlay.classList.add("hidden");
@@ -3581,7 +5370,7 @@ wsForm.addEventListener("submit", async (e) => {
     if (agent) {
       agent.workdir = workdir;
       agent.card.querySelector(".workdir-link").textContent = shortPath(workdir);
-      agent.terminal.innerHTML = "";
+      if (agent.terminal) agent.terminal.innerHTML = "";
     }
     wsModalOverlay.classList.add("hidden");
   } else {
@@ -3696,12 +5485,38 @@ document.addEventListener("keydown", (e) => {
 // --- Keyboard shortcuts ---
 
 document.addEventListener("keydown", (e) => {
-  // Suppress all hotkeys while page loader is showing or reload is in flight
-  if (!_loaderDismissed || _reloadingPage) return;
+  let inInput = e.target.matches("input, textarea, [contenteditable]");
+  // Suppress hotkeys while page loader is showing or reload is in flight
+  // BUT allow typing in inputs (user may have focus restored before loader finishes)
+  if (!_loaderDismissed || _reloadingPage) { if (!inInput) return; }
+
+  // If focus is on body but we had an active textarea recently, redirect to it
+  // instead of letting the keypress trigger a hotkey. This catches the cascading
+  // bug where programmatic focus loss → body → next keystroke triggers hotkey.
+  if (!inInput && (e.target === document.body || e.target === document.documentElement)) {
+    if (_lastActiveTextarea && _lastActiveTextarea.isConnected && (Date.now() - _lastActiveTextareaAt) < 5000 && (Date.now() - _userClickedAt) > 300) {
+      if (!e.metaKey && !e.ctrlKey && !e.altKey) {
+        const ta = _lastActiveTextarea;
+        ta.focus({ preventScroll: true });
+        // Insert the printable character that was meant for the textarea
+        if (e.key.length === 1) {
+          const start = ta.selectionStart || 0;
+          const end = ta.selectionEnd || 0;
+          ta.value = ta.value.slice(0, start) + e.key + ta.value.slice(end);
+          ta.selectionStart = ta.selectionEnd = start + 1;
+          ta.dispatchEvent(new Event("input", { bubbles: true }));
+          e.preventDefault();
+        }
+        // For non-printable keys (Backspace, arrows, etc.), focus is restored
+        // and the next keypress will work normally. One keystroke may be lost
+        // but that's acceptable — the focus is back where it belongs.
+        return;
+      }
+    }
+  }
 
   const inShell = !!e.target.closest("#shell-panel");
   const inFilesPanel = !!e.target.closest("#files-panel");
-  const inInput = e.target.matches("input, textarea, [contenteditable]");
   const todoSettingsOverlay = document.getElementById("todo-settings-overlay");
   const bugReportOverlay = document.getElementById("bug-report-overlay");
   const bugSuccessOverlay = document.getElementById("bug-success-overlay");
@@ -3717,6 +5532,11 @@ document.addEventListener("keydown", (e) => {
       if (btn) { btn.innerHTML = "\u26F6"; btn.title = "Fullscreen"; }
       document.body.style.overflow = "";
       scheduleMasonry();
+      return;
+    }
+    if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      closeDiffModal();
       return;
     }
     if (!modalOverlay.classList.contains("hidden")) {
@@ -4536,10 +6356,11 @@ const _ueCopyLegacy = document.getElementById("update-error-copy-legacy");
 const _ueRetry = document.getElementById("update-error-retry");
 const _ueClose = document.getElementById("update-error-close");
 
-function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated) {
+function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated, remote) {
+  remote = remote || "origin";
   const fileList = files.map(f => `- ${f}`).join("\n");
   const parts = [
-    `You are in the CEO Dashboard repository at ${cwd}. An update from origin/main caused merge conflicts.`,
+    `You are in the CEO Dashboard repository at ${cwd}. An update from ${remote}/main caused merge conflicts.`,
     ``,
     `## The user's local customizations`,
     `Below is the diff of local changes this user has made. Study it carefully — these are their personal customizations (hotkeys, styles, layout tweaks, etc.) and you MUST preserve them.`,
@@ -4565,7 +6386,7 @@ function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated) {
     fileList,
     ``,
     `## Step 1: Start the merge`,
-    `\`git fetch origin main && git merge origin/main --no-edit\``,
+    `\`git fetch ${remote} main && git merge ${remote}/main --no-edit\``,
     ``,
     `## Step 2: Resolve each conflict INTELLIGENTLY`,
     `You already know exactly what the user changed (from the diff above). Use that knowledge to make smart decisions.`,
@@ -4595,7 +6416,7 @@ function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated) {
     ``,
     `## Step 4: Commit only after approval`,
     `Only after I confirm:`,
-    `\`git add ${files.join(" ")} && git commit -m "Merge origin/main — resolve conflicts"\``,
+    `\`git add ${files.join(" ")} && git commit -m "Merge ${remote}/main — resolve conflicts"\``,
     ``,
     `If I say something looks wrong:`,
     `- Run \`git merge --abort\` to undo everything`,
@@ -4611,20 +6432,22 @@ function _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated) {
   return parts.join("\n");
 }
 
-function _buildConflictManualSteps(files, cwd) {
+function _buildConflictManualSteps(files, cwd, remote) {
+  remote = remote || "origin";
   return [
     `cd ${cwd}`,
-    `git fetch origin main`,
-    `git merge origin/main --no-edit`,
+    `git fetch ${remote} main`,
+    `git merge ${remote}/main --no-edit`,
     `# Resolve conflicts in each file`,
     `git add ${files.join(" ")}`,
-    `git commit -m "Merge origin/main — resolve conflicts"`,
+    `git commit -m "Merge ${remote}/main — resolve conflicts"`,
   ].join("\n");
 }
 
-function _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated) {
+function _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated, remote) {
+  remote = remote || "origin";
   const parts = [
-    `You are in the CEO Dashboard repository at ${cwd}. There are uncommitted local changes blocking an auto-update from origin/main.`,
+    `You are in the CEO Dashboard repository at ${cwd}. There are uncommitted local changes blocking an auto-update from ${remote}/main.`,
     ``,
     `## The user's local customizations`,
     `Below is the diff of local changes this user has made. Study it carefully — these are their personal customizations and you MUST preserve them.`,
@@ -4649,7 +6472,7 @@ function _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated) {
     `## Step 1: Stash and update`,
     `\`\`\``,
     `git stash`,
-    `git fetch origin main && git merge origin/main --no-edit`,
+    `git fetch ${remote} main && git merge ${remote}/main --no-edit`,
     `git stash pop`,
     `\`\`\``,
     ``,
@@ -4687,19 +6510,21 @@ function _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated) {
   return parts.join("\n");
 }
 
-function _buildDirtyWorkdirManualSteps(cwd) {
+function _buildDirtyWorkdirManualSteps(cwd, remote) {
+  remote = remote || "origin";
   return [
     `cd ${cwd}`,
     `git stash`,
-    `git fetch origin main`,
-    `git merge origin/main --no-edit`,
+    `git fetch ${remote} main`,
+    `git merge ${remote}/main --no-edit`,
     `git stash pop`,
     `# Resolve any conflicts if needed`,
   ].join("\n");
 }
 
-function _buildUnknownPrompt(message, cwd) {
-  return `The CEO Dashboard update at ${cwd || "."} failed with this error:\n\n${message}\n\nDiagnose and fix this so the dashboard can update. Check git status, resolve any issues, then run: git fetch origin main && git -c merge.ff=false merge origin/main --no-edit`;
+function _buildUnknownPrompt(message, cwd, remote) {
+  remote = remote || "origin";
+  return `The CEO Dashboard update at ${cwd || "."} failed with this error:\n\n${message}\n\nDiagnose and fix this so the dashboard can update. Check git status, resolve any issues, then run: git fetch ${remote} main && git -c merge.ff=false merge ${remote}/main --no-edit`;
 }
 
 function showUpdateError(data) {
@@ -4710,6 +6535,7 @@ function showUpdateError(data) {
   const files = data.conflicts || [];
   const localDiff = data.localDiff || "";
   const diffTruncated = data.diffTruncated || false;
+  const remote = data.remote || "origin";
 
   // Reset all sections
   _ueFiles.classList.add("hidden");
@@ -4736,11 +6562,11 @@ function showUpdateError(data) {
       _ueDesc.textContent = "Your local changes conflict with the latest update. Nothing is broken \u2014 the dashboard is still running.";
       _ueAgentBtn.classList.remove("hidden");
       _ueAgentDesc.classList.remove("hidden");
-      _ueAgentBtn._agentPrompt = _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated);
+      _ueAgentBtn._agentPrompt = _buildConflictAgentPrompt(files, cwd, localDiff, diffTruncated, remote);
       _ueAgentBtn._agentCwd = cwd;
       _ueFiles.innerHTML = files.map(f => `<li>${escapeHtml(f)}</li>`).join("");
       _ueFiles.classList.remove("hidden");
-      _uePrompt.textContent = _buildConflictManualSteps(files, cwd);
+      _uePrompt.textContent = _buildConflictManualSteps(files, cwd, remote);
       _ueManual.classList.remove("hidden");
       break;
 
@@ -4750,9 +6576,9 @@ function showUpdateError(data) {
       _ueDesc.textContent = "Your local changes prevent the update. Nothing is broken \u2014 the dashboard is still running.";
       _ueAgentBtn.classList.remove("hidden");
       _ueAgentDesc.classList.remove("hidden");
-      _ueAgentBtn._agentPrompt = _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated);
+      _ueAgentBtn._agentPrompt = _buildDirtyWorkdirAgentPrompt(cwd, localDiff, diffTruncated, remote);
       _ueAgentBtn._agentCwd = cwd;
-      _uePrompt.textContent = _buildDirtyWorkdirManualSteps(cwd);
+      _uePrompt.textContent = _buildDirtyWorkdirManualSteps(cwd, remote);
       _ueManual.classList.remove("hidden");
       break;
 
@@ -4770,13 +6596,16 @@ function showUpdateError(data) {
       _ueRetry.classList.remove("hidden");
       break;
 
-    case "not-on-main":
+    case "not-on-main": {
+      const branch = data.branch || "unknown";
       _ueTitle.textContent = "Wrong Branch";
       _ueTitle.style.color = "var(--accent)";
-      _ueDesc.innerHTML = "You must be on the <code>main</code> branch to update. Run this command first:";
+      _ueDesc.innerHTML = `You're on <code>${escapeHtml(branch)}</code>. Updates apply to the <code>main</code> branch. Switch first, then retry:`;
       _uePromptLegacy.textContent = `cd ${cwd} && git checkout main`;
       _uePromptWrap.classList.remove("hidden");
+      _ueRetry.classList.remove("hidden");
       break;
+    }
 
     case "npm-failed":
       _ueTitle.textContent = "Install Failed";
@@ -4791,7 +6620,7 @@ function showUpdateError(data) {
       _ueTitle.style.color = "var(--red)";
       _ueDesc.textContent = message || "An unexpected error occurred during the update.";
       if (cwd) {
-        _uePromptLegacy.textContent = _buildUnknownPrompt(message, cwd);
+        _uePromptLegacy.textContent = _buildUnknownPrompt(message, cwd, remote);
         _uePromptWrap.classList.remove("hidden");
       }
       break;
@@ -5033,16 +6862,19 @@ async function loadSettings() {
     settingAutostart.checked = data.autoStart;
 
     // Dock App
+    const rebuildHint = document.getElementById("customize-rebuild-hint");
     if (data.dockAppInstalled) {
-      settingAddToDock.textContent = "Installed";
+      settingAddToDock.textContent = "Rebuild";
       settingAddToDock.classList.add("installed");
-      settingAddToDock.disabled = true;
-      dockDesc.textContent = "CEO Dashboard app is installed in ~/Applications";
+      settingAddToDock.disabled = false;
+      dockDesc.textContent = "Rebuild to apply title and accent color changes to the Dock app";
+      if (rebuildHint) rebuildHint.classList.remove("hidden");
     } else {
       settingAddToDock.textContent = "Install";
       settingAddToDock.classList.remove("installed");
       settingAddToDock.disabled = false;
       dockDesc.textContent = "Install as a standalone app in your Dock";
+      if (rebuildHint) rebuildHint.classList.add("hidden");
     }
 
     // Tailscale
@@ -5085,6 +6917,37 @@ async function loadSettings() {
   } catch {
     tailscaleDesc.textContent = "Failed to load settings";
   }
+
+  // Accent Color swatches
+  const accentGrid = document.getElementById("accent-color-grid");
+  if (accentGrid) renderAccentGrid(accentGrid);
+
+  // Background color swatches
+  const bgGrid = document.getElementById("bg-color-grid");
+  if (bgGrid) renderBgGrid(bgGrid);
+
+  // Terminal color swatches
+  const termGrid = document.getElementById("terminal-color-grid");
+  if (termGrid) renderTerminalGrid(termGrid);
+
+  // Shell color swatches
+  const shellGrid = document.getElementById("shell-color-grid");
+  if (shellGrid) renderShellGrid(shellGrid);
+}
+
+function _removeBgOverrides() {
+  const s = document.documentElement.style;
+  const props = ["--bg","--bg-gradient","--input-bg","--header-bg","--surface","--modal-bg",
+   "--surface-raised","--border","--scrollbar-thumb","--scrollbar-hover","--gray","--text-dim",
+   "--text","--header-border","--modal-backdrop","--card-shadow"];
+  // Only reset terminal-bg if user hasn't set a custom terminal color
+  if (!localStorage.getItem("terminalColor")) {
+    props.push("--terminal-bg");
+    s.removeProperty("--terminal-text");
+    s.removeProperty("--terminal-text-dim");
+    s.removeProperty("--terminal-link-color");
+  }
+  props.forEach(v => s.removeProperty(v));
 }
 
 settingAutostart.addEventListener("change", async () => {
@@ -5107,7 +6970,8 @@ settingAutostart.addEventListener("change", async () => {
 
 settingAddToDock.addEventListener("click", async () => {
   if (settingAddToDock.disabled) return;
-  settingAddToDock.textContent = "Installing...";
+  const wasInstalled = settingAddToDock.classList.contains("installed");
+  settingAddToDock.textContent = wasInstalled ? "Rebuilding..." : "Installing...";
   settingAddToDock.disabled = true;
   try {
     const res = await fetch("/api/settings/add-to-dock", {
@@ -5115,17 +6979,18 @@ settingAddToDock.addEventListener("click", async () => {
       headers: { "Content-Type": "application/json" },
     });
     if (res.ok) {
-      settingAddToDock.textContent = "Installed";
+      settingAddToDock.textContent = "Rebuild";
       settingAddToDock.classList.add("installed");
-      dockDesc.textContent = "CEO Dashboard app is installed in ~/Applications";
+      settingAddToDock.disabled = false;
+      dockDesc.textContent = "Rebuild to apply title and accent color changes to the Dock app";
     } else {
       const err = await res.json();
-      settingAddToDock.textContent = "Install";
+      settingAddToDock.textContent = wasInstalled ? "Rebuild" : "Install";
       settingAddToDock.disabled = false;
       alert(err.error || "Failed to install");
     }
   } catch {
-    settingAddToDock.textContent = "Install";
+    settingAddToDock.textContent = wasInstalled ? "Rebuild" : "Install";
     settingAddToDock.disabled = false;
   }
 });
@@ -5144,9 +7009,53 @@ document.getElementById("setting-clear-browser").addEventListener("click", () =>
   setTimeout(() => { btn.textContent = "Clear"; btn.disabled = false; }, 2000);
 });
 
+// --- Delete All Worktrees (double-click confirm) ---
+{
+  const btn = document.getElementById("setting-delete-worktrees");
+  let armed = false;
+  let timer = null;
+  btn.addEventListener("click", async () => {
+    if (!armed) {
+      armed = true;
+      btn.classList.add("armed");
+      btn.textContent = "Confirm Delete";
+      timer = setTimeout(() => {
+        armed = false;
+        btn.classList.remove("armed");
+        btn.textContent = "Delete All";
+      }, 2000);
+      return;
+    }
+    clearTimeout(timer);
+    armed = false;
+    btn.classList.remove("armed");
+    btn.disabled = true;
+    btn.textContent = "Deleting...";
+    try {
+      const resp = await fetch("/api/worktrees/delete-all", { method: "POST" });
+      const data = await resp.json();
+      if (resp.ok) {
+        btn.textContent = data.removed > 0 ? `Removed ${data.removed}` : "None found";
+      } else {
+        btn.textContent = "Error";
+      }
+    } catch {
+      btn.textContent = "Error";
+    }
+    setTimeout(() => { btn.textContent = "Delete All"; btn.disabled = false; }, 2000);
+  });
+}
+
 // --- Agent Defaults config ---
 
 // Collapsible toggle
+document.getElementById("customize-toggle").addEventListener("click", () => {
+  const section = document.getElementById("customize-toggle").closest(".settings-collapse");
+  const body = document.getElementById("customize-body");
+  section.classList.toggle("open");
+  body.classList.toggle("hidden");
+});
+
 document.getElementById("agent-defaults-toggle").addEventListener("click", () => {
   const section = document.getElementById("agent-defaults-toggle").closest(".settings-collapse");
   const body = document.getElementById("agent-defaults-body");
@@ -5169,6 +7078,15 @@ function _loadAgentDefaults() {
     _settingPrefix.value = cfg.agentPrefix || "ceo-";
     _settingPort.value = cfg.port || 9145;
     _settingShellCmd.value = cfg.shellCommand || "ceo";
+    // Sync accent color from server config (for cross-device consistency)
+    if (cfg.accentColor && ACCENT_PRESETS[cfg.accentColor] && !localStorage.getItem("accentColor")) {
+      localStorage.setItem("accentColor", cfg.accentColor);
+      applyAccentColor(cfg.accentColor);
+    }
+    if (cfg.bgColor && !localStorage.getItem("bgColor")) {
+      localStorage.setItem("bgColor", cfg.bgColor);
+      applyBgColor(cfg.bgColor);
+    }
   }).catch(() => {});
 }
 
@@ -5636,25 +7554,30 @@ startTodoRefsPolling();
 let _expectedAgentCount = 0;
 let _agentsWithContent = new Set();
 let _loaderDismissed = false;
+let _sessionsReceived = false; // true after /api/sessions fetch resolves
 let _savedReloadState = null; // set during restore to apply after loader
 
 function dismissPageLoader() {
   if (_loaderDismissed) return;
   _loaderDismissed = true;
+  const loader = document.getElementById("page-loader");
+  if (loader) {
+    // Try graceful fade first
+    loader.classList.add("fade-out");
+    loader.addEventListener("transitionend", () => loader.remove(), { once: true });
+    // 400ms: force hide (covers transition not firing)
+    setTimeout(() => { if (loader.parentNode) { loader.style.display = "none"; } }, 400);
+    // 800ms: force remove from DOM
+    setTimeout(() => { if (loader.parentNode) loader.remove(); }, 800);
+  }
+  // Restore remaining state (panels, scroll, modals) after a frame so layout settles
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      const loader = document.getElementById("page-loader");
-      if (loader) {
-        loader.classList.add("fade-out");
-        loader.addEventListener("transitionend", () => loader.remove(), { once: true });
-      }
-      // Restore full state AFTER layout is settled and loader is fading
+    try {
       if (_savedReloadState) {
         _applyRestoredState(_savedReloadState);
         _savedReloadState = null;
       } else {
         // First load (no reload state) — auto-open shell if not explicitly closed before
-        // Default is open ("1") so new users see the terminal immediately
         const shellPref = localStorage.getItem("ceo-shell-open");
         if (shellPref !== "0") {
           const header = document.getElementById("shell-header");
@@ -5664,40 +7587,81 @@ function dismissPageLoader() {
           }
         }
       }
-    });
+    } catch (e) {
+      console.error("[loader] Error restoring state:", e);
+    }
   });
 }
 
 function checkAllAgentsLoaded() {
   if (_loaderDismissed) return;
+  // Don't dismiss for count===0 until we've actually received the session list
+  // (WS output can arrive before the fetch resolves, leaving _expectedAgentCount at 0)
+  if (!_sessionsReceived) return;
   if (_expectedAgentCount === 0) { dismissPageLoader(); return; }
   if (_agentsWithContent.size >= _expectedAgentCount) {
-    // All agents have content — run masonry then dismiss.
-    // Cards still show per-card loading spinners; the page loader just prevents layout snapping.
+    // All agents have content — run masonry then dismiss after layout settles.
     scheduleMasonry();
-    setTimeout(() => dismissPageLoader(), 100);
+    // Wait two rAFs (layout + paint) then dismiss so cards don't jump
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => dismissPageLoader());
+    });
   }
 }
 
 // Safety: dismiss loader after 3s no matter what (server lag, dead agents, etc.)
 setTimeout(() => { if (!_loaderDismissed) dismissPageLoader(); }, 3000);
+// Hard safety: force-remove loader DOM at 4s and 6s — two chances, no transitions, just remove
+for (const ms of [4000, 6000]) {
+  setTimeout(() => {
+    const loader = document.getElementById("page-loader");
+    if (loader) {
+      loader.style.display = "none";
+      loader.remove();
+      _loaderDismissed = true;
+    }
+  }, ms);
+}
 
 // Load existing sessions first, then connect WebSocket
-fetch("/api/sessions")
-  .then((r) => r.json())
-  .then((sessions) => {
-    _expectedAgentCount = sessions.length;
-    for (const s of sessions) {
-      addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite);
-    }
-    reorderCards();
-    updateEmptyState();
-    // If no agents, dismiss immediately
-    checkAllAgentsLoaded();
-  })
-  .catch(() => {
-    dismissPageLoader();
-  });
+function _loadSessions(retries) {
+  fetch("/api/sessions")
+    .then((r) => r.json())
+    .then((sessions) => {
+      _expectedAgentCount = sessions.length;
+      _sessionsReceived = true;
+      for (const s of sessions) {
+        try {
+          if (s.type === "terminal") {
+            addTerminalCard(s.name, s.workdir);
+          } else {
+            addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+          }
+        } catch (e) {
+          console.error("[init] Failed to add card for", s.name, e);
+        }
+      }
+      reorderCards();
+      updateEmptyState();
+      // Restore drafts + focus EARLY (before loader dismisses) so user can type immediately
+      try {
+        if (_savedReloadState) _applyEarlyState(_savedReloadState);
+      } catch (e) {
+        console.error("[loader] Error in early state restore:", e);
+      }
+      // If no agents, dismiss immediately
+      checkAllAgentsLoaded();
+    })
+    .catch(() => {
+      if (retries > 0) {
+        setTimeout(() => _loadSessions(retries - 1), 1000);
+      } else {
+        _sessionsReceived = true;
+        dismissPageLoader();
+      }
+    });
+}
+_loadSessions(3);
 
 connect();
 
@@ -5738,8 +7702,12 @@ setInterval(() => {
   } catch {}
 }, 5000);
 
-// Apply all saved state in one coordinated pass (called by dismissPageLoader)
-function _applyRestoredState(state) {
+// Early restore: drafts + focus applied as soon as cards exist (before loader dismisses).
+// This lets the user start typing immediately during load.
+let _earlyStateApplied = false;
+function _applyEarlyState(state) {
+  if (_earlyStateApplied) return;
+  _earlyStateApplied = true;
   // 1. Restore input drafts
   if (state.drafts) {
     for (const [name, text] of Object.entries(state.drafts)) {
@@ -5748,7 +7716,7 @@ function _applyRestoredState(state) {
         const textarea = agent.card.querySelector(".card-input textarea");
         if (textarea) {
           textarea.value = text;
-          textarea.style.height = "auto";
+          textarea.style.height = "1px";
           textarea.style.height = Math.min(textarea.scrollHeight, 150) + "px";
         }
       }
@@ -5778,6 +7746,14 @@ function _applyRestoredState(state) {
       }
     }
   }
+  // 3. Restore focus immediately so user can keep typing
+  _restoreFocusFromState(state);
+}
+
+// Apply remaining state after loader dismisses (panels, scroll, modals)
+function _applyRestoredState(state) {
+  // Drafts/attachments/focus already applied in _applyEarlyState — skip if done
+  if (!_earlyStateApplied) _applyEarlyState(state);
   // 3. Force all terminals to scroll to bottom on reload.
   // Saved scroll positions are unreliable after innerHTML rebuild — the offsets
   // become stale and leave terminals stuck at the top.
@@ -5809,6 +7785,13 @@ function _applyRestoredState(state) {
         if (state.todo.rawContent != null) {
           const rawTextarea = document.querySelector(".todo-editor");
           if (rawTextarea) rawTextarea.value = state.todo.rawContent;
+        }
+        // Restore rich editor content (re-render with saved markdown)
+        if (state.todo.richContent != null && !todoRawMode) {
+          const richEditor = document.getElementById("todo-rich-editor");
+          if (richEditor) {
+            renderRichEditorContent({ content: state.todo.richContent });
+          }
         }
       });
     }
@@ -5894,51 +7877,61 @@ function _applyRestoredState(state) {
       loadBookmarks();
     }
   }
-  // 9. Restore focus + cursor position (do this last so layout is settled)
+  // 9. Re-apply scroll after layout settles (panels/modals may have shifted it)
   requestAnimationFrame(() => {
-    // Re-apply page scroll (layout changes from modal/shell/todo may have shifted it)
     window.scrollTo(0, state.scrollY || 0);
-
-    // Helper: focus an element and restore cursor position
-    function restoreFocus(el) {
-      if (!el) return false;
-      el.focus({ preventScroll: true });
-      if (state.focusCursorStart != null && el.setSelectionRange) {
-        try { el.setSelectionRange(state.focusCursorStart, state.focusCursorEnd ?? state.focusCursorStart); } catch {}
-      }
-      return true;
-    }
-
-    // Try to restore by element ID first (covers modal inputs, settings inputs, file editor, etc.)
-    if (state.focusedId) {
-      const el = document.getElementById(state.focusedId);
-      if (el && restoreFocus(el)) return;
-    }
-    // Todo inputs (identified by class, not ID — they're dynamic)
-    if (state.focusedTodo) {
-      let el = null;
-      if (state.focusedTodo === "title") el = document.querySelector(".todo-title-input");
-      else if (state.focusedTodo === "editor") el = document.querySelector(".todo-editor");
-      else if (state.focusedTodo === "rich-editor") el = document.getElementById("todo-rich-editor");
-      if (el && restoreFocus(el)) return;
-    }
-    // Agent card input (identified by agent name)
-    if (state.focusedAgent) {
-      const agent = agents.get(state.focusedAgent);
-      if (agent) {
-        const textarea = agent.card.querySelector(".card-input textarea");
-        if (textarea && restoreFocus(textarea)) return;
-      }
-    }
-    // Agent doc edit area
-    if (state.focusedDocAgent) {
-      const agent = agents.get(state.focusedDocAgent);
-      if (agent) {
-        const editArea = agent.card.querySelector(".agent-doc-edit-area");
-        if (editArea && editArea.style.display !== "none" && restoreFocus(editArea)) return;
-      }
-    }
+    // Re-focus in case panels stole it
+    _restoreFocusFromState(state);
   });
+}
+
+// Shared focus restoration — used by both early and late restore phases
+function _restoreFocusFromState(state) {
+  function restoreFocus(el) {
+    if (!el) return false;
+    el.focus({ preventScroll: true });
+    if (state.focusCursorStart != null && el.setSelectionRange) {
+      try {
+        const len = el.value?.length ?? 0;
+        // If cursor was at or near end of text, snap to actual end
+        // (text length may differ slightly after restore)
+        const wasNearEnd = state.focusCursorStart >= (state._savedTextLength || len) - 2;
+        if (wasNearEnd) {
+          el.setSelectionRange(len, len);
+        } else {
+          const start = Math.min(state.focusCursorStart, len);
+          const end = Math.min(state.focusCursorEnd ?? start, len);
+          el.setSelectionRange(start, end);
+        }
+      } catch {}
+    }
+    return true;
+  }
+  if (state.focusedId) {
+    const el = document.getElementById(state.focusedId);
+    if (el && restoreFocus(el)) return;
+  }
+  if (state.focusedTodo) {
+    let el = null;
+    if (state.focusedTodo === "title") el = document.querySelector(".todo-title-input");
+    else if (state.focusedTodo === "editor") el = document.querySelector(".todo-editor");
+    else if (state.focusedTodo === "rich-editor") el = document.getElementById("todo-rich-editor");
+    if (el && restoreFocus(el)) return;
+  }
+  if (state.focusedAgent) {
+    const agent = agents.get(state.focusedAgent);
+    if (agent) {
+      const textarea = agent.card.querySelector(".card-input textarea");
+      if (textarea && restoreFocus(textarea)) return;
+    }
+  }
+  if (state.focusedDocAgent) {
+    const agent = agents.get(state.focusedDocAgent);
+    if (agent) {
+      const editArea = agent.card.querySelector(".agent-doc-edit-area");
+      if (editArea && editArea.style.display !== "none" && restoreFocus(editArea)) return;
+    }
+  }
 }
 
 // --- Embedded Shell Terminal (xterm.js) ---
@@ -5950,45 +7943,10 @@ function _applyRestoredState(state) {
   // Set initial shell height CSS var for todo view sizing
   document.documentElement.style.setProperty("--shell-panel-h", (shellPanel.offsetHeight || 42) + 8 + "px");
 
-  // Create xterm.js terminal
-  const term = new Terminal({
-    cursorBlink: true,
-    cursorStyle: "bar",
-    fontSize: 13,
-    fontFamily: "'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace",
-    scrollback: 2000,
-    fastScrollModifier: "alt",
-    fastScrollSensitivity: 10,
-    smoothScrollDuration: 0, // disable smooth scroll animation for responsiveness
-    theme: {
-      background: "#0d1117",
-      foreground: "#e6edf3",
-      cursor: "#e6edf3",
-      selectionBackground: "rgba(56, 139, 253, 0.4)",
-      black: "#484f58",
-      red: "#ff7b72",
-      green: "#3fb950",
-      yellow: "#d29922",
-      blue: "#58a6ff",
-      magenta: "#bc8cff",
-      cyan: "#39d353",
-      white: "#b1bac4",
-      brightBlack: "#6e7681",
-      brightRed: "#ffa198",
-      brightGreen: "#56d364",
-      brightYellow: "#e3b341",
-      brightBlue: "#79c0ff",
-      brightMagenta: "#d2a8ff",
-      brightCyan: "#56d364",
-      brightWhite: "#f0f6fc",
-    },
-    allowProposedApi: true,
-  });
-
-  const fitAddon = new FitAddon.FitAddon();
-  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
-  term.loadAddon(fitAddon);
-  term.loadAddon(webLinksAddon);
+  // Create xterm.js terminal — respect saved shell color (uses shared infra with theme override)
+  const _shellBg = localStorage.getItem("shellColor") || "#0d1117";
+  const _shellTheme = buildXtermTheme(_shellBg);
+  const { term, fitAddon } = createXtermInstance(2000, _shellTheme);
 
   // --- URL Opener wrapper detection + install ---
   const urlOpenerWrap = document.getElementById("url-opener-wrap");
@@ -6049,16 +8007,7 @@ function _applyRestoredState(state) {
     shellInitialized = true;
     term.open(shellContainer);
 
-    // WebGL renderer — dramatically faster than default canvas
-    try {
-      if (typeof WebglAddon !== "undefined") {
-        const webglAddon = new WebglAddon.WebglAddon();
-        webglAddon.onContextLoss(() => { webglAddon.dispose(); });
-        term.loadAddon(webglAddon);
-      }
-    } catch (e) {
-      console.warn("[shell] WebGL addon failed, using canvas renderer:", e);
-    }
+    initXtermWebGL(term);
 
     // Send input from xterm to server PTY
     // Handles selection-based editing for paste (keyboard is handled by attachCustomKeyEventHandler)
@@ -6133,18 +8082,6 @@ function _applyRestoredState(state) {
   let _acIndex = 0;         // selected index
   let _acWord = "";         // original word being completed
   let _acFetching = false;  // prevent double-fetch
-
-  const _shellEncoder = new TextEncoder();
-  function _sendShellStdin(data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      // Binary protocol: 0x01 prefix + UTF-8 payload (skips JSON.parse on server)
-      const payload = _shellEncoder.encode(data);
-      const frame = new Uint8Array(1 + payload.length);
-      frame[0] = 0x01;
-      frame.set(payload, 1);
-      ws.send(frame);
-    }
-  }
 
   function _getCursorScreenPos() {
     const screen = shellContainer.querySelector(".xterm-screen");
