@@ -1898,14 +1898,10 @@ app.post("/api/update", async (req, res) => {
       const changed = execSync("git diff HEAD~1 --name-only", { cwd: __dirname, encoding: "utf8" });
       nativeChanged = changed.includes("native-app/");
     } catch {}
+    // Native app rebuild is handled by the startup stale-binary check in the new server process
     res.json({ ok: true });
     for (const client of wss.clients) {
       try { client.send(JSON.stringify({ type: "server-restarting" })); } catch {}
-    }
-    if (fs.existsSync(nativeAppDir) && nativeChanged) {
-      for (const client of wss.clients) {
-        try { client.send(JSON.stringify({ type: "native-rebuild-required" })); } catch {}
-      }
     }
     const child = require("child_process").spawn(
       process.execPath, [path.join(__dirname, "server.js")],
@@ -2465,6 +2461,96 @@ server.listen(PORT, BIND_HOST, () => {
   startShellInfoPolling();
   restoreSessions(detectClaudeSessionIdForAgent);
   _tokenUsageTotals = loadTokenUsage();
+  // Auto-rebuild native app if binary is stale (main.swift changed since last compile)
+  {
+    const nativeAppDir = getNativeAppDir();
+    const buildCache = path.join(__dirname, "native-app", ".build-cache", "swift.hash");
+    const mainSwift = path.join(__dirname, "native-app", "main.swift");
+    if (fs.existsSync(nativeAppDir) && fs.existsSync(mainSwift)) {
+      try {
+        const currentHash = execSync(`shasum -a 256 "${mainSwift}" | cut -d' ' -f1`, { encoding: "utf8" }).trim() + "|" + __dirname;
+        const cachedHash = fs.existsSync(buildCache) ? fs.readFileSync(buildCache, "utf8").trim() : "";
+        const lockFile = "/tmp/ceo-rebuild.lock";
+        const lockStale = fs.existsSync(lockFile) && (Date.now() - fs.statSync(lockFile).mtimeMs > 120000);
+        if (currentHash !== cachedHash && (!fs.existsSync(lockFile) || lockStale)) {
+          console.log("[native-app] Binary is stale — rebuilding with progress window...");
+          fs.writeFileSync(lockFile, String(process.pid));
+          const appTitle = userConfig.title || "CEO Dashboard";
+          const buildScript = path.join(__dirname, "native-app", "build.sh");
+          const progressSrc = path.join(__dirname, "native-app", "rebuild-progress.swift");
+          const statusFile = "/tmp/ceo-rebuild-status";
+          const titleFile = "/tmp/ceo-rebuild-title";
+          const progressBin = "/tmp/ceo-rebuild-progress";
+          const script = `#!/bin/bash
+STATUS="${statusFile}"
+rm -f "$STATUS"
+
+echo "Updating ${appTitle}..." > "${titleFile}"
+echo "PROGRESS:5:1:6:Compiling progress window..." > "$STATUS"
+swiftc "${progressSrc}" -o "${progressBin}" -framework Cocoa -O 2>/tmp/ceo-rebuild.log
+if [ $? -ne 0 ]; then
+    osascript -e 'display notification "Progress window failed to compile" with title "${appTitle}"'
+else
+    "${progressBin}" &
+    PROGRESS_PID=$!
+fi
+
+sleep 0.5
+echo "PROGRESS:10:1:6:Closing app for rebuild..." > "$STATUS"
+osascript -e 'tell application "${appTitle}" to quit' 2>/dev/null
+sleep 1
+echo "PROGRESS:15:2:6:Compiling Swift application..." > "$STATUS"
+
+cd "${__dirname}"
+bash "${buildScript}" > /tmp/ceo-rebuild.log 2>&1 &
+BUILD_PID=$!
+
+LAST_STAGE=""
+while kill -0 $BUILD_PID 2>/dev/null; do
+    if [ -f /tmp/ceo-rebuild.log ]; then
+        CURRENT=$(tail -1 /tmp/ceo-rebuild.log 2>/dev/null)
+        if [ "$CURRENT" != "$LAST_STAGE" ] && [ -n "$CURRENT" ]; then
+            LAST_STAGE="$CURRENT"
+            case "$CURRENT" in
+                *"Compiled Swift"*)
+                    echo "PROGRESS:50:3:6:Generating app icon..." > "$STATUS" ;;
+                *"Generated app icon"*)
+                    echo "PROGRESS:70:4:6:Code signing..." > "$STATUS" ;;
+                *"Signed with"*|*"ad-hoc signing"*)
+                    echo "PROGRESS:85:5:6:Registering with Launch Services..." > "$STATUS" ;;
+                *"Installed to"*)
+                    echo "PROGRESS:95:6:6:Finalizing..." > "$STATUS" ;;
+            esac
+        fi
+    fi
+    sleep 0.3
+done
+
+wait $BUILD_PID
+BUILD_EXIT=$?
+
+if [ $BUILD_EXIT -eq 0 ]; then
+    echo "DONE:Build complete — reopening app" > "$STATUS"
+    sleep 2
+    open "${nativeAppDir}"
+else
+    echo "FAIL:Build failed — see /tmp/ceo-rebuild.log" > "$STATUS"
+    sleep 5
+fi
+
+[ -n "$PROGRESS_PID" ] && kill $PROGRESS_PID 2>/dev/null
+rm -f "${statusFile}" "${titleFile}" /tmp/ceo-rebuild-screen /tmp/ceo-rebuild.lock
+`;
+          const scriptPath = "/tmp/ceo-rebuild.sh";
+          fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+          require("child_process").spawn("/bin/bash", [scriptPath],
+            { cwd: __dirname, detached: true, stdio: "ignore" }).unref();
+        }
+      } catch (err) {
+        console.error("[native-app] Auto-rebuild check failed:", err.message);
+      }
+    }
+  }
   setTimeout(() => { claudeSessions.resetSyncTimer(); syncClaudeSessionIds(); }, 10000);
   setTimeout(() => { syncTokenUsage(); }, 15000);
   setTimeout(() => { loadClaudeSessionsAsync(null).catch(() => {}); }, 2000);
