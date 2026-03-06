@@ -19,9 +19,10 @@ MACOS="$CONTENTS/MacOS"
 RESOURCES="$CONTENTS/Resources"
 TMP_DIR=$(mktemp -d)
 
-# Remove any old app with our bundle ID but a different name, preserving Dock position
+# Find any old app with our bundle ID but a different name (renamed app)
 BUNDLE_ID="com.ceo-dashboard.app"
 OLD_APP_PATH=""
+OLD_APP_BACKUP=""
 for old_app in "$HOME/Applications/"*.app; do
   [ -d "$old_app" ] || continue
   [ "$old_app" = "$APP_DIR" ] && continue
@@ -30,11 +31,22 @@ for old_app in "$HOME/Applications/"*.app; do
     old_id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$old_plist" 2>/dev/null)
     if [ "$old_id" = "$BUNDLE_ID" ]; then
       OLD_APP_PATH="$old_app"
-      echo "Removing old app: $old_app"
-      rm -rf "$old_app"
+      # Move to temp instead of deleting — restore on build failure
+      OLD_APP_BACKUP="$TMP_DIR/old-app-backup.app"
+      echo "Moving old app aside: $old_app"
+      mv "$old_app" "$OLD_APP_BACKUP"
     fi
   fi
 done
+
+# Restore old app on any failure (set -e will trigger this via trap)
+restore_old_app() {
+  if [ -n "$OLD_APP_BACKUP" ] && [ -d "$OLD_APP_BACKUP" ] && [ ! -d "$OLD_APP_PATH" ]; then
+    echo "Build failed — restoring old app: $OLD_APP_PATH"
+    mv "$OLD_APP_BACKUP" "$OLD_APP_PATH"
+  fi
+}
+trap restore_old_app ERR
 
 echo "Building $APP_NAME..."
 
@@ -139,13 +151,18 @@ cat > "$CONTENTS/Info.plist" << PLIST
 PLIST
 
 # 4. Codesign with development certificate + entitlements
-SIGN_IDENTITY=$(security find-identity -v -p codesigning | head -1 | sed 's/.*"\(.*\)"/\1/')
+# Find a valid signing identity (filter to lines that contain a quoted name)
+SIGN_IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep '"' | head -1 | sed 's/.*"\(.*\)"/\1/')
+SIGNED=false
 if [ -n "$SIGN_IDENTITY" ]; then
-    codesign --force --sign "$SIGN_IDENTITY" --entitlements "$SCRIPT_DIR/entitlements.plist" "$APP_DIR"
-    echo "Signed with: $SIGN_IDENTITY"
-else
-    codesign --force --sign - --entitlements "$SCRIPT_DIR/entitlements.plist" "$APP_DIR"
-    echo "Warning: No dev certificate found, using ad-hoc signing (passkeys may not work)"
+    if codesign --force --sign "$SIGN_IDENTITY" --entitlements "$SCRIPT_DIR/entitlements.plist" "$APP_DIR" 2>/dev/null; then
+        echo "Signed with: $SIGN_IDENTITY"
+        SIGNED=true
+    fi
+fi
+if ! $SIGNED; then
+    codesign --force --sign - --entitlements "$SCRIPT_DIR/entitlements.plist" "$APP_DIR" 2>/dev/null || true
+    echo "Warning: Using ad-hoc signing (passkeys may not work)"
 fi
 
 # 5. Register with Launch Services & flush icon cache
@@ -179,12 +196,15 @@ if [ -n "$OLD_APP_PATH" ] && [ "$OLD_APP_PATH" != "$APP_DIR" ]; then
   fi
 fi
 
+# Build succeeded — clear the ERR trap and remove the backup
+trap - ERR
+
 # 7. Auto-open the app after build (unless running in CI or explicitly suppressed)
 if [ -z "$CEO_NO_OPEN" ] && [ -z "$CI" ]; then
   open "$APP_DIR" 2>/dev/null &
 fi
 
-# Cleanup
+# Cleanup (includes old app backup)
 rm -rf "$TMP_DIR"
 
 echo ""
