@@ -15,14 +15,14 @@ class ProgressDelegate: NSObject, NSApplicationDelegate {
 
         // Read dynamic title from file (set by the caller)
         let windowTitle = (try? String(contentsOfFile: TITLE_FILE, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Rebuilding CEO Dashboard..."
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Rebuilding..."
 
         window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: w, height: h),
             styleMask: [.titled],
             backing: .buffered, defer: false
         )
-        window.title = "CEO Dashboard"
+        window.title = windowTitle
         window.level = .floating
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: .darkAqua)

@@ -292,7 +292,7 @@ fetch("/api/config")
     }
     // Populate the contribute tooltip with the dashboard directory + spawn button
     if (cfg.dashboardDir) {
-      const dir = shortPath(cfg.dashboardDir);
+      const dir = typeof shortPath === "function" ? shortPath(cfg.dashboardDir) : cfg.dashboardDir;
       const tip = document.querySelector(".contribute-tooltip");
       if (tip) tip.querySelector(".dashboard-dir").textContent = dir;
       const spawnBtn = document.getElementById("contribute-spawn-btn");
@@ -328,7 +328,7 @@ fetch("/api/config")
     _renderWorkdirPills(cfg.workspaces || []);
     updateEmptyState();
   })
-  .catch(() => {});
+  .catch((err) => console.error("[config] Failed to load config:", err));
 
 function _renderWorkdirPills(workspaces) {
   const customBtn = workdirOptions.querySelector('[data-path="__custom__"]');
