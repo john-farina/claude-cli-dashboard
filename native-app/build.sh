@@ -84,30 +84,23 @@ if [ -n "$BG_COLOR" ] && [ "$BG_COLOR" != "None" ]; then
   ICON_BG_ARG="--bg ${BG_COLOR#\#}"
 fi
 
-# Cache key: hash of generate-icon.py + the color args
-ICON_INPUTS="$(shasum -a 256 "$SCRIPT_DIR/generate-icon.py" | cut -d' ' -f1)|${ICON_COLOR_ARG}|${ICON_BG_ARG}"
-ICON_CACHE="$CACHE_DIR/icon.hash"
-if [ -z "$CEO_FORCE_ICON" ] && [ -f "$ICON_CACHE" ] && [ "$(cat "$ICON_CACHE")" = "$ICON_INPUTS" ] && [ -f "$RESOURCES/AppIcon.icns" ]; then
-    echo "App icon unchanged — skipped generation"
+# Always regenerate icon (ensures name/color changes take effect immediately)
+TMP_PNG="$TMP_DIR/icon-1024.png"
+ICONSET="$TMP_DIR/AppIcon.iconset"
+mkdir -p "$ICONSET"
+
+python3 "$SCRIPT_DIR/generate-icon.py" "$TMP_PNG" $ICON_COLOR_ARG $ICON_BG_ARG
+
+if [ -f "$TMP_PNG" ]; then
+    for SIZE in 16 32 128 256 512; do
+        sips -z $SIZE $SIZE "$TMP_PNG" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" 2>/dev/null
+        DOUBLE=$((SIZE * 2))
+        sips -z $DOUBLE $DOUBLE "$TMP_PNG" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null
+    done
+    iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns" 2>/dev/null
+    echo "Generated app icon"
 else
-    TMP_PNG="$TMP_DIR/icon-1024.png"
-    ICONSET="$TMP_DIR/AppIcon.iconset"
-    mkdir -p "$ICONSET"
-
-    python3 "$SCRIPT_DIR/generate-icon.py" "$TMP_PNG" $ICON_COLOR_ARG $ICON_BG_ARG
-
-    if [ -f "$TMP_PNG" ]; then
-        for SIZE in 16 32 128 256 512; do
-            sips -z $SIZE $SIZE "$TMP_PNG" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" 2>/dev/null
-            DOUBLE=$((SIZE * 2))
-            sips -z $DOUBLE $DOUBLE "$TMP_PNG" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null
-        done
-        iconutil -c icns "$ICONSET" -o "$RESOURCES/AppIcon.icns" 2>/dev/null
-        echo "$ICON_INPUTS" > "$ICON_CACHE"
-        echo "Generated app icon"
-    else
-        echo "Warning: Icon generation failed"
-    fi
+    echo "Warning: Icon generation failed"
 fi
 
 # 3. Write Info.plist

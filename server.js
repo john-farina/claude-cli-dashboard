@@ -2027,7 +2027,8 @@ app.post("/api/rebuild-native-app", (req, res) => {
   const nativeAppDir = getNativeAppDir();
   if (!fs.existsSync(buildScript)) return res.status(404).json({ error: "build.sh not found" });
   res.json({ ok: true });
-  const notify = (msg) => `osascript -e 'display notification "${msg}" with title "CEO Dashboard"'`;
+  const appTitle = userConfig.title || "CEO Dashboard";
+  const notify = (msg) => `osascript -e 'display notification "${msg}" with title "${appTitle}"'`;
   const script = [
     notify("Rebuilding app — compiling Swift..."),
     `CEO_NO_OPEN=1 CEO_FORCE_ICON=1 bash "${buildScript}" 2>&1`,

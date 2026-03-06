@@ -77,8 +77,20 @@ class BackdropClickView: NSView {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate, UNUserNotificationCenterDelegate {
-    var appName: String = {
-        let configPath = CEO_DASHBOARD_DIR + "/config.json"
+    /// Resolve the dashboard directory at runtime by asking the running server,
+    /// falling back to the compile-time constant if the server is unreachable.
+    func resolveDashboardDir() -> String {
+        if let url = URL(string: "http://localhost:9145/api/config"),
+           let data = try? Data(contentsOf: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let dir = json["dashboardDir"] as? String, !dir.isEmpty {
+            return dir
+        }
+        return CEO_DASHBOARD_DIR
+    }
+
+    lazy var appName: String = {
+        let configPath = resolveDashboardDir() + "/config.json"
         if let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let title = json["title"] as? String, !title.isEmpty {
@@ -755,7 +767,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
     }
 
     func launchRebuild(title: String, step1Message: String) {
-        let ceoDir = CEO_DASHBOARD_DIR
+        let ceoDir = resolveDashboardDir()
         // Read app name from config.json so rebuild reopens the correct (possibly renamed) app
         let appName = self.appName
         let appPath = NSHomeDirectory() + "/Applications/" + appName + ".app"
@@ -902,7 +914,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
     func startServer(completion: @escaping () -> Void) {
         DispatchQueue.global().async {
-            let ceoDir = CEO_DASHBOARD_DIR
+            let ceoDir = self.resolveDashboardDir()
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["node", ceoDir + "/server.js"]
