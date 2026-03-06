@@ -77,6 +77,28 @@ class BackdropClickView: NSView {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate, UNUserNotificationCenterDelegate {
+    /// Resolve the dashboard directory at runtime by asking the running server,
+    /// falling back to the compile-time constant if the server is unreachable.
+    func resolveDashboardDir() -> String {
+        if let url = URL(string: "http://localhost:9145/api/config"),
+           let data = try? Data(contentsOf: url),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let dir = json["dashboardDir"] as? String, !dir.isEmpty {
+            return dir
+        }
+        return CEO_DASHBOARD_DIR
+    }
+
+    lazy var appName: String = {
+        let configPath = resolveDashboardDir() + "/config.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let title = json["title"] as? String, !title.isEmpty {
+            return title
+        }
+        return "CEO Dashboard"
+    }()
+
     var window: NSWindow!
     var containerView: NSView!
     var webView: WKWebView!
@@ -130,7 +152,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
             backing: .buffered,
             defer: false
         )
-        window.title = "CEO Dashboard"
+        window.title = appName
         window.contentView = containerView
         // Restore saved window frame (position, size, monitor)
         if let saved = UserDefaults.standard.string(forKey: "CEOMainWindowFrame") {
@@ -196,7 +218,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
         case "nativeRebuild":
             // Triggered by server update when native-app/ files changed — skip confirmation
-            launchRebuild(title: "Update — Rebuilding App", step1Message: "Update detected native app changes...")
+            launchRebuild(title: "Update — Rebuilding \(appName)...", step1Message: "Update detected native app changes...")
 
         case "startWindowDrag":
             // Popout header drag — find which popout window contains the sender WKWebView
@@ -568,8 +590,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
         canGoBackObserver = nil
         canGoForwardObserver = nil
 
-        // Restore keyboard focus to the main webview
-        window.makeFirstResponder(webView)
+        // Restore keyboard focus to the main webview (guard for termination)
+        if window != nil, webView != nil {
+            window.makeFirstResponder(webView)
+        }
     }
 
 
@@ -609,7 +633,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(withTitle: "About CEO Dashboard", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(withTitle: "About \(appName)", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appMenuItem.submenu = appMenu
@@ -739,19 +763,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
         alert.alertStyle = .informational
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
-        launchRebuild(title: "Rebuilding CEO Dashboard...", step1Message: "Preparing progress window...")
+        launchRebuild(title: "Rebuilding \(appName)...", step1Message: "Preparing progress window...")
     }
 
     func launchRebuild(title: String, step1Message: String) {
-        let ceoDir = NSHomeDirectory() + "/ceo-dashboard"
+        let ceoDir = resolveDashboardDir()
         // Read app name from config.json so rebuild reopens the correct (possibly renamed) app
-        var appName = "CEO Dashboard"
-        let configPath = ceoDir + "/config.json"
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let cfgTitle = json["title"] as? String, !cfgTitle.isEmpty {
-            appName = cfgTitle
-        }
+        let appName = self.appName
         let appPath = NSHomeDirectory() + "/Applications/" + appName + ".app"
         let statusFile = "/tmp/ceo-rebuild-status"
         let scriptPath = "/tmp/ceo-rebuild.sh"
@@ -778,7 +796,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
         echo "PROGRESS:5:1:6:\(step1Message)" > "$STATUS"
         swiftc "\(progressSrc)" -o "\(progressBin)" -framework Cocoa -O 2>/tmp/ceo-rebuild.log
         if [ $? -ne 0 ]; then
-            osascript -e 'display notification "Progress window failed to compile" with title "CEO Dashboard"'
+            osascript -e 'display notification "Progress window failed to compile" with title "\(appName)"'
         else
             "\(progressBin)" &
             PROGRESS_PID=$!
@@ -896,7 +914,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
     func startServer(completion: @escaping () -> Void) {
         DispatchQueue.global().async {
-            let ceoDir = NSHomeDirectory() + "/ceo-dashboard"
+            let ceoDir = self.resolveDashboardDir()
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["node", ceoDir + "/server.js"]
