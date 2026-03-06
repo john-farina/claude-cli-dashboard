@@ -3186,11 +3186,32 @@ function updateTerminal(terminal, lines) {
 
   terminal._lastContent = content;
   let html = linkifyTerminal(ansiUp.ansi_to_html(content));
-  // Strip dark gray background blocks (user-typed messages in Claude Code)
-  // These are ANSI 256-color backgrounds in the #2a2a2a–#4a4a4a range
+  // Fix dark backgrounds from ANSI output (user-typed messages & TUI selection highlights)
+  // Replaces dark gray backgrounds with a subtle accent tint, and ensures text is visible
   html = html.replace(/background-color:rgb\((\d+),(\d+),(\d+)\)/g, (m, r, g, b) => {
     r = +r; g = +g; b = +b;
-    if (r === g && g === b && r >= 30 && r <= 80) return "background-color:transparent";
+    // Dark gray backgrounds (user-typed messages) → subtle accent tint
+    if (r === g && g === b && r >= 30 && r <= 80) return "background-color:var(--accent-subtle)";
+    // Light/white backgrounds from reverse video (TUI selection) → stronger accent highlight
+    if (r === g && g === b && r >= 180) return "background-color:var(--accent-glow)";
+    return m;
+  });
+  // Fix TUI selection highlights: Ink uses reverse video (\e[7m) which ansi_up renders
+  // as dark foreground + light background spans. Replace dark foreground colors inside
+  // spans that also have a background-color, so text stays visible.
+  html = html.replace(/<span style="((?:[^"]*background-color:[^"]+))">([^<]*)<\/span>/g, (m, style, text) => {
+    // If span has both a dark foreground and any background, fix the foreground
+    const hasBg = /background-color:/.test(style);
+    if (!hasBg) return m;
+    const fgMatch = style.match(/^color:rgb\((\d+),(\d+),(\d+)\)/);
+    if (fgMatch) {
+      const fr = +fgMatch[1], fg = +fgMatch[2], fb = +fgMatch[3];
+      // Dark foreground on a colored background = invisible text from reverse video
+      if (fr < 100 && fg < 100 && fb < 100) {
+        const fixedStyle = style.replace(/^color:rgb\(\d+,\d+,\d+\)/, "color:var(--text)");
+        return `<span style="${fixedStyle}">${text}</span>`;
+      }
+    }
     return m;
   });
 

@@ -357,50 +357,127 @@ function broadcastTokenUsage() {
 }
 
 // --- Slash commands ---
+// Built-in Claude Code slash commands (stable across versions)
 const BUILTIN_COMMANDS = [
+  { name: "/agents", description: "List configured agents" },
   { name: "/bug", description: "Report a bug" },
+  { name: "/chrome", description: "Toggle Chrome integration" },
   { name: "/clear", description: "Clear conversation history" },
+  { name: "/commit", description: "Commit changes" },
   { name: "/compact", description: "Compact conversation to save context" },
   { name: "/config", description: "Open settings configuration" },
   { name: "/cost", description: "Show token usage and cost" },
   { name: "/doctor", description: "Check health of your installation" },
+  { name: "/fast", description: "Toggle fast mode" },
   { name: "/help", description: "Get help with Claude Code" },
+  { name: "/hooks", description: "View and manage hooks" },
+  { name: "/ide", description: "Connect to IDE" },
   { name: "/init", description: "Initialize project with CLAUDE.md" },
   { name: "/login", description: "Switch authentication method" },
   { name: "/logout", description: "Sign out of your account" },
+  { name: "/mcp", description: "Configure and manage MCP servers" },
   { name: "/memory", description: "View CLAUDE.md memory files" },
   { name: "/model", description: "Switch AI model" },
   { name: "/permissions", description: "View and manage permissions" },
+  { name: "/plugin", description: "Manage Claude Code plugins" },
   { name: "/review", description: "Review a pull request" },
   { name: "/status", description: "Show session status" },
   { name: "/terminal-setup", description: "Setup terminal integration" },
   { name: "/vim", description: "Toggle vim keybindings" },
 ];
 
+function scanCommandDir(dir, commands, label) {
+  try {
+    for (const file of fs.readdirSync(dir)) {
+      if (file.endsWith(".md")) {
+        const name = "/" + file.replace(".md", "");
+        if (!commands.find((c) => c.name === name)) {
+          commands.push({ name, description: label, custom: true });
+        }
+      }
+    }
+  } catch {}
+}
+
+function getPluginCommands() {
+  const commands = [];
+  const pluginsFile = path.join(os.homedir(), ".claude", "plugins", "installed_plugins.json");
+  try {
+    const data = JSON.parse(fs.readFileSync(pluginsFile, "utf8"));
+    const plugins = data.plugins || {};
+    for (const [key, installs] of Object.entries(plugins)) {
+      const pluginName = key.split("@")[0]; // e.g. "superpowers" from "superpowers@claude-plugins-official"
+      for (const install of installs) {
+        // Scan commands/ directory for slash commands
+        const cmdDir = path.join(install.installPath, "commands");
+        try {
+          const files = fs.readdirSync(cmdDir, { withFileTypes: true });
+          for (const entry of files) {
+            if (entry.isFile() && entry.name.endsWith(".md")) {
+              const cmdName = entry.name.replace(".md", "");
+              const name = `/${pluginName}:${cmdName}`;
+              if (!commands.find((c) => c.name === name)) {
+                commands.push({ name, description: `${pluginName} plugin`, custom: true, plugin: pluginName });
+              }
+            } else if (entry.isDirectory()) {
+              // Nested commands like commands/tasks/build.md → /plugin:tasks:build
+              try {
+                for (const sub of fs.readdirSync(path.join(cmdDir, entry.name))) {
+                  if (sub.endsWith(".md")) {
+                    const subName = sub.replace(".md", "");
+                    const name = `/${pluginName}:${entry.name}:${subName}`;
+                    if (!commands.find((c) => c.name === name)) {
+                      commands.push({ name, description: `${pluginName} plugin`, custom: true, plugin: pluginName });
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+        // Scan skills/ directory — each subdir with a SKILL.md becomes a slash command
+        const skillsDir = path.join(install.installPath, "skills");
+        try {
+          for (const skillEntry of fs.readdirSync(skillsDir, { withFileTypes: true })) {
+            if (!skillEntry.isDirectory()) continue;
+            const skillPath = path.join(skillsDir, skillEntry.name);
+            // Skills can be nested: skills/<namespace>/<skill-name>/SKILL.md
+            if (fs.existsSync(path.join(skillPath, "SKILL.md"))) {
+              const name = `/${pluginName}:${skillEntry.name}`;
+              if (!commands.find((c) => c.name === name)) {
+                commands.push({ name, description: `${pluginName} skill`, custom: true, plugin: pluginName });
+              }
+            } else {
+              // Check one level deeper for namespaced skills
+              try {
+                for (const nested of fs.readdirSync(skillPath, { withFileTypes: true })) {
+                  if (nested.isDirectory() && fs.existsSync(path.join(skillPath, nested.name, "SKILL.md"))) {
+                    const name = `/${pluginName}:${nested.name}`;
+                    if (!commands.find((c) => c.name === name)) {
+                      commands.push({ name, description: `${pluginName} skill`, custom: true, plugin: pluginName });
+                    }
+                  }
+                }
+              } catch {}
+            }
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return commands;
+}
+
 function getSlashCommands() {
   const commands = [...BUILTIN_COMMANDS];
-  const userCmdDir = path.join(os.homedir(), ".claude", "commands");
-  try {
-    for (const file of fs.readdirSync(userCmdDir)) {
-      if (file.endsWith(".md")) {
-        const name = "/" + file.replace(".md", "");
-        if (!commands.find((c) => c.name === name)) {
-          commands.push({ name, description: "Custom command", custom: true });
-        }
-      }
+  scanCommandDir(path.join(os.homedir(), ".claude", "commands"), commands, "Custom command");
+  scanCommandDir(path.join(DEFAULT_WORKDIR, ".claude", "commands"), commands, "Project command");
+  // Add plugin commands
+  for (const cmd of getPluginCommands()) {
+    if (!commands.find((c) => c.name === cmd.name)) {
+      commands.push(cmd);
     }
-  } catch {}
-  const projectCmdDir = path.join(DEFAULT_WORKDIR, ".claude", "commands");
-  try {
-    for (const file of fs.readdirSync(projectCmdDir)) {
-      if (file.endsWith(".md")) {
-        const name = "/" + file.replace(".md", "");
-        if (!commands.find((c) => c.name === name)) {
-          commands.push({ name, description: "Project command", custom: true });
-        }
-      }
-    }
-  } catch {}
+  }
   commands.sort((a, b) => a.name.localeCompare(b.name));
   return commands;
 }
