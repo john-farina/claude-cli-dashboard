@@ -1265,25 +1265,41 @@ settingAddToDock.addEventListener("click", async () => {
   const wasInstalled = settingAddToDock.classList.contains("installed");
   settingAddToDock.textContent = wasInstalled ? "Rebuilding..." : "Installing...";
   settingAddToDock.disabled = true;
+  // Listen for async build result via WebSocket
+  const handler = (ev) => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.type !== "dock-build-result") return;
+      window._ceoWs?.removeEventListener("message", handler);
+      if (msg.ok) {
+        settingAddToDock.textContent = "Rebuild";
+        settingAddToDock.classList.add("installed");
+        dockDesc.textContent = "Rebuild to apply title and accent color changes to the Dock app";
+      } else {
+        settingAddToDock.textContent = wasInstalled ? "Rebuild" : "Install";
+        alert("Build failed — check /tmp/ceo-rebuild.log for details");
+      }
+      settingAddToDock.disabled = false;
+    } catch {}
+  };
+  if (window._ceoWs) window._ceoWs.addEventListener("message", handler);
   try {
     const res = await fetch("/api/settings/add-to-dock", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
     });
-    if (res.ok) {
-      settingAddToDock.textContent = "Rebuild";
-      settingAddToDock.classList.add("installed");
-      settingAddToDock.disabled = false;
-      dockDesc.textContent = "Rebuild to apply title and accent color changes to the Dock app";
-    } else {
+    if (!res.ok) {
       const err = await res.json();
       settingAddToDock.textContent = wasInstalled ? "Rebuild" : "Install";
       settingAddToDock.disabled = false;
+      window._ceoWs?.removeEventListener("message", handler);
       alert(err.error || "Failed to install");
     }
+    // If res.ok, wait for WebSocket result
   } catch {
     settingAddToDock.textContent = wasInstalled ? "Rebuild" : "Install";
     settingAddToDock.disabled = false;
+    window._ceoWs?.removeEventListener("message", handler);
   }
 });
 

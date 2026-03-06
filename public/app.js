@@ -764,6 +764,7 @@ function connect() {
   }
   const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
   ws = new WebSocket(`${wsProto}//${location.host}`);
+  window._ceoWs = ws;
   ws.binaryType = "arraybuffer"; // Binary frames arrive as ArrayBuffer (shell PTY data)
 
   ws.onopen = () => {
