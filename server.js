@@ -1454,13 +1454,19 @@ app.post("/api/settings/auto-start", (req, res) => {
 
 app.post("/api/settings/add-to-dock", (req, res) => {
   const buildScript = path.join(__dirname, "native-app", "build.sh");
-  try {
-    execSync(`CEO_NO_OPEN=1 CEO_FORCE_ICON=1 bash "${buildScript}"`, { timeout: 60000, encoding: "utf8" });
-    const appDir = getNativeAppDir();
-    res.json({ ok: true, path: appDir });
-  } catch (e) {
-    res.status(500).json({ error: e.stderr || e.message });
-  }
+  if (!fs.existsSync(buildScript)) return res.status(404).json({ error: "build.sh not found" });
+  const appDir = getNativeAppDir();
+  // Run build async — respond immediately, notify via WebSocket when done
+  res.json({ ok: true, path: appDir, async: true });
+  const child = require("child_process").spawn("/bin/bash", [buildScript],
+    { cwd: __dirname, env: { ...process.env, CEO_NO_OPEN: "1" } });
+  let output = "";
+  child.stdout.on("data", (d) => { output += d; });
+  child.stderr.on("data", (d) => { output += d; });
+  child.on("close", (code) => {
+    const msg = JSON.stringify({ type: "dock-build-result", ok: code === 0, output, path: appDir });
+    for (const c of wss.clients) { try { c.send(msg); } catch {} }
+  });
 });
 
 // --- Notification API ---
