@@ -12,7 +12,11 @@ else
   PORT=9145
 fi
 
-APP_PATH="$HOME/Applications/CEO Dashboard.app"
+# Read app name from config.json (matches build.sh logic)
+if [ -f "$CEO_DIR/config.json" ] && command -v python3 &>/dev/null; then
+  _APP_TITLE=$(python3 -c "import json; print(json.load(open('$CEO_DIR/config.json')).get('title','CEO Dashboard'))" 2>/dev/null)
+fi
+APP_PATH="$HOME/Applications/${_APP_TITLE:-CEO Dashboard}.app"
 
 # Check tmux
 if ! command -v tmux &>/dev/null; then
@@ -68,7 +72,7 @@ pkill -9 -x CEODashboard 2>/dev/null
 # If app is already running, just refresh it. Otherwise open it.
 if pgrep -x CEODashboard >/dev/null 2>&1; then
   # Send reload notification — app refreshes & comes to front
-  osascript -e 'tell application "CEO Dashboard" to activate' 2>/dev/null
+  osascript -e "tell application \"${_APP_TITLE:-CEO Dashboard}\" to activate" 2>/dev/null
   /usr/bin/python3 -c "
 import Foundation
 dn = Foundation.NSDistributedNotificationCenter.defaultCenter()

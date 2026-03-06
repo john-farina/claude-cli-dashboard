@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>Dashboard</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=3">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -11,10 +14,15 @@
     *{margin:0;padding:0;box-sizing:border-box}
     :root{--bg:#121212;--bg-gradient:linear-gradient(135deg,#121212 0%,#1a1816 50%,#141210 100%);--surface:#1e1e1e;--text:#ede8e0;--text-dim:#7a7568;--accent:#c9a84c;--terminal-bg:#0e0e0d}
     body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;background:var(--bg);background-image:var(--bg-gradient);background-attachment:fixed;color:var(--text);min-height:100vh;-webkit-font-smoothing:antialiased}
-    .page-loader{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;background:var(--bg);background-image:var(--bg-gradient)}
+    .page-loader{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;background:var(--bg);background-image:var(--bg-gradient);pointer-events:none}
+    .page-loader>*{visibility:hidden}
     .hidden{display:none!important}
   </style>
-  <link rel="stylesheet" href="style.css" id="main-css">
+  <script>
+    // Apply saved accent color before paint to prevent flash
+    (function(){function L(h){var x=parseInt(h.replace("#",""),16);return((x>>16&255)*0.299+(x>>8&255)*0.587+(x&255)*0.114)>128}var m={gold:"#c9a84c",cyan:"#00e5ff",rose:"#c64c75",violet:"#894cc6",green:"#4cc67f",orange:"#c67f4c",blue:"#4c7fc6",coral:"#c6614c"};var k=localStorage.getItem("accentColor");if(k){var c=m[k]||(/^#[0-9a-fA-F]{6}$/.test(k)?k:null);if(c)document.documentElement.style.setProperty("--accent",c)}var bg=localStorage.getItem("bgColor");if(bg&&/^#[0-9a-fA-F]{6}$/.test(bg)){var s=document.documentElement.style;s.setProperty("--bg",bg);s.setProperty("--bg-gradient","linear-gradient(135deg,"+bg+" 0%,"+bg+" 100%)");if(L(bg))s.setProperty("--text","#1a1a1a")}var tc=localStorage.getItem("terminalColor");if(tc&&/^#[0-9a-fA-F]{6}$/.test(tc)){document.documentElement.style.setProperty("--terminal-bg",tc);if(L(tc))document.documentElement.style.setProperty("--terminal-text","#1a1a1a")}var sc=localStorage.getItem("shellColor");if(sc&&/^#[0-9a-fA-F]{6}$/.test(sc)){var ss=document.documentElement.style;ss.setProperty("--shell-bg",sc);if(L(sc)){ss.setProperty("--shell-text-dim","#555");ss.setProperty("--shell-pill-bg","rgba(0,0,0,0.06)");ss.setProperty("--shell-pill-border","rgba(0,0,0,0.08)")}}})();
+  </script>
+  <link rel="stylesheet" href="style.css?v=20260305b" id="main-css">
   <script>
     // Retry loading style.css if it fails (e.g. server restart timing)
     document.getElementById('main-css').onerror = function() {
@@ -51,13 +59,19 @@
       <div class="loading-orb loading-orb-4"></div>
       <div class="loading-orb loading-orb-5"></div>
       <div class="loading-orb loading-orb-6"></div>
-      <img src="claude-symbol.svg" class="loading-logo" alt="">
+      <svg class="loading-logo claude-star-svg" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M 233.96 800.21 L 468.64 668.54 472.59 657.1 468.64 650.74 457.21 650.74 417.99 648.32 283.89 644.7 167.6 639.87 54.93 633.83 26.58 627.79 0 592.75 2.74 575.28 26.58 559.25 60.72 562.23 136.19 567.38 249.42 575.19 331.57 580.03 453.26 592.67 472.59 592.67 475.33 584.86 468.72 580.03 463.57 575.19 346.39 495.79 219.54 411.87 153.1 363.54 117.18 339.06 99.06 316.11 91.25 266.01 123.87 230.09 167.68 233.07 178.87 236.05 223.25 270.2 318.04 343.57 441.83 434.74 459.95 449.8 467.19 444.64 468.08 441.02 459.95 427.41 392.62 305.72 320.78 181.93 288.81 130.63 280.35 99.87 C 277.37 87.22 275.19 76.59 275.19 63.62 L 312.32 13.21 332.86 6.6 382.39 13.21 403.25 31.33 434.01 101.72 483.87 212.54 561.18 363.22 583.81 407.92 595.89 449.32 600.4 461.96 608.21 461.96 608.21 454.71 614.58 369.83 626.34 265.61 637.77 131.52 641.72 93.75 660.4 48.48 697.53 24 726.52 37.85 750.36 72 747.06 94.07 732.89 186.2 705.1 330.52 686.98 427.17 697.53 427.17 709.61 415.09 758.5 350.17 840.64 247.49 876.89 206.74 919.17 161.72 946.31 140.3 997.61 140.3 1035.38 196.43 1018.47 254.42 965.64 321.42 921.83 378.2 859.01 462.77 819.79 530.42 823.41 535.81 832.75 534.93 974.66 504.72 1051.33 490.87 1142.82 475.17 1184.21 494.5 1188.72 514.15 1172.46 554.34 1074.6 578.5 959.84 601.45 788.94 641.88 786.85 643.41 789.26 646.39 866.26 653.64 899.19 655.41 979.81 655.41 1129.93 666.6 1169.15 692.54 1192.67 724.27 1188.72 748.43 1128.32 779.19 1046.82 759.87 856.59 714.6 791.36 698.34 782.34 698.34 782.34 703.73 836.7 756.89 936.32 846.85 1061.07 962.82 1067.44 991.49 1051.41 1014.12 1034.5 1011.7 924.89 929.23 882.6 892.11 786.85 811.49 780.48 811.49 780.48 819.95 802.55 852.24 919.09 1027.41 925.13 1081.13 916.67 1098.6 886.47 1109.15 853.29 1103.11 785.07 1007.36 714.68 899.52 657.91 802.87 650.98 806.82 617.48 1167.7 601.77 1186.15 565.53 1200 535.33 1177.05 519.3 1139.92 535.33 1066.55 554.66 970.79 570.36 894.68 584.54 800.13 592.99 768.72 592.43 766.63 585.5 767.52 514.23 865.37 405.83 1011.87 320.05 1103.68 299.52 1111.81 263.92 1093.37 267.22 1060.43 287.11 1031.11 405.83 880.11 477.42 786.52 523.65 732.48 523.33 724.67 520.59 724.67 205.29 929.4 149.15 936.64 124.99 914.01 127.97 876.89 139.41 864.81 234.2 799.57 233.88 799.89 Z"/></svg>
     </div>
     <span class="page-loader-text">Loading Dashboard<span class="loading-dots"><span>.</span><span>.</span><span>.</span></span></span>
   </div>
+  <script>
+    // Nuclear safety: remove loader after 5s no matter what (even if app.js fails to load)
+    setTimeout(function(){var l=document.getElementById("page-loader");if(l){l.style.display="none";l.remove();}},5000);
+    // Catch any uncaught JS errors and ensure loader still gets removed
+    window.onerror=function(msg,url,line){console.error("[FATAL]",msg,"at",url+":"+line);var l=document.getElementById("page-loader");if(l){l.style.display="none";l.remove();}};
+  </script>
   <header>
     <div class="header-left">
-      <img src="claude-symbol.svg" alt="" class="header-logo">
+      <svg class="header-logo claude-star-svg" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M 233.96 800.21 L 468.64 668.54 472.59 657.1 468.64 650.74 457.21 650.74 417.99 648.32 283.89 644.7 167.6 639.87 54.93 633.83 26.58 627.79 0 592.75 2.74 575.28 26.58 559.25 60.72 562.23 136.19 567.38 249.42 575.19 331.57 580.03 453.26 592.67 472.59 592.67 475.33 584.86 468.72 580.03 463.57 575.19 346.39 495.79 219.54 411.87 153.1 363.54 117.18 339.06 99.06 316.11 91.25 266.01 123.87 230.09 167.68 233.07 178.87 236.05 223.25 270.2 318.04 343.57 441.83 434.74 459.95 449.8 467.19 444.64 468.08 441.02 459.95 427.41 392.62 305.72 320.78 181.93 288.81 130.63 280.35 99.87 C 277.37 87.22 275.19 76.59 275.19 63.62 L 312.32 13.21 332.86 6.6 382.39 13.21 403.25 31.33 434.01 101.72 483.87 212.54 561.18 363.22 583.81 407.92 595.89 449.32 600.4 461.96 608.21 461.96 608.21 454.71 614.58 369.83 626.34 265.61 637.77 131.52 641.72 93.75 660.4 48.48 697.53 24 726.52 37.85 750.36 72 747.06 94.07 732.89 186.2 705.1 330.52 686.98 427.17 697.53 427.17 709.61 415.09 758.5 350.17 840.64 247.49 876.89 206.74 919.17 161.72 946.31 140.3 997.61 140.3 1035.38 196.43 1018.47 254.42 965.64 321.42 921.83 378.2 859.01 462.77 819.79 530.42 823.41 535.81 832.75 534.93 974.66 504.72 1051.33 490.87 1142.82 475.17 1184.21 494.5 1188.72 514.15 1172.46 554.34 1074.6 578.5 959.84 601.45 788.94 641.88 786.85 643.41 789.26 646.39 866.26 653.64 899.19 655.41 979.81 655.41 1129.93 666.6 1169.15 692.54 1192.67 724.27 1188.72 748.43 1128.32 779.19 1046.82 759.87 856.59 714.6 791.36 698.34 782.34 698.34 782.34 703.73 836.7 756.89 936.32 846.85 1061.07 962.82 1067.44 991.49 1051.41 1014.12 1034.5 1011.7 924.89 929.23 882.6 892.11 786.85 811.49 780.48 811.49 780.48 819.95 802.55 852.24 919.09 1027.41 925.13 1081.13 916.67 1098.6 886.47 1109.15 853.29 1103.11 785.07 1007.36 714.68 899.52 657.91 802.87 650.98 806.82 617.48 1167.7 601.77 1186.15 565.53 1200 535.33 1177.05 519.3 1139.92 535.33 1066.55 554.66 970.79 570.36 894.68 584.54 800.13 592.99 768.72 592.43 766.63 585.5 767.52 514.23 865.37 405.83 1011.87 320.05 1103.68 299.52 1111.81 263.92 1093.37 267.22 1060.43 287.11 1031.11 405.83 880.11 477.42 786.52 523.65 732.48 523.33 724.67 520.59 724.67 205.29 929.4 149.15 936.64 124.99 914.01 127.97 876.89 139.41 864.81 234.2 799.57 233.88 799.89 Z"/></svg>
       <h1 id="header-title">CEO Dashboard</h1>
       <span id="connection-dot" class="dot offline" title="Disconnected"></span>
       <span class="contribute-info" tabindex="0">
@@ -98,7 +112,6 @@
         <button id="bookmarks-btn" class="dock-item" tabindex="0" title="Bookmarks (B)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v12l-5-3-5 3z"/></svg><span class="dock-label">Bookmarks</span><kbd>B</kbd></button>
         <button id="todo-btn" class="dock-item" tabindex="0" title="Notes (D)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="1.5" width="12" height="13" rx="1"/><path d="M5 5.5h6M5 8.5h6M5 11.5h3"/></svg><span class="dock-label">Notes</span><kbd>D</kbd></button>
       </nav>
-      <button id="new-terminal-btn" class="btn-secondary" tabindex="0" style="margin-right:6px;">+ Terminal</button>
       <button id="new-agent-btn" class="btn-primary" tabindex="0">+ New Agent <kbd>N</kbd></button>
     </div>
   </header>
@@ -107,7 +120,7 @@
 
   <main id="agents-grid" class="agents-grid">
     <div id="empty-state" class="empty-state">
-      <p>No agents or terminals running. Click <strong>+ New Agent</strong> or <strong>+ Terminal</strong> to start one.</p>
+      <p>No agents running. Click <strong>+ New Agent</strong> to start one.</p>
     </div>
   </main>
 
@@ -452,6 +465,70 @@
         </div>
       </div>
 
+      <!-- Customize (collapsible) -->
+      <div class="settings-section settings-collapse">
+        <button type="button" class="settings-collapse-toggle" id="customize-toggle">
+          <span class="settings-collapse-arrow">&#x25B6;</span>
+          <span class="settings-section-title" style="margin:0">Customize</span>
+        </button>
+        <div id="customize-body" class="settings-collapse-body hidden">
+          <div class="customize-color-section">
+            <span class="settings-label">Dashboard Title</span>
+            <span class="settings-desc">Name shown in the header, tab title, and notifications</span>
+            <input type="text" id="setting-title" class="settings-inline-input" style="margin-top:6px;width:100%;max-width:260px;" placeholder="CEO Dashboard">
+          </div>
+          <div class="customize-color-section">
+            <span class="settings-label">Background Color</span>
+            <span class="settings-desc">Base background — all surfaces auto-derive from it</span>
+            <div id="bg-color-grid" class="accent-color-grid"></div>
+            <div id="bg-picker-container" class="accent-picker-container hidden">
+              <div id="bg-picker-wheel"></div>
+              <div class="accent-picker-actions">
+                <button id="bg-picker-save" class="btn-settings-action">Save Color</button>
+                <button id="bg-picker-cancel" class="btn-settings-action" style="background:transparent;color:var(--text-dim)">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="customize-color-section">
+            <span class="settings-label">Agent Terminal Color</span>
+            <span class="settings-desc">Agent card terminal background — "Auto" derives from background</span>
+            <div id="terminal-color-grid" class="accent-color-grid"></div>
+            <div id="terminal-picker-container" class="accent-picker-container hidden">
+              <div id="terminal-picker-wheel"></div>
+              <div class="accent-picker-actions">
+                <button id="terminal-picker-save" class="btn-settings-action">Save Color</button>
+                <button id="terminal-picker-cancel" class="btn-settings-action" style="background:transparent;color:var(--text-dim)">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="customize-color-section">
+            <span class="settings-label">Shell Terminal Color</span>
+            <span class="settings-desc">Footer shell background</span>
+            <div id="shell-color-grid" class="accent-color-grid"></div>
+            <div id="shell-picker-container" class="accent-picker-container hidden">
+              <div id="shell-picker-wheel"></div>
+              <div class="accent-picker-actions">
+                <button id="shell-picker-save" class="btn-settings-action">Save Color</button>
+                <button id="shell-picker-cancel" class="btn-settings-action" style="background:transparent;color:var(--text-dim)">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="customize-color-section">
+            <span class="settings-label">Accent Color</span>
+            <span class="settings-desc">Dashboard highlight color</span>
+            <div id="accent-color-grid" class="accent-color-grid"></div>
+            <div id="accent-picker-container" class="accent-picker-container hidden">
+              <div id="accent-picker-wheel"></div>
+              <div class="accent-picker-actions">
+                <button id="accent-picker-save" class="btn-settings-action">Save Color</button>
+                <button id="accent-picker-cancel" class="btn-settings-action" style="background:transparent;color:var(--text-dim)">Cancel</button>
+              </div>
+            </div>
+          </div>
+          <p id="customize-rebuild-hint" class="settings-hint hidden">To update the Dock app icon and name, go to <strong>Settings → Rebuild &amp; Relaunch</strong> in the menu bar (⌘⇧B).</p>
+        </div>
+      </div>
+
       <!-- Agent Defaults (collapsible) -->
       <div class="settings-section settings-collapse">
         <button type="button" class="settings-collapse-toggle" id="agent-defaults-toggle">
@@ -459,13 +536,6 @@
           <span class="settings-section-title" style="margin:0">Agent Defaults</span>
         </button>
         <div id="agent-defaults-body" class="settings-collapse-body hidden">
-          <div class="settings-inline-row">
-            <div class="settings-row-info">
-              <span class="settings-label">Dashboard Title</span>
-              <span class="settings-desc">Customize the name shown in the header, tab title, and notifications.</span>
-            </div>
-            <input type="text" id="setting-title" class="settings-inline-input" placeholder="CEO Dashboard">
-          </div>
           <div class="settings-inline-row">
             <div class="settings-row-info">
               <span class="settings-label">Default Name</span>
@@ -528,6 +598,16 @@
       </div>
 
       <!-- Version Manager (collapsible) -->
+      <div class="settings-section">
+        <div class="settings-row">
+          <div class="settings-row-info">
+            <span class="settings-label">Git Worktrees</span>
+            <span class="settings-desc">Remove all git worktrees created by agents. Double-click to confirm.</span>
+          </div>
+          <button id="setting-delete-worktrees" class="btn-settings-action" style="background:#a33">Delete All</button>
+        </div>
+      </div>
+
       <div class="settings-section settings-collapse">
         <button type="button" class="settings-collapse-toggle" id="version-toggle">
           <span class="settings-collapse-arrow">&#x25B6;</span>
@@ -593,6 +673,7 @@
     <div id="shell-terminal" class="shell-terminal"></div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5.5.2/dist/iro.min.js" integrity="sha384-oZxUObEswsFY+jlvIkPj4iWF3WW1I6vMNyzoakb3v99l1DtAoF/VyBTrNKtSCVoa" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.min.js" integrity="sha384-ZrKQ7PkfCn7dCFPHYUVgEVQl/baDI8SxCXy/rqOimlKqxI0E83ob0u9QkcMPrk5+" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js" integrity="sha384-NNQgBjjuhtXzPmmy4gurS5X7P4uTt1DThyevz4Ua0IVK5+kazYQI1W27JHjbbxQz" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js" integrity="sha384-J4qzUjBl1FxyLsl/kQPQIOeINsmp17OHYXDOMpMxlKX53ZfYsL+aWHpgArvOuof9" crossorigin="anonymous"></script>
@@ -600,6 +681,6 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js" integrity="sha384-S1biLeI8L/bFduIVvCxbn/l4EtaG4nTqQjGF7qCYTbsGXGFe8KgIKXtw4+UWxprv" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js" integrity="sha384-suTk5GfzCaPxAJRzhqzQQvM81UskMll+stLgqXpay997ORTnMRm1IAJi143VfhXU" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js" integrity="sha384-1tVmtFdzvhqVP3vQWJmKYvD0uTtR0r+FhlLWw+vG6F/vNDS7yegNMNNHRS12fSyR" crossorigin="anonymous"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260305b"></script>
 </body>
 </html>

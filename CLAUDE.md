@@ -185,10 +185,12 @@ The dashboard has an auto-update system. Users see an "Update Available" button 
 
 To push an update: just push to `main`. That's it. The update button appears automatically for all users on their next check.
 
-- Dashboards run `git fetch origin main` every hour (and on every server restart) to check for new commits
+- The server auto-detects the correct git remote for `john-farina/claude-cli-dashboard` (works for direct clones, forks, and any remote layout). It checks `upstream` then `origin`, and adds an `upstream` remote automatically if needed.
+- Dashboards run `git fetch <remote> main` every hour (and on every server restart) to check for new commits
 - The button shows the number of commits behind (e.g. "Update (3 new commits)")
 - Hovering shows commit summaries + release notes (if any) in a tooltip
-- Clicking runs `git merge origin/main`, installs deps if needed, and restarts
+- Clicking checks you're on `main` branch first, then runs `git merge <remote>/main`, installs deps if needed, and restarts
+- If on a feature branch, shows a "Wrong Branch" error with instructions to checkout main
 
 **Optional: GitHub Releases** — If you create a GitHub Release (with a tag like `v0.3.0`), its release notes body will show in the hover tooltip alongside commit summaries. This is purely cosmetic — updates are triggered by commits, not releases.
 

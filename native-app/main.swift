@@ -744,7 +744,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandler, WKUI
 
     func launchRebuild(title: String, step1Message: String) {
         let ceoDir = NSHomeDirectory() + "/ceo-dashboard"
-        let appPath = NSHomeDirectory() + "/Applications/CEO Dashboard.app"
+        // Read app name from config.json so rebuild reopens the correct (possibly renamed) app
+        var appName = "CEO Dashboard"
+        let configPath = ceoDir + "/config.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: configPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let cfgTitle = json["title"] as? String, !cfgTitle.isEmpty {
+            appName = cfgTitle
+        }
+        let appPath = NSHomeDirectory() + "/Applications/" + appName + ".app"
         let statusFile = "/tmp/ceo-rebuild-status"
         let scriptPath = "/tmp/ceo-rebuild.sh"
         let progressSrc = ceoDir + "/native-app/rebuild-progress.swift"
