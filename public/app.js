@@ -3200,7 +3200,7 @@ function updateTerminal(terminal, lines) {
   // spans that also have a background-color, so text stays visible.
   html = html.replace(/<span style="((?:[^"]*background-color:[^"]+))">([^<]*)<\/span>/g, (m, style, text) => {
     // If span has both a dark foreground and any background, fix the foreground
-    const hasBg = /background-color:rgb\(\d+,\d+,\d+\)/.test(style);
+    const hasBg = /background-color:/.test(style);
     if (!hasBg) return m;
     const fgMatch = style.match(/^color:rgb\((\d+),(\d+),(\d+)\)/);
     if (fgMatch) {
