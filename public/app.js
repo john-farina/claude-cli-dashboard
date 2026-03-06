@@ -974,11 +974,20 @@ function connect() {
 
     if (msg.type === "sessions") {
       const activeNames = new Set(msg.sessions.map(s => s.name));
+      // Process agents first, then terminals — so embedded terminal checks can find parent agents
+      for (const s of msg.sessions) {
+        if (s.type !== "terminal") {
+          addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+        }
+      }
       for (const s of msg.sessions) {
         if (s.type === "terminal") {
+          // Skip embedded agent terminals — they're managed by the parent agent card,
+          // not as standalone terminal cards. Without this check, WS reconnects would
+          // spawn a standalone card for every closed embedded terminal.
+          const parentName = s.name.endsWith("-term") ? s.name.slice(0, -5) : null;
+          if (parentName && agents.has(parentName) && !agents.has(s.name)) continue;
           addTerminalCard(s.name, s.workdir);
-        } else {
-          addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
         }
       }
       // Clear ALL terminalOpen flags — terminals are only opened by user interaction
