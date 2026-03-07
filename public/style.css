@@ -2582,6 +2582,26 @@ header h1 {
 }
 
 /* Screenshot upload zone */
+.bug-screenshot-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.bug-screenshot-row.hidden { display: none; }
+.bug-screenshot-capture-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.bug-screenshot-capture-btn.hidden { display: none; }
+.bug-screenshot-capture-btn svg {
+  flex-shrink: 0;
+}
 .bug-screenshot-zone {
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -2593,6 +2613,7 @@ header h1 {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 1;
 }
 .bug-screenshot-zone:hover,
 .bug-screenshot-zone.dragover {
@@ -5540,6 +5561,13 @@ header .btn-primary kbd {
   }
   .bug-screenshot-remove-btn {
     min-width: 36px;
+    min-height: 36px;
+  }
+  .bug-screenshot-row {
+    flex-direction: column;
+  }
+  .bug-screenshot-capture-btn {
+    justify-content: center;
     min-height: 36px;
   }
 }

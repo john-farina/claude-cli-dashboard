@@ -25,12 +25,18 @@
   const bugSuccessClose = document.getElementById("bug-success-close");
   const bugSuccessSpawn = document.getElementById("bug-success-spawn");
 
+  const bugScreenshotCapture = document.getElementById("bug-screenshot-capture");
+
   let bugSelectedSeverity = "medium";
   let bugScreenshotFile = null;
+  let bugScreenshotServerPath = null;
   let bugSystemInfo = null;
   let _lastIssueUrl = "";
   let _lastBugTitle = "";
   let _lastBugDesc = "";
+  let _lastBugSteps = "";
+  let _lastBugSeverity = "";
+  let _lastBugScreenshotPath = "";
 
   function setSysinfoState(state) {
     bugSysinfoLoading.classList.toggle("hidden", state !== "loading");
@@ -52,6 +58,7 @@
     bugForm.reset();
     bugSelectedSeverity = "medium";
     bugScreenshotFile = null;
+    bugScreenshotServerPath = null;
     bugScreenshotPreview.classList.add("hidden");
     bugScreenshotPlaceholder.style.display = "";
     bugSystemInfo = null;
@@ -125,13 +132,43 @@
   bugScreenshotRemove.addEventListener("click", (e) => {
     e.stopPropagation();
     bugScreenshotFile = null;
+    bugScreenshotServerPath = null;
     bugScreenshotPreview.classList.add("hidden");
     bugScreenshotPlaceholder.style.display = "";
     bugScreenshotInput.value = "";
   });
 
+  // Capture screenshot via macOS screencapture
+  bugScreenshotCapture.addEventListener("click", async () => {
+    // Hide the modal so user can capture the screen (use classList not inline style)
+    bugOverlay.classList.add("hidden");
+    bugScreenshotCapture.disabled = true;
+    bugScreenshotCapture.textContent = "Capturing...";
+
+    try {
+      const res = await fetch("/api/screenshot", { method: "POST" });
+      const data = await res.json();
+      if (data.ok && data.path) {
+        // Show the captured screenshot in the preview
+        bugScreenshotServerPath = data.path;
+        bugScreenshotFile = null; // server already has the file
+        bugScreenshotImg.src = `/api/screenshot-preview?path=${encodeURIComponent(data.path)}&t=${Date.now()}`;
+        bugScreenshotPreview.classList.remove("hidden");
+        bugScreenshotPlaceholder.style.display = "none";
+      }
+    } catch {
+      // User cancelled or error — do nothing
+    } finally {
+      // Show the modal again
+      bugOverlay.classList.remove("hidden");
+      bugScreenshotCapture.disabled = false;
+      bugScreenshotCapture.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M5 3L6 1h4l1 2"/></svg> Capture Screen`;
+    }
+  });
+
   function handleScreenshot(file) {
     bugScreenshotFile = file;
+    bugScreenshotServerPath = null;
     const reader = new FileReader();
     reader.onload = () => {
       bugScreenshotImg.src = reader.result;
@@ -151,9 +188,9 @@
     bugSubmit.textContent = "Submitting...";
 
     try {
-      // Upload screenshot first if present
-      let screenshotPath = null;
-      if (bugScreenshotFile) {
+      // Upload screenshot first if present (client-side file)
+      let screenshotPath = bugScreenshotServerPath || null;
+      if (!screenshotPath && bugScreenshotFile) {
         const formData = new FormData();
         formData.append("file", bugScreenshotFile);
         const upRes = await fetch("/api/upload", { method: "POST", body: formData });
@@ -181,6 +218,9 @@
         _lastIssueUrl = data.issueUrl;
         _lastBugTitle = title;
         _lastBugDesc = bugDesc.value.trim();
+        _lastBugSteps = bugSteps.value.trim();
+        _lastBugSeverity = bugSelectedSeverity;
+        _lastBugScreenshotPath = screenshotPath || "";
         closeBugReportModal();
         // Show success modal with spawn option
         bugSuccessMsg.innerHTML = `Issue created: <a href="${escapeAttr(data.issueUrl)}" target="_blank">${escapeHtml(data.issueUrl)}</a>`;
@@ -206,8 +246,44 @@
 
   bugSuccessSpawn.addEventListener("click", async () => {
     bugSuccessOverlay.classList.add("hidden");
-    // Create a new agent with the bug details as its prompt
-    const prompt = `Fix this bug and create a PR:\n\nTitle: ${_lastBugTitle}\n${_lastBugDesc ? `Description: ${_lastBugDesc}\n` : ""}Issue: ${_lastIssueUrl}\n\nPlease investigate, fix the bug, and create a PR that references the issue.`;
+    // Build comprehensive bug-fix agent prompt
+    let prompt = `You are a bug-fix agent. Your job is to investigate and fix the following bug, then ensure the codebase passes a security review, and finally create a PR or file a detailed issue.
+
+## Bug Report
+
+**Title:** ${_lastBugTitle}
+${_lastBugDesc ? `**Description:** ${_lastBugDesc}\n` : ""}${_lastBugSteps ? `**Steps to Reproduce:** ${_lastBugSteps}\n` : ""}**Severity:** ${_lastBugSeverity || "medium"}
+**Issue:** ${_lastIssueUrl}
+${_lastBugScreenshotPath ? `**Screenshot:** ${_lastBugScreenshotPath}\n` : ""}
+
+## Your Workflow
+
+### Step 1: Investigate & Fix the Bug
+- Read the relevant code and understand the root cause
+- Implement a fix
+- Test the fix if possible (run existing tests, verify the fix addresses the issue)
+- **If you need more information from the user, ask them directly** — don't guess
+
+### Step 2: Security Check
+- Once the bug is fixed, run a security review of the entire codebase
+- Check for OWASP Top 10 vulnerabilities: command injection, XSS, SQL injection, path traversal, etc.
+- Pay special attention to user input handling, shell commands, file path validation, and HTML rendering
+- If you find security issues, fix them before proceeding
+
+### Step 3: Create a PR or File an Issue
+- **If the bug is fixed and security checks pass:**
+  - Create a feature branch, commit your changes, and open a PR against \`main\` that references the issue (${_lastIssueUrl})
+  - PR title should be concise and describe the fix
+  - PR body should include a summary of the bug, the fix, and any security improvements made
+- **If you cannot fix the bug or resolve security issues:**
+  - File a detailed GitHub issue with your findings: what you tried, what failed, relevant code locations, and suggested approaches for someone else to try
+  - Reference the original issue (${_lastIssueUrl})
+
+## Important
+- Always ask the user if you need clarification — don't make assumptions about ambiguous behavior
+- Keep changes minimal and focused on the bug fix + any security issues found
+- Do not refactor unrelated code`;
+
     try {
       const res = await fetch("/api/sessions", {
         method: "POST",
