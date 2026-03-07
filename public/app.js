@@ -4234,27 +4234,29 @@ function _toggleHelpOverlay() {
     _helpOverlay = document.createElement("div");
     _helpOverlay.id = "help-overlay";
     _helpOverlay.className = "command-palette-overlay";
+    const K = (key, desc) => `<kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">${key}</kbd><span>${desc}</span>`;
     _helpOverlay.innerHTML = `
       <div class="command-palette" style="max-width:480px">
         <div style="padding:20px 24px 8px;font-size:16px;font-weight:600">Keyboard Shortcuts</div>
         <div style="padding:8px 24px 20px;font-size:13px;line-height:2.2">
           <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center">
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Cmd+K</kbd><span>Command Palette</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">N</kbd><span>New Agent</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">T</kbd><span>Terminal</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">F</kbd><span>Files</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">S</kbd><span>Settings</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">B</kbd><span>Bookmarks</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">D</kbd><span>Todos</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">L</kbd><span>Activity Timeline</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">C</kbd><span>CEO Prompt</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">R</kbd><span>Restart</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">!</kbd><span>Bug Report</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">/</kbd><span>Focus First Card</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">1-9</kbd><span>Focus Card N</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">?</kbd><span>This Help</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Esc</kbd><span>Close / Back</span>
+            ${K("Cmd+K", "Command Palette")}
+            ${K("Cmd+F", "Search Agent Output")}
+            ${K("N", "New Agent")}
+            ${K("T", "Terminal")}
+            ${K("F", "Files")}
+            ${K("S", "Settings")}
+            ${K("B", "Bookmarks")}
+            ${K("D", "Todos")}
+            ${K("G", "Dependency Graph")}
+            ${K("L", "Activity Timeline")}
+            ${K("C", "CEO Prompt")}
+            ${K("R", "Restart")}
+            ${K("!", "Bug Report")}
+            ${K("/", "Focus First Card")}
+            ${K("1-9", "Focus Card N")}
+            ${K("?", "This Help")}
+            ${K("Esc", "Close / Back")}
           </div>
         </div>
       </div>
