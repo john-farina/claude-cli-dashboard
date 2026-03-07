@@ -977,6 +977,10 @@ function connect() {
         agent.terminal._wheelGraceUntil = Date.now() + 1500;
       }
       updateTerminal(agent.terminal, msg.lines);
+      // Forward output to split view if open
+      if (typeof SplitView !== "undefined" && SplitView.isOpen()) {
+        SplitView.onOutput(msg.session, agent.terminal.innerHTML);
+      }
       // Track that this agent has received its first output (for page loader)
       if (isFirstContent && !_loaderDismissed) {
         _agentsWithContent.add(msg.session);
@@ -4232,8 +4236,13 @@ document.addEventListener("keydown", (e) => {
   const bugSuccessOverlay = document.getElementById("bug-success-overlay");
   const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) || (_diffOverlay && !_diffOverlay.classList.contains("hidden")) || (bugReportOverlay && !bugReportOverlay.classList.contains("hidden")) || (bugSuccessOverlay && !bugSuccessOverlay.classList.contains("hidden"));
 
-  // Escape: layered dismiss (fullscreen → modals → file editor → files panel → shell → agent tmux)
+  // Escape: layered dismiss (split view → fullscreen → modals → file editor → files panel → shell → agent tmux)
   if (e.key === "Escape") {
+    if (typeof SplitView !== "undefined" && SplitView.isOpen()) {
+      e.preventDefault();
+      SplitView.close();
+      return;
+    }
     const fullscreenCard = document.querySelector(".agent-card.fullscreen");
     if (fullscreenCard) {
       e.preventDefault();
@@ -4451,6 +4460,14 @@ loadSlashCommands();
 startDocPolling();
 startTodoRefsPolling();
 if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
+if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
+  CommandPalette.registerAction({
+    id: "split-view", category: "Views", label: "Split View",
+    keywords: "split side by side compare two agents",
+    icon: "&#9646;",
+    handler: () => SplitView.promptAndOpen(),
+  });
+}
 
 // --- Page loader: wait for ALL agents to have terminal content before revealing ---
 let _expectedAgentCount = 0;
