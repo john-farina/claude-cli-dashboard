@@ -2591,12 +2591,15 @@ app.post("/api/screenshot", (req, res) => {
   fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
   // screencapture -i: interactive selection mode (user drags to select area)
   // Returns exit code 1 if user cancels (presses Escape)
-  execFile("screencapture", ["-i", screenshotPath], { timeout: 120000 }, (err) => {
-    if (err || !fs.existsSync(screenshotPath)) {
-      return res.json({ ok: false, cancelled: true });
-    }
-    res.json({ ok: true, path: screenshotPath });
-  });
+  // Delay briefly so the bug-report modal finishes hiding before screencapture starts
+  setTimeout(() => {
+    execFile("screencapture", ["-i", screenshotPath], { timeout: 120000 }, (err) => {
+      if (err || !fs.existsSync(screenshotPath)) {
+        return res.json({ ok: false, cancelled: true });
+      }
+      res.json({ ok: true, path: screenshotPath });
+    });
+  }, 300);
 });
 
 // --- Native app rebuild ---
