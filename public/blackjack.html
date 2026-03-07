@@ -40,15 +40,15 @@ body {
   z-index: 0;
 }
 
-/* Table arc — the semicircular betting area outline */
+/* Table arc — subtle semicircular line like a real table */
 #table::after {
   content: '';
   position: absolute;
-  bottom: 35%;
-  left: 10%;
-  right: 10%;
-  height: 50%;
-  border: 2px solid rgba(201,168,76,0.2);
+  bottom: 28%;
+  left: 20%;
+  right: 20%;
+  height: 22%;
+  border: 1px solid rgba(201,168,76,0.12);
   border-bottom: none;
   border-radius: 50% 50% 0 0 / 100% 100% 0 0;
   pointer-events: none;
@@ -59,29 +59,29 @@ body {
 .table-text {
   position: absolute;
   width: 100%;
-  text-align: center;
   pointer-events: none;
   z-index: 0;
 }
 .table-text-top {
   position: absolute;
-  top: 38%;
-  left: 50%;
-  transform: translateX(-50%);
-  font-size: 14px;
-  letter-spacing: 4px;
-  color: rgba(201,168,76,0.2);
-  text-transform: uppercase;
-  font-family: Georgia, serif;
-}
-.table-text-bottom {
-  position: absolute;
-  top: 43%;
+  bottom: 50%;
   left: 50%;
   transform: translateX(-50%);
   font-size: 11px;
   letter-spacing: 3px;
-  color: rgba(201,168,76,0.15);
+  color: rgba(201,168,76,0.12);
+  text-transform: uppercase;
+  font-family: Georgia, serif;
+  white-space: nowrap;
+}
+.table-text-bottom {
+  position: absolute;
+  bottom: 47%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: rgba(201,168,76,0.1);
   text-transform: uppercase;
   font-family: Georgia, serif;
   white-space: nowrap;
