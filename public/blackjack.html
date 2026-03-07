@@ -293,15 +293,17 @@ body {
 
 #chip-stack {
   display: flex;
-  flex-direction: column-reverse;
   align-items: center;
-  min-height: 30px;
+  justify-content: center;
+  min-height: 48px;
   position: relative;
+  width: 120px;
+  height: 60px;
 }
 
 .bet-chip {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -310,10 +312,10 @@ body {
   font-weight: bold;
   color: #fff;
   border: 3px dashed rgba(255,255,255,0.5);
-  margin-top: -20px;
   text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+  position: absolute;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
 }
-.bet-chip:first-child { margin-top: 0; }
 
 #chip-rack {
   display: flex;
@@ -552,13 +554,13 @@ window.addEventListener('message', (e) => {
     bankrollConfirmed = true;
     updateBankrollDisplay();
   } else if (msg && msg.type === 'bankroll-wager-result') {
-    if (msg.success) {
-      bankroll = msg.newBalance;
+    if (msg.success && typeof msg.balance === 'number') {
+      bankroll = msg.balance;
       updateBankrollDisplay();
     }
   } else if (msg && msg.type === 'bankroll-win-result') {
-    if (msg.success) {
-      bankroll = msg.newBalance;
+    if (typeof msg.balance === 'number') {
+      bankroll = msg.balance;
       updateBankrollDisplay();
     }
   }
@@ -681,53 +683,77 @@ function createCardElement(card, faceDown) {
   return wrapper;
 }
 
-function renderDealerCards(stagger) {
+function renderDealerCards() {
   const container = document.getElementById('dealer-cards');
-  container.innerHTML = '';
-  dealerCards.forEach((card, i) => {
+  const existing = container.querySelectorAll('.card-wrapper').length;
+
+  // Only add cards that aren't rendered yet
+  for (let i = existing; i < dealerCards.length; i++) {
     const faceDown = (i === 1 && !dealerHoleRevealed);
-    const el = createCardElement(card, faceDown);
+    const el = createCardElement(dealerCards[i], faceDown);
     container.appendChild(el);
-    el._animateIn(stagger ? i * 200 : 0);
-  });
+    el._animateIn(0);
+  }
+
+  // Handle hole card flip
+  if (dealerHoleRevealed && container.children.length >= 2) {
+    const holeCard = container.children[1];
+    const inner = holeCard.querySelector('.card-inner');
+    if (inner && !inner.classList.contains('flipped')) {
+      inner.classList.add('flipped');
+    }
+  }
 
   const totalEl = document.getElementById('dealer-total');
   if (dealerHoleRevealed) {
     totalEl.textContent = handValue(dealerCards);
   } else if (dealerCards.length > 0) {
-    // Show just first card value
     totalEl.textContent = handValue([dealerCards[0]]);
   } else {
     totalEl.textContent = '';
   }
 }
 
-function renderPlayerHands() {
+function clearDealerCards() {
+  document.getElementById('dealer-cards').innerHTML = '';
+  document.getElementById('dealer-total').textContent = '';
+}
+
+function renderPlayerHands(forceRedraw) {
   const container = document.getElementById('player-hands');
-  container.innerHTML = '';
   const totalEl = document.getElementById('player-total');
 
   if (playerHands.length === 0) {
+    container.innerHTML = '';
     totalEl.textContent = '';
     return;
   }
 
-  if (playerHands.length === 1) {
+  if (playerHands.length === 1 && !forceRedraw) {
     const hand = playerHands[0];
-    const row = document.createElement('div');
-    row.className = 'cards-row';
-    hand.cards.forEach((c, i) => {
-      const el = createCardElement(c, false);
+    // Ensure there's a cards-row
+    let row = container.querySelector('.cards-row');
+    if (!row) {
+      container.innerHTML = '';
+      row = document.createElement('div');
+      row.className = 'cards-row';
+      container.appendChild(row);
+    }
+    // Only add new cards
+    const existing = row.querySelectorAll('.card-wrapper').length;
+    for (let i = existing; i < hand.cards.length; i++) {
+      const el = createCardElement(hand.cards[i], false);
       row.appendChild(el);
-      el._animateIn(i * 200);
-    });
-    container.appendChild(row);
+      el._animateIn(0);
+    }
     const v = handValue(hand.cards);
     let label = v.toString();
     if (isSoft(hand.cards) && v < 21) label = `Soft ${v}`;
     if (hand.result) label += ` - ${hand.result}`;
     totalEl.textContent = label;
   } else {
+    // Split hands — full redraw (less frequent)
+    container.innerHTML = '';
     totalEl.textContent = '';
     playerHands.forEach((hand, idx) => {
       const splitDiv = document.createElement('div');
@@ -735,7 +761,7 @@ function renderPlayerHands() {
 
       const row = document.createElement('div');
       row.className = 'cards-row';
-      hand.cards.forEach(c => row.appendChild(createCardElement(c, false)));
+      hand.cards.forEach(c => { const el = createCardElement(c, false); row.appendChild(el); el._animateIn(0); });
       splitDiv.appendChild(row);
 
       const info = document.createElement('div');
@@ -773,10 +799,14 @@ function renderChipRack() {
 function renderBetStack() {
   const stack = document.getElementById('chip-stack');
   stack.innerHTML = '';
-  betChips.forEach(d => {
+  // Show max 8 chips visually, stacked with slight vertical offset
+  const shown = betChips.slice(-8);
+  shown.forEach((d, i) => {
     const chip = document.createElement('div');
     chip.className = `bet-chip ${CHIP_CLASSES[d]}`;
     chip.textContent = CHIP_LABELS[d];
+    chip.style.bottom = (i * 4) + 'px';
+    chip.style.zIndex = i;
     stack.appendChild(chip);
   });
   document.getElementById('bet-amount').textContent = `$${currentBet.toLocaleString('en-US')}`;
@@ -898,6 +928,9 @@ function deal() {
   updateBankrollDisplay();
 
   clearResult();
+  clearDealerCards();
+  document.getElementById('player-hands').innerHTML = '';
+  document.getElementById('player-total').textContent = '';
   dealerHoleRevealed = false;
   insuranceBet = 0;
 
