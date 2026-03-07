@@ -34,7 +34,7 @@
     border: 2px solid #0f3460;
     border-radius: 8px;
     padding: 10px;
-    backdrop-filter: blur(4px);
+    /* backdrop-filter removed for perf */
     transition: border-color 0.3s, box-shadow 0.3s;
   }
   .panel-box h3 {
@@ -97,7 +97,9 @@
     position: fixed; top: 0; left: 0;
     width: 100vw; height: 100vh;
     z-index: 0; pointer-events: none;
+    will-change: transform;
   }
+  canvas { will-change: transform; }
   #achievement-toast {
     position: fixed; top: 20px; right: 20px;
     z-index: 20; display: flex; flex-direction: column; gap: 8px; pointer-events: none;
@@ -129,7 +131,7 @@
     letter-spacing: 2px; box-shadow: 0 0 20px rgba(233,69,96,0.5); transition: all 0.2s;
   }
   #game-over button:hover { background: #ff5a75; transform: scale(1.05); }
-  #pause-overlay { background: rgba(0,0,0,0.7); z-index: 5; backdrop-filter: blur(6px); }
+  #pause-overlay { background: rgba(0,0,0,0.7); z-index: 5; /* backdrop-filter removed for perf */ }
   #pause-overlay h1 { font-size: 56px; color: #aaa; }
   @keyframes pulse { to { text-shadow: 0 0 60px #e94560, 0 0 120px #e94560, 0 0 180px #e94560; } }
   #danger-overlay {
@@ -142,7 +144,7 @@
   #mode-select {
     display: flex; position: fixed; inset: 0; z-index: 15;
     justify-content: center; align-items: center; flex-direction: column;
-    background: rgba(0,0,0,0.95); backdrop-filter: blur(10px);
+    background: rgba(0,0,0,0.95); /* backdrop-filter removed for perf */
   }
   #mode-select.hidden { display: none; }
   .mode-btn {
@@ -156,13 +158,13 @@
   #draft-screen {
     position: fixed; inset: 0; z-index: 16;
     display: flex; flex-direction: column; justify-content: center; align-items: center;
-    background: rgba(0,0,0,0.95); backdrop-filter: blur(10px); gap: 16px;
+    background: rgba(0,0,0,0.95); /* backdrop-filter removed for perf */ gap: 16px;
   }
   #draft-screen.hidden { display: none; }
   #wheel-overlay {
     position: fixed; inset: 0; z-index: 14;
     display: flex; flex-direction: column; justify-content: center; align-items: center;
-    background: rgba(0,0,0,0.85); backdrop-filter: blur(8px);
+    background: rgba(0,0,0,0.85); /* backdrop-filter removed for perf */
   }
   #wheel-overlay.hidden { display: none; }
   .draft-heading { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; text-align: center; }
@@ -513,7 +515,7 @@ const PIECES=[
 // ===================== PARTICLE SYSTEM =====================
 let particles=[],textPopups=[],shockwaves=[],afterimages=[],bgStars=[];
 
-function initStars(){bgStars=[];for(let i=0;i<80;i++)bgStars.push({x:Math.random()*bgCanvas.width,y:Math.random()*bgCanvas.height,r:Math.random()*2.5+0.3,speed:Math.random()*0.4+0.05,brightness:Math.random(),phase:Math.random()*6.28,color:['#fff','#aaf','#faf','#aff','#ffa','#faa'][Math.floor(Math.random()*6)]});}
+function initStars(){bgStars=[];for(let i=0;i<40;i++)bgStars.push({x:Math.random()*bgCanvas.width,y:Math.random()*bgCanvas.height,r:Math.random()*2.5+0.3,speed:Math.random()*0.4+0.05,brightness:Math.random(),phase:Math.random()*6.28,color:['#fff','#aaf','#faf','#aff','#ffa','#faa'][Math.floor(Math.random()*6)]});}
 initStars();
 
 function spawn(x,y,color,count,force=3){for(let i=0;i<count;i++){const a=Math.random()*6.28,s=Math.random()*force+1;particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-1,life:1,decay:Math.random()*0.015+0.008,color,size:Math.random()*5+2,gravity:0.08,type:Math.random()>0.3?'circle':'square'});}}
@@ -550,7 +552,7 @@ function addAfterimage(piece){if(!piece)return;afterimages.push({cells:[...piece
 
 function addText(text,x,y,color='#fff',size=28){textPopups.push({text,x,y,color,size,life:1,decay:0.012,vy:-2,scale:0,wobble:0});}
 
-const MAX_PARTICLES=300;
+const MAX_PARTICLES=150;
 function updateParticles(){
   // Cap particles to prevent runaway counts
   if(particles.length>MAX_PARTICLES)particles.length=MAX_PARTICLES;

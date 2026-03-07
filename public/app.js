@@ -4658,6 +4658,8 @@ function _arcadeLaunch(game) {
   _activeGame = { id: game.id, game, iframe };
   if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
   _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+  // Focus iframe once loaded so keyboard controls work immediately
+  iframe.addEventListener("load", () => { iframe.focus(); });
 }
 
 function _showPauseLayer() {
@@ -4684,6 +4686,8 @@ function _showPauseLayer() {
     const headerSpan2 = _arcadeModal.querySelector(".game-modal-header span");
     if (headerSpan2) headerSpan2.textContent = g.name + " — " + g.subtitle;
     try { _activeGame.iframe.contentWindow?.postMessage("ceo-resume", "*"); } catch {}
+    // Focus the iframe so keyboard controls (M for music, P for pause, etc.) work immediately
+    setTimeout(() => { _activeGame?.iframe?.focus(); }, 50);
   });
   _pauseLayer.querySelector(".game-quit-btn").addEventListener("click", () => {
     _pauseLayer.remove();
