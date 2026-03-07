@@ -1149,6 +1149,15 @@ header h1 {
 .branch-info:empty { display: none; }
 .branch-info.worktree { color: var(--green); }
 
+.agent-earnings {
+  color: #4ade80;
+  font-size: 10px;
+  font-weight: 600;
+  margin-left: auto;
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
 .token-usage-wrap {
   display: flex;
   gap: 12px;

@@ -884,6 +884,11 @@ function connect() {
       return;
     }
 
+    if (msg.type === "bankroll-earn") {
+      _handleBankrollEarn(msg);
+      return;
+    }
+
     if (msg.type === "file-overlaps") {
       _updateOverlapBanners(msg.overlaps || []);
       return;
@@ -1318,6 +1323,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       <div class="card-subheader">
         <span class="workdir-link" title="Click to change workspace">${escapeHtml(shortPath(workdir))}</span>
         <span class="branch-info"></span>
+        <span class="agent-earnings" title="Session earnings">$0</span>
       </div>
     </div>
     <div class="terminal">
@@ -4848,11 +4854,13 @@ function _renderWallet(stats) {
       <div class="wallet-section">
         <div class="wallet-section-title">WORK BREAKDOWN</div>
         <div class="wallet-breakdown">
-          <div class="wallet-row"><span>Tasks completed</span><span>${stats.breakdown.taskComplete} &times; $100 = ${fmt(stats.breakdown.taskComplete * 100)}</span></div>
-          <div class="wallet-row"><span>Commits</span><span>${stats.breakdown.commits} &times; $200 = ${fmt(stats.breakdown.commits * 200)}</span></div>
-          <div class="wallet-row"><span>Docs saved</span><span>${stats.breakdown.docSaves} &times; $50 = ${fmt(stats.breakdown.docSaves * 50)}</span></div>
-          <div class="wallet-row"><span>Agent cleanups</span><span>${stats.breakdown.agentCleanups} &times; $25 = ${fmt(stats.breakdown.agentCleanups * 25)}</span></div>
-          <div class="wallet-row"><span>Daily seeds</span><span>${stats.breakdown.dailySeeds} &times; $500 = ${fmt(stats.breakdown.dailySeeds * 500)}</span></div>
+          <div class="wallet-row"><span>Tasks completed</span><span>${stats.breakdown.taskComplete} &times; ~$50-200</span></div>
+          <div class="wallet-row"><span>Commits</span><span>${stats.breakdown.commits} &times; $150</span></div>
+          <div class="wallet-row"><span>File edits</span><span>${stats.breakdown.fileEdits || 0} &times; $25</span></div>
+          <div class="wallet-row"><span>Test passes</span><span>${stats.breakdown.testPasses || 0} &times; ~$10-100</span></div>
+          <div class="wallet-row"><span>Docs saved</span><span>${stats.breakdown.docSaves} &times; $50</span></div>
+          <div class="wallet-row"><span>Agent cleanups</span><span>${stats.breakdown.agentCleanups} &times; $25</span></div>
+          <div class="wallet-row"><span>Daily seeds</span><span>${stats.breakdown.dailySeeds} &times; $500</span></div>
         </div>
       </div>
 
@@ -5046,8 +5054,72 @@ async function _refreshBankroll() {
       _bankrollBalance = data.balance;
       const el = document.getElementById("bankroll-display");
       if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      // Update per-agent earnings on cards
+      if (data.agentEarnings) {
+        for (const [name, earned] of Object.entries(data.agentEarnings)) {
+          _updateCardEarnings(name, earned);
+        }
+      }
     }
   } catch {}
+}
+
+const _EARN_LABELS = {
+  "task-complete": "task",
+  "commit": "commit",
+  "file-edit": "edit",
+  "test-pass": "tests",
+  "doc-save": "doc",
+  "agent-cleanup": "cleanup",
+};
+
+function _handleBankrollEarn(msg) {
+  // Update header balance
+  _bankrollBalance = msg.balance;
+  const el = document.getElementById("bankroll-display");
+  if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+
+  // Update agent card earnings + show floating popup
+  if (msg.agent) {
+    const agent = agents.find(a => a.name === msg.agent);
+    if (agent?.card) {
+      // Update earnings counter
+      const earningsEl = agent.card.querySelector(".agent-earnings");
+      if (earningsEl) {
+        const current = parseInt(earningsEl.textContent.replace(/[$,]/g, "")) || 0;
+        const newTotal = current + msg.amount;
+        earningsEl.textContent = "$" + newTotal.toLocaleString();
+        earningsEl.style.display = "";
+      }
+
+      // Floating "+$X reason" popup
+      const popup = document.createElement("div");
+      popup.className = "earn-popup";
+      const label = _EARN_LABELS[msg.reason] || msg.reason;
+      popup.textContent = "+$" + msg.amount + " " + label;
+      const header = agent.card.querySelector(".card-subheader");
+      if (header) {
+        header.style.position = "relative";
+        popup.style.cssText = "position:absolute;right:8px;top:-2px;color:#4ade80;font-size:11px;font-weight:bold;pointer-events:none;opacity:1;transition:all 0.8s ease;z-index:5;text-shadow:0 0 6px rgba(74,222,128,0.4);";
+        header.appendChild(popup);
+        requestAnimationFrame(() => {
+          popup.style.opacity = "0";
+          popup.style.transform = "translateY(-18px)";
+        });
+        setTimeout(() => popup.remove(), 900);
+      }
+    }
+  }
+}
+
+function _updateCardEarnings(name, earned) {
+  const agent = agents.find(a => a.name === name);
+  if (!agent?.card) return;
+  const el = agent.card.querySelector(".agent-earnings");
+  if (el && earned > 0) {
+    el.textContent = "$" + earned.toLocaleString();
+    el.style.display = "";
+  }
 }
 setInterval(_refreshBankroll, 10000);
 _refreshBankroll();

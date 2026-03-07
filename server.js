@@ -1338,7 +1338,6 @@ app.delete("/api/sessions/:name", async (req, res) => {
   clearWorktreeCache(`${PREFIX}${name}`);
   prevStatuses.delete(`${PREFIX}${name}`);
   _autoRenamed.delete(name);
-  _seenCommits.delete(name);
   _pendingRenamePrefix.delete(name);
   _firingAgents.delete(name);
   fileTracker.removeAgent(name);
@@ -2070,7 +2069,9 @@ app.get("/api/agent-files/:name", (req, res) => {
 });
 
 app.get("/api/bankroll", (req, res) => {
-  res.json(bankroll.getInfo());
+  const info = bankroll.getInfo();
+  info.agentEarnings = bankroll.getAllAgentEarnings();
+  res.json(info);
 });
 
 app.get("/api/bankroll/stats", (req, res) => {
@@ -3120,7 +3121,6 @@ app.post("/api/restart-server", (req, res) => {
 
 const prevOutputs = new Map();
 const prevStatuses = new Map(); // track previous status per session for auto-rename
-const _seenCommits = new Map(); // agent -> Set of commit hashes already rewarded
 const _autoRenamed = new Set(); // sessions already auto-renamed (by original name)
 const _pendingAutoRename = new Set(); // agents queued for rename on next idle (explicit user request)
 const _firingAgents = new Set(); // agents being fired — hidden from UI, running in background
@@ -3623,16 +3623,14 @@ async function broadcastOutputs() {
         const prevStatus = prevStatuses.get(session);
         prevStatuses.set(session, status);
 
-        // Bankroll: mark working start
+        // Bankroll: smart output-based work detection
+        let statusTransition = null;
         if (status === "working" && prevStatus !== "working") {
-          console.log(`[bankroll-trigger] ${name}: ${prevStatus} -> working (timer started)`);
-          bankroll.markWorking(name);
+          statusTransition = "work-start";
+        } else if (prevStatus === "working" && status !== "working") {
+          statusTransition = "task-complete";
         }
-        // Bankroll: earn on task complete (working -> not working)
-        if (prevStatus === "working" && status !== "working") {
-          console.log(`[bankroll-trigger] ${name}: working -> ${status} (task-complete attempt)`);
-          bankroll.earn(100, "task-complete", name);
-        }
+        bankroll.detectWork(name, output, statusTransition);
 
         // Track status changes for activity timeline
         if (prevStatus && prevStatus !== status) {
@@ -3655,20 +3653,7 @@ async function broadcastOutputs() {
           }
         }
 
-        // Bankroll: detect commits in output (dedupe by hash)
-        const commitMatch = output.match(/\[[\w\s-]+\s+([0-9a-f]{7,10})\]/g);
-        if (commitMatch) {
-          if (!_seenCommits.has(name)) _seenCommits.set(name, new Set());
-          const seen = _seenCommits.get(name);
-          for (const m of commitMatch) {
-            const hash = m.match(/([0-9a-f]{7,10})\]/)?.[1];
-            if (hash && !seen.has(hash)) {
-              seen.add(hash);
-              console.log(`[bankroll-trigger] commit detected: ${hash} from ${name}`);
-              bankroll.earn(200, "commit", name);
-            }
-          }
-        }
+        // (commit detection now handled by bankroll.detectWork above)
 
         const liveCwd = await getEffectiveCwdAsync(session, output);
         const git = await getCachedGitInfo(liveCwd);
@@ -4108,6 +4093,10 @@ server.listen(PORT, BIND_HOST, () => {
   restoreSessions(detectClaudeSessionIdForAgent);
   _tokenUsageTotals = loadTokenUsage();
   bankroll.checkDailySeed();
+  // Broadcast earn events to all clients in real-time
+  bankroll.onEarn((amount, reason, agentName) => {
+    _broadcastWs({ type: "bankroll-earn", amount, reason, agent: agentName || null, balance: bankroll.getBalance() });
+  });
   // Auto-rebuild native app if binary is stale (main.swift changed since last compile)
   {
     const nativeAppDir = getNativeAppDir();
