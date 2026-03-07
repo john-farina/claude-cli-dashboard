@@ -4167,7 +4167,7 @@ function _toggleHelpOverlay() {
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">!</kbd><span>Bug Report</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">/</kbd><span>Focus First Card</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">1-9</kbd><span>Focus Card N</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Cmd+Shift+J/K</kbd><span>Navigate Cards</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Cmd+Shift+E/R</kbd><span>Navigate Cards</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">?</kbd><span>This Help</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Esc</kbd><span>Close / Back</span>
           </div>
@@ -4350,14 +4350,14 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  // Cmd+Shift+J / Cmd+Shift+K: navigate between agent cards (works even when typing)
-  if (e.metaKey && e.shiftKey && (e.code === "KeyJ" || e.code === "KeyK")) {
+  // Cmd+Shift+E / Cmd+Shift+R: navigate between agent cards (works even when typing)
+  if (e.metaKey && e.shiftKey && (e.code === "KeyE" || e.code === "KeyR")) {
     e.preventDefault();
     const cards = [...grid.querySelectorAll(".agent-card:not(.minimized)")];
     if (cards.length === 0) return;
     const focused = document.activeElement?.closest(".agent-card");
     let idx = focused ? cards.indexOf(focused) : -1;
-    if (e.code === "KeyJ") {
+    if (e.code === "KeyR") {
       idx = idx < cards.length - 1 ? idx + 1 : 0;
     } else {
       idx = idx > 0 ? idx - 1 : cards.length - 1;
