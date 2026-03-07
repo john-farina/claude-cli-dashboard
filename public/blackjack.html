@@ -20,12 +20,71 @@ body {
 #table {
   width: 100%;
   height: 100%;
-  background: radial-gradient(ellipse at 50% 40%, #1a5c2a 0%, #0d3317 60%, #071a0b 100%);
-  border: 4px solid #3d2b1f;
-  box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+  background:
+    radial-gradient(ellipse at 50% 100%, rgba(0,0,0,0.3) 0%, transparent 70%),
+    radial-gradient(ellipse at 50% 40%, #1a6b2a 0%, #145522 40%, #0d3b18 70%, #071a0b 100%);
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
+}
+
+/* Felt texture overlay */
+#table::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Table arc — the semicircular betting area outline */
+#table::after {
+  content: '';
+  position: absolute;
+  bottom: 35%;
+  left: 10%;
+  right: 10%;
+  height: 50%;
+  border: 2px solid rgba(201,168,76,0.2);
+  border-bottom: none;
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Table text decorations */
+.table-text {
+  position: absolute;
+  width: 100%;
+  text-align: center;
+  pointer-events: none;
+  z-index: 0;
+}
+.table-text-top {
+  position: absolute;
+  top: 38%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 14px;
+  letter-spacing: 4px;
+  color: rgba(201,168,76,0.2);
+  text-transform: uppercase;
+  font-family: Georgia, serif;
+}
+.table-text-bottom {
+  position: absolute;
+  top: 43%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: rgba(201,168,76,0.15);
+  text-transform: uppercase;
+  font-family: Georgia, serif;
+  white-space: nowrap;
 }
 
 /* Top bar */
@@ -36,6 +95,8 @@ body {
   padding: 10px 20px;
   background: rgba(0,0,0,0.3);
   border-bottom: 1px solid rgba(61,43,31,0.6);
+  position: relative;
+  z-index: 1;
 }
 
 #bankroll-display {
@@ -66,6 +127,8 @@ body {
   justify-content: space-between;
   padding: 10px 20px 10px;
   min-height: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Hand areas */
@@ -94,7 +157,7 @@ body {
   gap: 8px;
   justify-content: center;
   flex-wrap: wrap;
-  min-height: 130px;
+  min-height: 150px;
   align-items: center;
 }
 
@@ -122,8 +185,8 @@ body {
 
 /* Cards */
 .card-wrapper {
-  width: 90px;
-  height: 126px;
+  width: 100px;
+  height: 140px;
   perspective: 600px;
   display: inline-block;
   opacity: 0;
@@ -156,8 +219,9 @@ body {
 }
 
 .card-face {
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  background: linear-gradient(135deg, #fefcf5 0%, #f5f0e3 100%);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 0 0 1px rgba(0,0,0,0.06);
+  border-radius: 10px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -170,9 +234,10 @@ body {
   position: absolute;
   top: 5px;
   left: 7px;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: bold;
   line-height: 1;
+  font-family: Georgia, 'Times New Roman', serif;
 }
 .card-suit-tl {
   position: absolute;
@@ -182,27 +247,57 @@ body {
   line-height: 1;
 }
 .card-suit-center {
-  font-size: 36px;
+  font-size: 42px;
   line-height: 1;
+}
+
+.card-rank-br {
+  position: absolute;
+  bottom: 5px;
+  right: 7px;
+  font-size: 18px;
+  font-weight: bold;
+  line-height: 1;
+  transform: rotate(180deg);
+  font-family: Georgia, 'Times New Roman', serif;
+}
+.card-suit-br {
+  position: absolute;
+  bottom: 21px;
+  right: 7px;
+  font-size: 12px;
+  line-height: 1;
+  transform: rotate(180deg);
 }
 
 .card-red { color: #d32f2f; }
 .card-black { color: #1a1a1a; }
 
 .card-back {
-  background: #8b0000;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  background: linear-gradient(135deg, #8b1a1a 0%, #6b0000 50%, #8b1a1a 100%);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
+  border-radius: 10px;
   overflow: hidden;
 }
 .card-back::before {
   content: '';
   position: absolute;
-  inset: 6px;
+  inset: 5px;
   border: 2px solid #c9a84c;
-  border-radius: 4px;
+  border-radius: 6px;
   background:
-    repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(201,168,76,0.15) 8px, rgba(201,168,76,0.15) 9px),
-    repeating-linear-gradient(-45deg, transparent, transparent 8px, rgba(201,168,76,0.15) 8px, rgba(201,168,76,0.15) 9px);
+    repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(201,168,76,0.12) 6px, rgba(201,168,76,0.12) 7px),
+    repeating-linear-gradient(-45deg, transparent, transparent 6px, rgba(201,168,76,0.12) 6px, rgba(201,168,76,0.12) 7px);
+}
+.card-back::after {
+  content: '\2666';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 28px;
+  color: #c9a84c;
+  opacity: 0.5;
 }
 
 /* Result message */
@@ -426,12 +521,17 @@ body {
   right: 16px;
   font-size: 11px;
   color: rgba(224,214,194,0.35);
+  z-index: 1;
 }
 </style>
 </head>
 <body>
 
 <div id="table">
+  <div class="table-text">
+    <span class="table-text-top">BLACKJACK PAYS 3 TO 2</span>
+    <span class="table-text-bottom">DEALER MUST STAND ON ALL 17s</span>
+  </div>
   <div id="top-bar">
     <div id="bankroll-display">BANKROLL: $10,000</div>
     <button id="rules-btn" onclick="toggleRules()">Rules</button>
@@ -665,9 +765,19 @@ function createCardElement(card, faceDown) {
   suitCenter.className = 'card-suit-center ' + cc;
   suitCenter.textContent = sym;
 
+  const rankBR = document.createElement('div');
+  rankBR.className = 'card-rank-br ' + cc;
+  rankBR.textContent = card.rank;
+
+  const suitBR = document.createElement('div');
+  suitBR.className = 'card-suit-br ' + cc;
+  suitBR.textContent = sym;
+
   face.appendChild(rankTL);
   face.appendChild(suitTL);
   face.appendChild(suitCenter);
+  face.appendChild(rankBR);
+  face.appendChild(suitBR);
 
   inner.appendChild(back);
   inner.appendChild(face);
