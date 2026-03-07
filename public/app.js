@@ -4801,7 +4801,9 @@ function _renderWallet(stats) {
   const ltColor = stats.lifetimePnl >= 0 ? "#4ade80" : "#ef4444";
   const ltSign = stats.lifetimePnl >= 0 ? "+" : "";
   const fmt = (n) => "$" + Math.abs(n).toLocaleString("en-US");
-  const capPct = stats.dailyCap > 0 ? Math.round((stats.dailyEarned / stats.dailyCap) * 100) : 0;
+  // Today's earnings from the chart data
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayEarned = (stats.earningsByDay || {})[todayStr] || 0;
 
   // Recent earnings by day (last 7 days)
   const days = Object.entries(stats.earningsByDay || {}).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
@@ -4864,10 +4866,7 @@ function _renderWallet(stats) {
       </div>
 
       <div class="wallet-section">
-        <div class="wallet-section-title">DAILY EARNINGS (${capPct}% of $${stats.dailyCap.toLocaleString()} cap)</div>
-        <div class="wallet-cap-bar">
-          <div class="wallet-cap-fill" style="width:${Math.min(100, capPct)}%"></div>
-        </div>
+        <div class="wallet-section-title">DAILY EARNINGS — $${todayEarned.toLocaleString()} today</div>
         ${days.length > 0 ? '<div class="wallet-chart">' + days.map(([day, amount]) => {
           const pct = Math.max(4, (amount / maxDay) * 100);
           const label = day.slice(5); // MM-DD
