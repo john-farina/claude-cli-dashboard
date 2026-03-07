@@ -1006,6 +1006,12 @@ function connect() {
         // Also update embedded terminal header if open
         updateTerminalHeader(agent.card, undefined, msg.branch, msg.isWorktree, undefined);
       }
+      // Quick diff badge
+      if (msg.diffFiles && msg.diffFiles.length > 0) {
+        _showDiffBadge(msg.session, msg.diffFiles);
+      } else if (msg.status === "working") {
+        _clearDiffBadge(msg.session);
+      }
     }
 
     // Renaming indicator — shown as status badge with spinner
@@ -3644,6 +3650,32 @@ function updateBranchDisplay(card, branch, isWorktree) {
   if (!branch) { el.textContent = ""; el.className = "branch-info"; return; }
   el.textContent = isWorktree ? `worktree: ${branch}` : branch;
   el.className = isWorktree ? "branch-info worktree" : "branch-info";
+}
+
+// --- Quick Diff Badge ---
+
+function _showDiffBadge(agentName, files) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  let badge = agent.card.querySelector(".diff-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "diff-badge";
+    const headerLeft = agent.card.querySelector(".card-header-left");
+    if (headerLeft) headerLeft.appendChild(badge);
+  }
+  badge.textContent = files.length + " file" + (files.length > 1 ? "s" : "") + " changed";
+  badge.title = files.map(f => f.file).join("\n");
+  badge.onclick = () => {
+    if (typeof OpsPanel !== "undefined") OpsPanel.open("diffs", agentName);
+  };
+}
+
+function _clearDiffBadge(agentName) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  const badge = agent.card.querySelector(".diff-badge");
+  if (badge) badge.remove();
 }
 
 // --- Token Usage Display ---

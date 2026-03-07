@@ -3423,6 +3423,16 @@ async function broadcastOutputs() {
 
         const liveCwd = await getEffectiveCwdAsync(session, output);
         const git = await getCachedGitInfo(liveCwd);
+
+        // Capture diff stat when agent finishes working
+        let diffFiles = null;
+        if (prevStatus === "working" && status !== "working") {
+          try {
+            const stat = diffService.getDiffStat(liveCwd || meta[name]?.workdir, git?.branch);
+            if (stat && stat.files.length > 0) diffFiles = stat.files;
+          } catch {}
+        }
+
         const message = JSON.stringify({
           type: "output",
           session: name,
@@ -3433,6 +3443,7 @@ async function broadcastOutputs() {
           workdir: liveCwd || null,
           branch: git?.branch || null,
           isWorktree: git?.isWorktree || false,
+          diffFiles,
         });
         wss.clients.forEach((client) => {
           if (client.readyState === 1) client.send(message);
