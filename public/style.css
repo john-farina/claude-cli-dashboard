@@ -6517,7 +6517,7 @@ header .btn-primary kbd {
 /* --- Workflow Canvas (replaces Dependency Graph Panel) --- */
 .workflow-canvas {
   position: fixed; top: 56px; right: 0; bottom: 48px;
-  width: 600px; max-width: 90vw; z-index: 800;
+  width: 750px; max-width: 90vw; z-index: 800;
   background: var(--surface); border-left: 1px solid var(--border, #333);
   transform: translateX(100%); transition: transform 0.2s ease;
   display: flex; flex-direction: column;

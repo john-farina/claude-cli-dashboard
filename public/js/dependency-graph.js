@@ -173,32 +173,77 @@
   }
 
   function _autoLayout() {
-    var existingNodes = _canvasNodes.filter(function(n) { return n.type === "existing"; });
-    var newNodes = _canvasNodes.filter(function(n) { return n.type === "new"; });
-
     var svgRect = _svg ? _svg.getBoundingClientRect() : { width: 560, height: 400 };
     var w = svgRect.width || 560;
     var h = svgRect.height || 400;
+    var nodeW = 150, nodeH = 50, padX = 40, padY = 30;
 
-    // Layout existing nodes on the left side in a column
-    var startX = 100;
-    var startY = 60;
-    var ySpacing = 70;
+    // Build adjacency from chains
+    var outgoing = {}; // source -> [target ids]
+    var incoming = {}; // target -> [source ids]
+    _canvasNodes.forEach(function(n) { outgoing[n.id] = []; incoming[n.id] = []; });
 
-    for (var i = 0; i < existingNodes.length; i++) {
-      if (existingNodes[i].x === 0 && existingNodes[i].y === 0) {
-        existingNodes[i].x = startX;
-        existingNodes[i].y = startY + i * ySpacing;
+    _canvasNodes.forEach(function(n) {
+      var agent = (typeof agents !== "undefined") ? agents.get(n.id) : null;
+      var chain = (agent && agent.chain) ? (Array.isArray(agent.chain) ? agent.chain : [agent.chain]) : [];
+      chain.forEach(function(t) {
+        var targetNode = _canvasNodes.find(function(cn) { return cn.id === t.next; });
+        if (targetNode) {
+          outgoing[n.id].push(t.next);
+          incoming[t.next].push(n.id);
+        }
+      });
+    });
+
+    // Also include canvas connections for new nodes
+    _canvasConnections.forEach(function(c) {
+      if (outgoing[c.fromId] && incoming[c.toId]) {
+        if (outgoing[c.fromId].indexOf(c.toId) === -1) outgoing[c.fromId].push(c.toId);
+        if (incoming[c.toId].indexOf(c.fromId) === -1) incoming[c.toId].push(c.fromId);
       }
+    });
+
+    // Topological sort into layers (BFS from roots)
+    var layers = [];
+    var assigned = {};
+    var roots = _canvasNodes.filter(function(n) { return incoming[n.id].length === 0; });
+    if (roots.length === 0) roots = _canvasNodes.slice(0, 1); // fallback
+
+    var queue = roots.map(function(n) { return { id: n.id, layer: 0 }; });
+    while (queue.length > 0) {
+      var item = queue.shift();
+      if (assigned[item.id] !== undefined) continue;
+      assigned[item.id] = item.layer;
+      if (!layers[item.layer]) layers[item.layer] = [];
+      layers[item.layer].push(item.id);
+      (outgoing[item.id] || []).forEach(function(tid) {
+        if (assigned[tid] === undefined) queue.push({ id: tid, layer: item.layer + 1 });
+      });
     }
 
-    // Layout new nodes to the right
-    var newStartX = 340;
-    for (var j = 0; j < newNodes.length; j++) {
-      if (newNodes[j].x === 0 && newNodes[j].y === 0) {
-        newNodes[j].x = newStartX;
-        newNodes[j].y = startY + j * ySpacing;
+    // Assign unconnected nodes to layer 0
+    _canvasNodes.forEach(function(n) {
+      if (assigned[n.id] === undefined) {
+        assigned[n.id] = 0;
+        if (!layers[0]) layers[0] = [];
+        layers[0].push(n.id);
       }
+    });
+
+    // Position: layers left-to-right, nodes within layer top-to-bottom
+    var layerX = padX + 30;
+    for (var l = 0; l < layers.length; l++) {
+      var layerNodes = layers[l];
+      var totalHeight = layerNodes.length * nodeH + (layerNodes.length - 1) * padY;
+      var startY = Math.max(40, (h - totalHeight) / 2);
+      for (var n = 0; n < layerNodes.length; n++) {
+        var node = _canvasNodes.find(function(cn) { return cn.id === layerNodes[n]; });
+        if (node && node.x === 0 && node.y === 0) {
+          node.x = layerX;
+          node.y = startY + n * (nodeH + padY);
+        }
+      }
+      layerX += nodeW + padX + 40;
     }
   }
 
