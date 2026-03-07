@@ -6526,7 +6526,8 @@ header .btn-primary kbd {
 
 /* --- Activity Timeline --- */
 .activity-timeline-panel {
-  display: none; border-top: 1px solid var(--border, #333);
+  display: none; position: fixed; bottom: 48px; left: 0; right: 0;
+  z-index: 850; border-top: 1px solid var(--border, #333);
   background: var(--surface); max-height: 200px;
 }
 .activity-timeline-panel.visible { display: flex; flex-direction: column; }
