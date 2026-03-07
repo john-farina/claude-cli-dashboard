@@ -4413,6 +4413,16 @@ function setupAutocomplete(input, card) {
 
 document.addEventListener("keydown", (e) => {
   let inInput = e.target.matches("input, textarea, [contenteditable]");
+
+  // Cmd+K / Ctrl+K: Command Palette
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    if (typeof CommandPalette !== "undefined") {
+      CommandPalette.isOpen() ? CommandPalette.close() : CommandPalette.open();
+    }
+    return;
+  }
+
   // Suppress hotkeys while page loader is showing or reload is in flight
   // BUT allow typing in inputs (user may have focus restored before loader finishes)
   if (!_loaderDismissed || _reloadingPage) { if (!inInput) return; }
@@ -4652,6 +4662,7 @@ document.addEventListener("keydown", (e) => {
 loadSlashCommands();
 startDocPolling();
 startTodoRefsPolling();
+if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
 
 // --- Page loader: wait for ALL agents to have terminal content before revealing ---
 let _expectedAgentCount = 0;
