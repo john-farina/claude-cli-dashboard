@@ -6525,6 +6525,7 @@ header .btn-primary kbd {
 }
 .dep-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 .dep-line-red { display: inline-block; width: 16px; height: 2px; background: #ef4444; margin-right: 4px; vertical-align: middle; }
+.dep-line-chain { display: inline-block; width: 16px; height: 2px; background: #c9a84c; margin-right: 4px; vertical-align: middle; border-top: 2px dashed #c9a84c; }
 .dep-graph-empty { padding: 24px 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
 
 /* --- Overlap Warning Banners --- */
@@ -6822,6 +6823,21 @@ header .btn-primary kbd {
   background: rgba(0,0,0,0.2); overflow-x: auto; font-size: 12px;
 }
 .ops-diff-inline .d2h-wrapper { background: transparent !important; }
+.ops-diff-toggle { display: flex; gap: 4px; margin: 4px 0; }
+.ops-diff-toggle-btn {
+  padding: 3px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border, #333);
+  color: var(--text-dim); transition: all 0.15s;
+}
+.ops-diff-toggle-btn.active { background: rgba(201,168,76,0.15); color: var(--accent); border-color: var(--accent); }
+.ops-diff-rendered { padding: 12px; font-size: 13px; line-height: 1.6; }
+.ops-diff-rendered h1, .ops-diff-rendered h2, .ops-diff-rendered h3 { color: var(--text); margin: 12px 0 6px; }
+.ops-diff-rendered p { margin: 6px 0; }
+.ops-diff-rendered code { background: rgba(255,255,255,0.06); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.ops-diff-rendered pre { background: rgba(0,0,0,0.3); padding: 10px; border-radius: 6px; overflow-x: auto; margin: 8px 0; }
+.ops-diff-rendered ul, .ops-diff-rendered ol { padding-left: 20px; }
+.ops-diff-rendered table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.ops-diff-rendered th, .ops-diff-rendered td { border: 1px solid var(--border, #333); padding: 6px 10px; font-size: 12px; }
 .ops-open-editor {
   font-size: 10px; padding: 2px 8px; border-radius: 4px;
   background: rgba(255,255,255,0.06); border: 1px solid var(--border, #333);
@@ -6851,6 +6867,23 @@ header .btn-primary kbd {
 .chain-fields select:focus, .chain-fields textarea:focus {
   outline: none; border-color: var(--accent);
 }
+.chain-add-target-btn {
+  background: rgba(255,255,255,0.04); border: 1px dashed var(--border, #333);
+  color: var(--text-dim); font-size: 11px; padding: 4px 10px; border-radius: 4px;
+  cursor: pointer; margin-top: 4px; transition: all 0.15s;
+}
+.chain-add-target-btn:hover { color: var(--accent); border-color: var(--accent); }
+.chain-target-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 4px;
+}
+.chain-target-label { font-size: 11px; color: var(--accent); font-weight: 600; }
+.chain-remove-target-btn {
+  background: none; border: none; color: var(--text-dim); font-size: 16px;
+  cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.chain-remove-target-btn:hover { color: #ef4444; }
 @keyframes chain-flash {
   0%, 100% { box-shadow: none; }
   50% { box-shadow: 0 0 12px 2px var(--accent); }

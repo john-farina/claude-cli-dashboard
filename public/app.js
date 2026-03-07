@@ -1149,7 +1149,7 @@ function _updateChainIndicator(agentName, chain) {
   const agent = agents.get(agentName);
   if (!agent?.card) return;
   let indicator = agent.card.querySelector(".chain-indicator");
-  if (!chain) {
+  if (!chain || (Array.isArray(chain) && chain.length === 0)) {
     if (indicator) indicator.remove();
     return;
   }
@@ -1159,37 +1159,61 @@ function _updateChainIndicator(agentName, chain) {
     const header = agent.card.querySelector(".card-header-left");
     if (header) header.appendChild(indicator);
   }
-  indicator.innerHTML = `<span class="chain-arrow">\u2192</span> ${escapeHtml(chain.next)}`;
-  indicator.title = `Chain: ${chain.condition}\nPrompt: ${chain.prompt}`;
+  // Support both legacy single object and new array format
+  const targets = Array.isArray(chain) ? chain : [chain];
+  indicator.innerHTML = targets.map(t =>
+    `<span class="chain-arrow">\u2192</span> ${escapeHtml(t.next)}`
+  ).join(' ');
+  indicator.title = targets.map(t => `${t.next}: ${t.condition}\n${t.prompt}`).join('\n---\n');
 }
 
 async function _openChainDialog(agentName) {
   const agent = agents.get(agentName);
   const existing = agent?.chain;
-  const nextAgent = prompt("Chain to agent (name):", existing?.next || "");
-  if (nextAgent === null) return; // cancelled
-  if (!nextAgent) {
-    // Remove chain
-    try {
-      await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, { method: "DELETE" });
-      if (agent) agent.chain = null;
-      _updateChainIndicator(agentName, null);
-    } catch {}
-    return;
+  // Normalize existing to array
+  const existingTargets = existing ? (Array.isArray(existing) ? existing : [existing]) : [];
+
+  // Collect targets in a loop
+  const targets = [];
+  let targetIdx = 0;
+  while (true) {
+    const def = existingTargets[targetIdx] || {};
+    const suffix = targets.length > 0 ? ` (target #${targets.length + 1}, leave empty to finish)` : "";
+    const nextAgent = prompt(`Chain to agent${suffix}:`, def.next || "");
+    if (nextAgent === null) {
+      if (targets.length === 0) return; // cancelled entirely
+      break; // done adding targets
+    }
+    if (!nextAgent) {
+      if (targets.length === 0) {
+        // Remove chain
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, { method: "DELETE" });
+          if (agent) agent.chain = null;
+          _updateChainIndicator(agentName, null);
+        } catch {}
+        return;
+      }
+      break; // done adding targets
+    }
+    const chainPrompt = prompt("Prompt to send (use {branch} and {workdir} as variables):", def.prompt || "");
+    if (!chainPrompt) { if (targets.length === 0) return; break; }
+    const condition = prompt("Condition (always, when-idle, branch-has-changes):", def.condition || "always") || "always";
+    targets.push({ next: nextAgent, prompt: chainPrompt, condition });
+    targetIdx++;
+    if (!confirm("Add another chain target?")) break;
   }
-  const chainPrompt = prompt("Prompt to send (use {branch} and {workdir} as variables):", existing?.prompt || "");
-  if (!chainPrompt) return;
-  const condition = prompt("Condition (always, when-idle, branch-has-changes):", existing?.condition || "always") || "always";
+
+  if (targets.length === 0) return;
   try {
     const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ next: nextAgent, prompt: chainPrompt, condition }),
+      body: JSON.stringify({ targets }),
     });
     if (res.ok) {
-      const chain = { next: nextAgent, prompt: chainPrompt, condition };
-      if (agent) agent.chain = chain;
-      _updateChainIndicator(agentName, chain);
+      if (agent) agent.chain = targets;
+      _updateChainIndicator(agentName, targets);
     }
   } catch (err) {
     console.error("[chain] Failed to set chain:", err);

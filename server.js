@@ -1767,16 +1767,26 @@ app.get("/api/sessions/:name/search", (req, res) => {
 app.post("/api/sessions/:name/chain", (req, res) => {
   const { name } = req.params;
   if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
-  const { next, prompt, condition } = req.body || {};
-  if (!next || !prompt) return res.status(400).json({ error: "next and prompt required" });
+  const body = req.body || {};
   const validConditions = ["always", "when-idle", "branch-has-changes"];
   const meta = loadSessionsMeta();
   if (!meta[name]) return res.status(404).json({ error: "agent not found" });
-  meta[name].chain = {
-    next: next,
-    prompt: prompt,
-    condition: validConditions.includes(condition) ? condition : "always",
-  };
+
+  // Support both legacy single-target { next, prompt, condition } and new multi-target { targets: [...] }
+  let targets;
+  if (Array.isArray(body.targets) && body.targets.length > 0) {
+    targets = body.targets;
+  } else if (body.next && body.prompt) {
+    targets = [{ next: body.next, prompt: body.prompt, condition: body.condition }];
+  } else {
+    return res.status(400).json({ error: "targets array or next+prompt required" });
+  }
+
+  meta[name].chain = targets.map(t => ({
+    next: t.next,
+    prompt: t.prompt || "",
+    condition: validConditions.includes(t.condition) ? t.condition : "always",
+  }));
   saveSessionsMeta(meta);
   res.json({ success: true });
 });
@@ -3381,44 +3391,49 @@ async function tryAutoRename(name, output) {
 const _chainExecuted = new Set(); // track chains already fired to prevent re-trigger
 
 function _executeChain(fromAgent, chain, workdir, branch) {
-  const { next, prompt, condition } = chain;
-  const chainKey = `${fromAgent}->${next}`;
+  // Support both legacy single object { next, prompt, condition } and new array format
+  const targets = Array.isArray(chain) ? chain : [chain];
 
-  // Prevent duplicate execution within same idle cycle
-  if (_chainExecuted.has(chainKey)) return;
-  _chainExecuted.add(chainKey);
-  setTimeout(() => _chainExecuted.delete(chainKey), 30000); // allow re-trigger after 30s
+  for (const target of targets) {
+    const { next, prompt, condition } = target;
+    const chainKey = `${fromAgent}->${next}`;
 
-  // Check condition
-  if (condition === "branch-has-changes") {
-    try {
-      const stat = diffService.getDiffStat(workdir, branch);
-      if (!stat || stat.files.length === 0) {
-        console.log(`[chain] ${fromAgent} → ${next}: skipped (no changes)`);
-        return;
+    // Prevent duplicate execution within same idle cycle
+    if (_chainExecuted.has(chainKey)) continue;
+    _chainExecuted.add(chainKey);
+    setTimeout(() => _chainExecuted.delete(chainKey), 30000); // allow re-trigger after 30s
+
+    // Check condition
+    if (condition === "branch-has-changes") {
+      try {
+        const stat = diffService.getDiffStat(workdir, branch);
+        if (!stat || stat.files.length === 0) {
+          console.log(`[chain] ${fromAgent} → ${next}: skipped (no changes)`);
+          continue;
+        }
+      } catch {
+        console.log(`[chain] ${fromAgent} → ${next}: skipped (diff check failed)`);
+        continue;
       }
-    } catch {
-      console.log(`[chain] ${fromAgent} → ${next}: skipped (diff check failed)`);
-      return;
     }
-  }
 
-  // Variable substitution in prompt
-  let finalPrompt = prompt
-    .replace(/\{branch\}/g, branch || "main")
-    .replace(/\{workdir\}/g, workdir || "");
+    // Variable substitution in prompt
+    let finalPrompt = prompt
+      .replace(/\{branch\}/g, branch || "main")
+      .replace(/\{workdir\}/g, workdir || "");
 
-  // Send to existing agent
-  const session = PREFIX + next;
-  const sessions = listTmuxSessions();
-  if (sessions.includes(session)) {
-    console.log(`[chain] ${fromAgent} → ${next}: sending prompt`);
-    sendKeys(session, finalPrompt);
-    scheduleForceUpdate();
-    // Broadcast chain-fired event
-    _broadcastWs({ type: "chain-fired", from: fromAgent, to: next, prompt: finalPrompt });
-  } else {
-    console.log(`[chain] ${fromAgent} → ${next}: agent not found, skipping`);
+    // Send to existing agent
+    const session = PREFIX + next;
+    const sessions = listTmuxSessions();
+    if (sessions.includes(session)) {
+      console.log(`[chain] ${fromAgent} → ${next}: sending prompt`);
+      sendKeys(session, finalPrompt);
+      scheduleForceUpdate();
+      // Broadcast chain-fired event
+      _broadcastWs({ type: "chain-fired", from: fromAgent, to: next, prompt: finalPrompt });
+    } else {
+      console.log(`[chain] ${fromAgent} → ${next}: agent not found, skipping`);
+    }
   }
 }
 

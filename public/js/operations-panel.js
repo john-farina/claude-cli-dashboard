@@ -373,14 +373,48 @@
         fetch("/api/sessions/" + encodeURIComponent(agentName) + "/full-diff?file=" + encodeURIComponent(file))
           .then(function(r) { return r.ok ? r.text() : Promise.reject(new Error("Not found")); })
           .then(function(diffText) {
+            var diffContainer = document.createElement("div");
+            diffContainer.className = "ops-diff-content";
             if (typeof Diff2Html !== "undefined") {
-              container.innerHTML = Diff2Html.html(diffText, {
+              diffContainer.innerHTML = Diff2Html.html(diffText, {
                 drawFileList: false,
                 matching: "lines",
                 outputFormat: "line-by-line"
               });
             } else {
-              container.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px">' + _escHtml(diffText) + '</pre>';
+              diffContainer.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px">' + _escHtml(diffText) + '</pre>';
+            }
+            container.innerHTML = "";
+            // If it's a markdown file, add rendered view toggle
+            if (file.endsWith(".md")) {
+              var toggleDiv = document.createElement("div");
+              toggleDiv.className = "ops-diff-toggle";
+              toggleDiv.innerHTML = '<button class="ops-diff-toggle-btn active" data-view="diff">Diff</button><button class="ops-diff-toggle-btn" data-view="rendered">Rendered</button>';
+              // Parse added lines from unified diff to get current content
+              var addedLines = diffText.split("\n")
+                .filter(function(l) { return l.startsWith("+") && !l.startsWith("+++"); })
+                .map(function(l) { return l.slice(1); })
+                .join("\n");
+              var renderedDiv = document.createElement("div");
+              renderedDiv.className = "ops-diff-rendered hidden";
+              if (typeof marked !== "undefined") {
+                renderedDiv.innerHTML = marked.parse(addedLines);
+              } else {
+                renderedDiv.innerHTML = '<pre style="white-space:pre-wrap;font-size:12px">' + _escHtml(addedLines) + '</pre>';
+              }
+              toggleDiv.addEventListener("click", function(e) {
+                var btn = e.target.closest(".ops-diff-toggle-btn");
+                if (!btn) return;
+                var view = btn.dataset.view;
+                toggleDiv.querySelectorAll(".ops-diff-toggle-btn").forEach(function(b) { b.classList.toggle("active", b === btn); });
+                diffContainer.classList.toggle("hidden", view === "rendered");
+                renderedDiv.classList.toggle("hidden", view === "diff");
+              });
+              container.appendChild(toggleDiv);
+              container.appendChild(diffContainer);
+              container.appendChild(renderedDiv);
+            } else {
+              container.appendChild(diffContainer);
             }
           })
           .catch(function(err) {

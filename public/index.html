@@ -204,23 +204,26 @@
         </label>
         <details class="chain-config" id="chain-config">
           <summary>Chain after completion</summary>
-          <div class="chain-fields">
-            <label>Then send to agent:
-              <select class="chain-next-select" id="chain-next-select">
-                <option value="">None</option>
-              </select>
-            </label>
-            <label>With prompt:
-              <textarea class="chain-prompt" id="chain-prompt" placeholder="Review changes on {branch}..." rows="2"></textarea>
-            </label>
-            <label>Condition:
-              <select class="chain-condition" id="chain-condition">
-                <option value="always">Always</option>
-                <option value="when-idle">When idle</option>
-                <option value="branch-has-changes">When branch has changes</option>
-              </select>
-            </label>
+          <div id="chain-targets-container">
+            <div class="chain-fields" data-chain-target="0">
+              <label>Then send to agent:
+                <select class="chain-next-select" id="chain-next-select">
+                  <option value="">None</option>
+                </select>
+              </label>
+              <label>With prompt:
+                <textarea class="chain-prompt" id="chain-prompt" placeholder="Review changes on {branch}..." rows="2"></textarea>
+              </label>
+              <label>Condition:
+                <select class="chain-condition" id="chain-condition">
+                  <option value="always">Always</option>
+                  <option value="when-idle">When idle</option>
+                  <option value="branch-has-changes">When branch has changes</option>
+                </select>
+              </label>
+            </div>
           </div>
+          <button type="button" class="chain-add-target-btn" id="chain-add-target-btn">+ Add another target</button>
         </details>
         <div class="modal-actions">
           <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>

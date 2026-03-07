@@ -587,18 +587,63 @@ async function fetchAndRenderTemplates() {
 }
 
 function populateChainAgentDropdown() {
-  const select = document.getElementById("chain-next-select");
-  if (!select) return;
-  // Keep the "None" option, clear the rest
-  select.innerHTML = '<option value="">None</option>';
-  if (typeof agents !== "undefined") {
-    for (const [agentName] of agents) {
-      const opt = document.createElement("option");
-      opt.value = agentName;
-      opt.textContent = agentName;
-      select.appendChild(opt);
+  // Populate all chain-next-select dropdowns (multiple targets)
+  const selects = document.querySelectorAll(".chain-next-select");
+  for (const select of selects) {
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">None</option>';
+    if (typeof agents !== "undefined") {
+      for (const [agentName] of agents) {
+        const opt = document.createElement("option");
+        opt.value = agentName;
+        opt.textContent = agentName;
+        select.appendChild(opt);
+      }
     }
+    if (currentVal) select.value = currentVal;
   }
+}
+
+function _addChainTarget() {
+  const container = document.getElementById("chain-targets-container");
+  if (!container) return;
+  const idx = container.querySelectorAll(".chain-fields").length;
+  const div = document.createElement("div");
+  div.className = "chain-fields";
+  div.dataset.chainTarget = idx;
+  div.innerHTML = `
+    <div class="chain-target-header">
+      <span class="chain-target-label">Target #${idx + 1}</span>
+      <button type="button" class="chain-remove-target-btn" title="Remove">&times;</button>
+    </div>
+    <label>Then send to agent:
+      <select class="chain-next-select">
+        <option value="">None</option>
+      </select>
+    </label>
+    <label>With prompt:
+      <textarea class="chain-prompt" placeholder="Review changes on {branch}..." rows="2"></textarea>
+    </label>
+    <label>Condition:
+      <select class="chain-condition">
+        <option value="always">Always</option>
+        <option value="when-idle">When idle</option>
+        <option value="branch-has-changes">When branch has changes</option>
+      </select>
+    </label>
+  `;
+  container.appendChild(div);
+  // Populate the new dropdown
+  populateChainAgentDropdown();
+  // Wire remove button
+  div.querySelector(".chain-remove-target-btn").addEventListener("click", () => {
+    div.remove();
+  });
+}
+
+const chainAddTargetBtn = document.getElementById("chain-add-target-btn");
+if (chainAddTargetBtn) {
+  chainAddTargetBtn.addEventListener("click", _addChainTarget);
 }
 
 newAgentBtn.addEventListener("click", () => {
@@ -606,9 +651,14 @@ newAgentBtn.addEventListener("click", () => {
   fetchClaudeSessions();
   fetchAndRenderTemplates();
   populateChainAgentDropdown();
-  // Reset chain fields
+  // Reset chain fields — remove extra targets, reset the first one
   const chainConfig = document.getElementById("chain-config");
   if (chainConfig) chainConfig.removeAttribute("open");
+  const chainContainer = document.getElementById("chain-targets-container");
+  if (chainContainer) {
+    const extras = chainContainer.querySelectorAll('.chain-fields:not([data-chain-target="0"])');
+    extras.forEach(el => el.remove());
+  }
   const chainPrompt = document.getElementById("chain-prompt");
   if (chainPrompt) chainPrompt.value = "";
   const chainNext = document.getElementById("chain-next-select");
@@ -844,16 +894,21 @@ newAgentForm.addEventListener("submit", async (e) => {
 
     if (res.ok) {
       const data = await res.json();
-      // Set chain if configured
-      const chainNext = document.getElementById("chain-next-select")?.value;
-      const chainPrompt = document.getElementById("chain-prompt")?.value?.trim();
-      if (chainNext && chainPrompt) {
-        const chainCondition = document.getElementById("chain-condition")?.value || "always";
+      // Set chain if configured — collect all chain target fields
+      const chainTargetEls = document.querySelectorAll("#chain-targets-container .chain-fields");
+      const chainTargets = [];
+      for (const el of chainTargetEls) {
+        const next = el.querySelector(".chain-next-select")?.value;
+        const prompt = el.querySelector(".chain-prompt")?.value?.trim();
+        const condition = el.querySelector(".chain-condition")?.value || "always";
+        if (next && prompt) chainTargets.push({ next, prompt, condition });
+      }
+      if (chainTargets.length > 0) {
         try {
           await fetch(`/api/sessions/${encodeURIComponent(data.name)}/chain`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ next: chainNext, prompt: chainPrompt, condition: chainCondition }),
+            body: JSON.stringify({ targets: chainTargets }),
           });
         } catch (err) {
           console.error("[chain] Failed to set chain:", err);

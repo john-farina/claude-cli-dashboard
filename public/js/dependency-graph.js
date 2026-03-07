@@ -47,6 +47,7 @@
           <span><span class="dep-dot" style="background:var(--dep-status-waiting)"></span> waiting</span>
           <span><span class="dep-dot" style="background:var(--dep-status-other)"></span> other</span>
           <span><span class="dep-line dep-line-red"></span> conflict</span>
+          <span><span class="dep-line dep-line-chain"></span> chain</span>
         </div>
         <div class="dep-graph-empty" style="display:none">No agents or no file overlaps detected yet.</div>
       </div>
@@ -66,7 +67,7 @@
         var name = entry[0];
         var agent = entry[1];
         if (agent.type !== "terminal") {
-          agentList.push({ name: name, status: agent.status || "idle", branch: agent.branch || "" });
+          agentList.push({ name: name, status: agent.status || "idle", branch: agent.branch || "", chain: agent.chain || null });
         }
       }
     }
@@ -115,6 +116,9 @@
     // Build SVG content
     var parts = [];
 
+    // Arrow marker definition for chain edges
+    parts.push('<defs><marker id="chain-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c9a84c"/></marker></defs>');
+
     // Draw edges
     for (var oi = 0; oi < overlaps.length; oi++) {
       var overlap = overlaps[oi];
@@ -150,6 +154,29 @@
             parts.push('<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '" stroke="' + (bothWorking ? (_getCssVar("--dep-status-conflict") || "#ef4444") : "rgba(255,255,255,0.08)") + '" stroke-width="1" stroke-dasharray="4,4"><title>Same branch: ' + _escHtml(agentList[ai].branch) + '</title></line>');
           }
         }
+      }
+    }
+
+    // Draw chain edges (directed, dashed gold lines with arrowheads)
+    for (var ci = 0; ci < agentList.length; ci++) {
+      var chainAgent = agentList[ci];
+      if (!chainAgent.chain) continue;
+      var chainTargets = Array.isArray(chainAgent.chain) ? chainAgent.chain : [chainAgent.chain];
+      for (var cti = 0; cti < chainTargets.length; cti++) {
+        var ct = chainTargets[cti];
+        var fromPos = positions[chainAgent.name];
+        var toPos = positions[ct.next];
+        if (!fromPos || !toPos) continue;
+        // Shorten line so arrow doesn't overlap the node circle
+        var dx = toPos.x - fromPos.x;
+        var dy = toPos.y - fromPos.y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist === 0) continue;
+        var x2 = toPos.x - (dx / dist) * nodeRadius;
+        var y2 = toPos.y - (dy / dist) * nodeRadius;
+        var x1 = fromPos.x + (dx / dist) * nodeRadius;
+        var y1 = fromPos.y + (dy / dist) * nodeRadius;
+        parts.push('<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="#c9a84c" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#chain-arrow)"><title>Chain: ' + _escHtml(chainAgent.name) + ' \u2192 ' + _escHtml(ct.next) + '</title></line>');
       }
     }
 
