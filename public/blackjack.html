@@ -1192,36 +1192,37 @@ function settleAllHands() {
     const playerBJ = isBlackjack(hand.cards) && playerHands.length === 1;
     const prefix = playerHands.length > 1 ? `Hand ${idx + 1}: ` : '';
 
+    const bet = hand.bet;
+    const fmt = (n) => '$' + n.toLocaleString('en-US');
     if (hand.result === 'Bust') {
-      // Already lost
-      messages.push({ text: prefix + 'Bust!', type: 'lose' });
+      messages.push({ text: prefix + 'Bust! ' + fmt(-bet), type: 'lose' });
     } else if (playerBJ && dealerBJ) {
-      // Push on double blackjack
       hand.result = 'Push';
-      totalWin += hand.bet;
-      messages.push({ text: prefix + 'Push', type: 'push' });
+      totalWin += bet;
+      messages.push({ text: prefix + 'Push — bet returned', type: 'push' });
     } else if (playerBJ) {
       hand.result = 'Blackjack!';
-      totalWin += hand.bet + Math.floor(hand.bet * 1.5);
-      messages.push({ text: prefix + 'Blackjack! 3:2', type: 'blackjack' });
+      const payout = Math.floor(bet * 1.5);
+      totalWin += bet + payout;
+      messages.push({ text: prefix + 'Blackjack! +' + fmt(payout), type: 'blackjack' });
     } else if (dealerBJ) {
       hand.result = 'Dealer Blackjack';
-      messages.push({ text: prefix + 'Dealer Blackjack', type: 'lose' });
+      messages.push({ text: prefix + 'Dealer Blackjack ' + fmt(-bet), type: 'lose' });
     } else if (dv > 21) {
       hand.result = 'Dealer Bust!';
-      totalWin += hand.bet * 2;
-      messages.push({ text: prefix + 'Dealer Busts! Win!', type: 'win' });
+      totalWin += bet * 2;
+      messages.push({ text: prefix + 'Dealer Busts! +' + fmt(bet), type: 'win' });
     } else if (pv > dv) {
       hand.result = 'Win!';
-      totalWin += hand.bet * 2;
-      messages.push({ text: prefix + `Win! ${pv} vs ${dv}`, type: 'win' });
+      totalWin += bet * 2;
+      messages.push({ text: prefix + 'Win! +' + fmt(bet), type: 'win' });
     } else if (pv === dv) {
       hand.result = 'Push';
-      totalWin += hand.bet;
-      messages.push({ text: prefix + 'Push', type: 'push' });
+      totalWin += bet;
+      messages.push({ text: prefix + 'Push — bet returned', type: 'push' });
     } else {
       hand.result = 'Lose';
-      messages.push({ text: prefix + `Lose. ${pv} vs ${dv}`, type: 'lose' });
+      messages.push({ text: prefix + 'Lose ' + fmt(-bet), type: 'lose' });
     }
   });
 
