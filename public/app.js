@@ -4328,6 +4328,12 @@ document.addEventListener("keydown", (e) => {
       showAgentsView();
       return;
     }
+    // Dependency graph panel
+    if (typeof DependencyGraph !== "undefined" && DependencyGraph.isOpen()) {
+      e.preventDefault();
+      DependencyGraph.close();
+      return;
+    }
     // Bookmarks panel
     if (_bmPanel && _bmPanel.classList.contains("visible")) {
       e.preventDefault();
@@ -4407,6 +4413,11 @@ document.addEventListener("keydown", (e) => {
     if (!settingsPanel.classList.contains("visible")) settingsBtn.focus();
     return;
   }
+  if (key === "g" && !inInput) {
+    e.preventDefault();
+    if (typeof DependencyGraph !== "undefined") DependencyGraph.toggle();
+    return;
+  }
 
   // Remaining hotkeys — skip if typing in any input
   if (inInput) return;
@@ -4475,6 +4486,14 @@ loadSlashCommands();
 startDocPolling();
 startTodoRefsPolling();
 if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
+if (typeof CommandPalette !== "undefined" && typeof DependencyGraph !== "undefined") {
+  CommandPalette.registerAction({
+    id: "dep-graph", category: "Views", label: "Dependency Graph",
+    keywords: "graph dependencies files overlap agents",
+    icon: "\u25C9", hint: "G",
+    handler: function() { DependencyGraph.toggle(); },
+  });
+}
 if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
   CommandPalette.registerAction({
     id: "split-view", category: "Views", label: "Focus View",
