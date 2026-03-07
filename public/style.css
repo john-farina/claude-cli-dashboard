@@ -6896,6 +6896,28 @@ header .btn-primary kbd {
 }
 .ops-open-editor:hover { color: var(--text); background: rgba(255,255,255,0.1); }
 
+/* --- File Viewer (inline in Ops panel) --- */
+.ops-file-viewer { border-top: 1px solid var(--border, #333); }
+.ops-viewer-header {
+  padding: 10px 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  border-bottom: 1px solid var(--border, #333); background: rgba(0,0,0,0.15);
+}
+.ops-viewer-title { font-size: 14px; font-weight: 600; }
+.ops-viewer-path { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ops-viewer-actions { display: flex; gap: 4px; align-items: center; }
+.ops-viewer-close {
+  background: none; border: none; color: var(--text-dim); font-size: 18px;
+  cursor: pointer; padding: 0 4px; line-height: 1;
+}
+.ops-viewer-close:hover { color: var(--text); }
+.ops-viewer-rendered { padding: 16px; overflow-y: auto; max-height: 500px; }
+.ops-viewer-source {
+  padding: 12px; margin: 0; overflow: auto; max-height: 500px;
+  background: rgba(0,0,0,0.2); font-size: 12px; line-height: 1.5;
+  font-family: var(--font-mono); color: var(--text); white-space: pre-wrap; word-wrap: break-word;
+}
+.ops-viewer-source code { font-family: inherit; }
+
 /* --- Agent Chains --- */
 .chain-indicator {
   font-size: 11px; color: var(--text-dim); display: inline-flex;

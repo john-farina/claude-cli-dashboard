@@ -2101,6 +2101,22 @@ app.post("/api/shell/open-file", (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/read-file", (req, res) => {
+  const { filePath } = req.body || {};
+  if (!filePath || typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > 500000) return res.status(413).json({ error: "File too large (>500KB)" });
+    const content = fs.readFileSync(filePath, "utf8");
+    const ext = path.extname(filePath).toLowerCase();
+    res.json({ content, ext, path: filePath, size: stat.size });
+  } catch (e) {
+    res.status(404).json({ error: "File not found" });
+  }
+});
+
 app.post("/api/shell/open-finder", (req, res) => {
   const { path: folderPath } = req.body || {};
   if (!folderPath || typeof folderPath !== "string" || !path.isAbsolute(folderPath)) {

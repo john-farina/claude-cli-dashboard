@@ -442,51 +442,91 @@
   }
 
   function _openInEditor(agentName, file) {
-    fetch("/api/editor-config")
-      .then(function(r) { return r.json(); })
-      .then(function(config) {
-        var editor = config.editor || "vscode";
-        // Resolve full path: if file is relative, prepend agent workdir
-        var fullPath = file;
-        if (typeof agents !== "undefined") {
-          var ag = agents.get(agentName);
-          if (ag && ag.workdir && !file.startsWith("/")) {
-            fullPath = ag.workdir + "/" + file;
-          }
-        }
+    // Resolve full path
+    var fullPath = file;
+    if (typeof agents !== "undefined") {
+      var ag = agents.get(agentName);
+      if (ag && ag.workdir && !file.startsWith("/")) {
+        fullPath = ag.workdir + "/" + file;
+      }
+    }
 
-        if (editor === "vscode") {
-          _triggerProtocol("vscode://file/" + fullPath);
-        } else if (editor === "cursor") {
-          _triggerProtocol("cursor://file/" + fullPath);
-        } else if (editor === "zed") {
-          _triggerProtocol("zed://file/" + fullPath);
-        } else if (editor === "xcode") {
-          fetch("/api/shell/open-file", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: fullPath, command: "xed" })
-          });
-        } else if (editor === "sublime") {
-          fetch("/api/shell/open-file", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: fullPath, command: "subl" })
-          });
-        } else {
-          _triggerProtocol("vscode://file/" + fullPath);
-        }
-      })
-      .catch(function() {
-        var fullPath = file;
-        if (typeof agents !== "undefined") {
-          var ag = agents.get(agentName);
-          if (ag && ag.workdir && !file.startsWith("/")) {
-            fullPath = ag.workdir + "/" + file;
-          }
-        }
-        _triggerProtocol("vscode://file/" + fullPath);
+    // Read file and show in dashboard
+    fetch("/api/read-file", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath: fullPath })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.error) { alert(data.error); return; }
+      _showFileViewer(data.content, data.ext, fullPath);
+    })
+    .catch(function(e) { alert("Failed to read file"); });
+  }
+
+  function _showFileViewer(content, ext, filePath) {
+    var viewer = document.getElementById("ops-file-viewer");
+    if (!viewer) {
+      viewer = document.createElement("div");
+      viewer.id = "ops-file-viewer";
+      viewer.className = "ops-file-viewer";
+      _panel.querySelector(".ops-content").appendChild(viewer);
+    }
+
+    var fileName = filePath.split("/").pop();
+    var isMarkdown = ext === ".md";
+    var isHtml = ext === ".html" || ext === ".htm";
+    var isJson = ext === ".json";
+
+    var header = '<div class="ops-viewer-header">' +
+      '<span class="ops-viewer-title">' + _escHtml(fileName) + '</span>' +
+      '<span class="ops-viewer-path">' + _escHtml(filePath) + '</span>' +
+      '<div class="ops-viewer-actions">';
+
+    if (isMarkdown || isHtml) {
+      header += '<button class="ops-diff-toggle-btn active" data-view="rendered">Rendered</button>' +
+        '<button class="ops-diff-toggle-btn" data-view="source">Source</button>';
+    }
+    header += '<button class="ops-viewer-close">&times;</button></div></div>';
+
+    var rendered = '';
+    if (isMarkdown && typeof marked !== "undefined") {
+      rendered = '<div class="ops-viewer-rendered ops-diff-rendered">' + marked.parse(content) + '</div>';
+    } else if (isHtml) {
+      rendered = '<div class="ops-viewer-rendered"><iframe class="ops-diff-iframe" sandbox="allow-same-origin" srcdoc="' + _escAttr(content) + '"></iframe></div>';
+    }
+
+    var source = '<pre class="ops-viewer-source' + (isMarkdown || isHtml ? ' hidden' : '') + '">' +
+      '<code>' + _escHtml(content) + '</code></pre>';
+
+    viewer.innerHTML = header + rendered + source;
+    viewer.style.display = '';
+
+    // Toggle rendered/source
+    viewer.querySelectorAll('.ops-diff-toggle-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var view = btn.dataset.view;
+        viewer.querySelectorAll('.ops-diff-toggle-btn').forEach(function(b) { b.classList.toggle('active', b === btn); });
+        var renderedEl = viewer.querySelector('.ops-viewer-rendered');
+        var sourceEl = viewer.querySelector('.ops-viewer-source');
+        if (renderedEl) renderedEl.classList.toggle('hidden', view === 'source');
+        if (sourceEl) sourceEl.classList.toggle('hidden', view === 'rendered');
       });
+    });
+
+    // Close
+    viewer.querySelector('.ops-viewer-close').addEventListener('click', function() {
+      viewer.style.display = 'none';
+      viewer.innerHTML = '';
+    });
+
+    // Scroll to viewer
+    viewer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function _escAttr(s) {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   // Open a protocol URL (vscode://, cursor://) without navigating away
