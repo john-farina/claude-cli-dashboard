@@ -237,6 +237,34 @@ function saveTokenUsage(data) {
   fs.writeFileSync(TOKEN_USAGE_FILE, JSON.stringify(data, null, 2));
 }
 
+// Snapshot a killed agent's per-day token contributions into killedDaily
+// Must be called BEFORE the agent is removed from sessions.json
+function snapshotKilledAgentTokens(name) {
+  try {
+    const meta = loadSessionsMeta();
+    const agentInfo = meta[name];
+    const sid = agentInfo?.resumeSessionId;
+    if (!sid) return;
+    const filePath = findJsonlFileForSession(sid);
+    if (!filePath) return;
+    const byDay = parseTokenUsageByDay(filePath);
+    if (Object.keys(byDay).length === 0) return;
+    const tokenData = loadTokenUsage();
+    tokenData.killedDaily = tokenData.killedDaily || {};
+    for (const [dayKey, dayUsage] of Object.entries(byDay)) {
+      const existing = tokenData.killedDaily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+      existing.input += dayUsage.input;
+      existing.output += dayUsage.output;
+      existing.cacheCreation += dayUsage.cacheCreation;
+      existing.cacheRead += dayUsage.cacheRead;
+      tokenData.killedDaily[dayKey] = existing;
+    }
+    saveTokenUsage(tokenData);
+  } catch (e) {
+    console.error(`[token snapshot] Failed to snapshot tokens for killed agent ${name}:`, e.message);
+  }
+}
+
 function findJsonlFileForSession(sessionId) {
   if (!sessionId) return null;
   try {
@@ -415,10 +443,21 @@ function syncTokenUsage() {
       daily[dayKey] = existing;
     }
   }
-  // Merge: JSONL ground truth overwrites, keep historical days from killed agents
-  const mergedDaily = { ...(saved.daily || {}) };
+  // Merge daily: killedDaily (snapshotted at kill time) + live agents' JSONL ground truth
+  const killedDaily = saved.killedDaily || {};
+  const mergedDaily = {};
+  // 1. Start with killed agents' snapshotted contributions
+  for (const [dayKey, kd] of Object.entries(killedDaily)) {
+    mergedDaily[dayKey] = { ...kd };
+  }
+  // 2. Add live agents' JSONL ground truth on top
   for (const [dayKey, dayUsage] of Object.entries(daily)) {
-    mergedDaily[dayKey] = { ...dayUsage };
+    const existing = mergedDaily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+    existing.input += dayUsage.input;
+    existing.output += dayUsage.output;
+    existing.cacheCreation += dayUsage.cacheCreation;
+    existing.cacheRead += dayUsage.cacheRead;
+    mergedDaily[dayKey] = existing;
   }
   // Apply reset offsets (subtract tokens cleared by user)
   const offsets = saved.dailyOffset || {};
@@ -1178,6 +1217,9 @@ app.delete("/api/sessions/:name", async (req, res) => {
     }
   }
 
+  // Snapshot killed agent's per-day token contributions before removing it
+  snapshotKilledAgentTokens(name);
+
   killSession(name);
   clearWorktreeCache(`${PREFIX}${name}`);
   prevStatuses.delete(`${PREFIX}${name}`);
@@ -1249,6 +1291,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
   } catch (e) {
     // If we can't send keys, write a basic entry ourselves and kill
     _firingAgents.delete(name);
+    snapshotKilledAgentTokens(name);
     killSession(name);
     clearWorktreeCache(session);
     return res.json({ ok: true, fallback: true });
@@ -1279,6 +1322,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
         }
       } catch {}
       _firingAgents.delete(name);
+      snapshotKilledAgentTokens(name);
       killSession(name);
       clearWorktreeCache(session);
       prevStatuses.delete(session);
@@ -1292,6 +1336,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
       if (!sessions.includes(session)) {
         // Agent already exited (via /exit)
         _firingAgents.delete(name);
+        snapshotKilledAgentTokens(name);
         clearWorktreeCache(session);
         prevStatuses.delete(session);
         _autoRenamed.delete(name);
@@ -1309,6 +1354,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
         // Agent is idle = it finished and is waiting at prompt
         if (status === "idle") {
           _firingAgents.delete(name);
+          snapshotKilledAgentTokens(name);
           killSession(name);
           clearWorktreeCache(session);
           prevStatuses.delete(session);
