@@ -2089,6 +2089,18 @@ app.post("/api/shell/open-url", (req, res) => {
   res.json({ ok: true });
 });
 
+app.post("/api/shell/open-file", (req, res) => {
+  const { path: filePath, command } = req.body || {};
+  if (!filePath || typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  const allowedCommands = ["xed", "subl", "code", "open"];
+  const cmd = allowedCommands.includes(command) ? command : "open";
+  const { execFile } = require("child_process");
+  execFile(cmd, [filePath], { timeout: 5000 }, () => {});
+  res.json({ ok: true });
+});
+
 app.post("/api/shell/open-finder", (req, res) => {
   const { path: folderPath } = req.body || {};
   if (!folderPath || typeof folderPath !== "string" || !path.isAbsolute(folderPath)) {

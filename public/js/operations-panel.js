@@ -456,22 +456,28 @@
         }
 
         if (editor === "vscode") {
-          window.open("vscode://file/" + fullPath, "_blank");
+          _triggerProtocol("vscode://file/" + fullPath);
         } else if (editor === "cursor") {
-          window.open("cursor://file/" + fullPath, "_blank");
+          _triggerProtocol("cursor://file/" + fullPath);
+        } else if (editor === "zed") {
+          _triggerProtocol("zed://file/" + fullPath);
         } else if (editor === "xcode") {
           fetch("/api/shell/open-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ path: fullPath })
+            body: JSON.stringify({ path: fullPath, command: "xed" })
+          });
+        } else if (editor === "sublime") {
+          fetch("/api/shell/open-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path: fullPath, command: "subl" })
           });
         } else {
-          // Default: try vscode
-          window.open("vscode://file/" + fullPath, "_blank");
+          _triggerProtocol("vscode://file/" + fullPath);
         }
       })
       .catch(function() {
-        // Fallback to vscode
         var fullPath = file;
         if (typeof agents !== "undefined") {
           var ag = agents.get(agentName);
@@ -479,8 +485,18 @@
             fullPath = ag.workdir + "/" + file;
           }
         }
-        window.open("vscode://file/" + fullPath, "_blank");
+        _triggerProtocol("vscode://file/" + fullPath);
       });
+  }
+
+  // Open a protocol URL (vscode://, cursor://) without navigating away
+  function _triggerProtocol(url) {
+    var a = document.createElement("a");
+    a.href = url;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function() { a.remove(); }, 100);
   }
 
   // ── Exports ───────────────────────────────────────
