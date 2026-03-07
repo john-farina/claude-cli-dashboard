@@ -1204,18 +1204,18 @@ function settleAllHands() {
       hand.result = 'Blackjack!';
       const payout = Math.floor(bet * 1.5);
       totalWin += bet + payout;
-      messages.push({ text: prefix + 'Blackjack! +' + fmt(payout), type: 'blackjack' });
+      messages.push({ text: prefix + 'Blackjack! +' + fmt(bet + payout), type: 'blackjack' });
     } else if (dealerBJ) {
       hand.result = 'Dealer Blackjack';
       messages.push({ text: prefix + 'Dealer Blackjack ' + fmt(-bet), type: 'lose' });
     } else if (dv > 21) {
       hand.result = 'Dealer Bust!';
       totalWin += bet * 2;
-      messages.push({ text: prefix + 'Dealer Busts! +' + fmt(bet), type: 'win' });
+      messages.push({ text: prefix + 'Dealer Busts! +' + fmt(bet * 2), type: 'win' });
     } else if (pv > dv) {
       hand.result = 'Win!';
       totalWin += bet * 2;
-      messages.push({ text: prefix + 'Win! +' + fmt(bet), type: 'win' });
+      messages.push({ text: prefix + 'Win! +' + fmt(bet * 2), type: 'win' });
     } else if (pv === dv) {
       hand.result = 'Push';
       totalWin += bet;
