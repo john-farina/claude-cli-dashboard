@@ -4262,6 +4262,7 @@ function _toggleHelpOverlay() {
             ${K("C", "CEO Prompt")}
             ${K("R", "Restart")}
             ${K("!", "Bug Report")}
+            ${K("@", "Arcade")}
             ${K("/", "Focus First Card")}
             ${K("1-9", "Focus Card N")}
             ${K("?", "This Help")}
@@ -4545,6 +4546,11 @@ document.addEventListener("keydown", (e) => {
   if (key === "!") {
     e.preventDefault();
     document.getElementById("bug-report-btn").click();
+    return;
+  }
+  if (key === "@") {
+    e.preventDefault();
+    _openArcade();
     return;
   }
   if (key === "n") {
