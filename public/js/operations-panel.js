@@ -385,8 +385,8 @@
               diffContainer.innerHTML = '<pre style="white-space:pre-wrap;font-size:11px">' + _escHtml(diffText) + '</pre>';
             }
             container.innerHTML = "";
-            // If it's a markdown file, add rendered view toggle
-            if (file.endsWith(".md")) {
+            // If it's a renderable file, add rendered view toggle
+            if (file.endsWith(".md") || file.endsWith(".html") || file.endsWith(".htm")) {
               var toggleDiv = document.createElement("div");
               toggleDiv.className = "ops-diff-toggle";
               toggleDiv.innerHTML = '<button class="ops-diff-toggle-btn active" data-view="diff">Diff</button><button class="ops-diff-toggle-btn" data-view="rendered">Rendered</button>';
@@ -397,7 +397,14 @@
                 .join("\n");
               var renderedDiv = document.createElement("div");
               renderedDiv.className = "ops-diff-rendered hidden";
-              if (typeof marked !== "undefined") {
+              if (file.endsWith(".html") || file.endsWith(".htm")) {
+                // HTML files — render in a sandboxed iframe
+                var iframe = document.createElement("iframe");
+                iframe.className = "ops-diff-iframe";
+                iframe.sandbox = "allow-same-origin";
+                iframe.srcdoc = addedLines;
+                renderedDiv.appendChild(iframe);
+              } else if (typeof marked !== "undefined") {
                 renderedDiv.innerHTML = marked.parse(addedLines);
               } else {
                 renderedDiv.innerHTML = '<pre style="white-space:pre-wrap;font-size:12px">' + _escHtml(addedLines) + '</pre>';
