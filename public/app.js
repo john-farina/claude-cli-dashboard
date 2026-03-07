@@ -4352,6 +4352,11 @@ document.addEventListener("keydown", (e) => {
       closeDiffModal();
       return;
     }
+    if (_gameOverlay && !_gameOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _gameOverlay.classList.add("hidden");
+      return;
+    }
     if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
       e.preventDefault();
       _helpOverlay.classList.add("hidden");
@@ -4568,6 +4573,33 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
+});
+
+// --- Game Overlay ---
+let _gameOverlay = null;
+document.getElementById("game-btn")?.addEventListener("click", () => {
+  if (!_gameOverlay) {
+    _gameOverlay = document.createElement("div");
+    _gameOverlay.id = "game-overlay";
+    _gameOverlay.className = "command-palette-overlay";
+    _gameOverlay.innerHTML = `
+      <div class="game-modal">
+        <div class="game-modal-header">
+          <span>Block Drop — ULTRA CHAOS</span>
+          <button class="game-modal-close">&times;</button>
+        </div>
+        <iframe src="game.html" class="game-iframe"></iframe>
+      </div>
+    `;
+    document.body.appendChild(_gameOverlay);
+    _gameOverlay.querySelector(".game-modal-close").addEventListener("click", () => {
+      _gameOverlay.classList.add("hidden");
+    });
+    _gameOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _gameOverlay) _gameOverlay.classList.add("hidden");
+    });
+  }
+  _gameOverlay.classList.remove("hidden");
 });
 
 // --- Init ---
