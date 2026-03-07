@@ -60,6 +60,10 @@ document.addEventListener("focusout", (e) => {
       if ((Date.now() - _userClickedAt) < 200) { clearInterval(_focusGuardInterval); _focusGuardInterval = null; return; }
       if (!textarea.isConnected) { clearInterval(_focusGuardInterval); _focusGuardInterval = null; return; }
       if (document.activeElement !== textarea) {
+        const agent = _getAgentName(textarea);
+        const curActive = document.activeElement;
+        const curDesc = curActive ? (curActive.id || curActive.className?.split?.(" ")?.[0] || curActive.tagName) : "null";
+        _focusLog("guard-restore", `restoring textarea[${agent}], was on ${curDesc}`, { guard: "focusout-guard" });
         textarea.focus({ preventScroll: true });
       }
     };
@@ -116,10 +120,80 @@ document.addEventListener("focusin", (e) => {
     if ((Date.now() - _userClickedAt) < 300) return;
     if (!_lastActiveTextarea || !_lastActiveTextarea.isConnected) return;
     if (document.activeElement === document.body || document.activeElement === document.documentElement) {
+      const agent = _getAgentName(_lastActiveTextarea);
+      _focusLog("body-restore", `restoring textarea[${agent}] from body`, { guard: "body-focusin-guard" });
       _lastActiveTextarea.focus({ preventScroll: true });
     }
   });
 }, true);
+
+// --- Focus debug logging (writes to /tmp/ceo-focus-debug.log via server) ---
+const _focusLogBuffer = [];
+let _focusLogTimer = null;
+function _flushFocusLog() {
+  if (!_focusLogBuffer.length) return;
+  const entries = _focusLogBuffer.splice(0);
+  fetch("/api/focus-log", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entries }),
+  }).catch(() => {});
+}
+function _getAgentName(el) {
+  return el?.closest?.(".agent-card")?.querySelector?.(".agent-name")?.textContent || "";
+}
+function _focusLog(event, detail, extra) {
+  const active = document.activeElement;
+  const activeDesc = active ? (active.id || active.className?.split?.(" ")?.[0] || active.tagName) : "null";
+  const agentName = _getAgentName(active);
+  _focusLogBuffer.push({
+    ts: Date.now(),
+    event,
+    active: agentName ? `${activeDesc}[${agentName}]` : activeDesc,
+    related: extra?.related || "",
+    guard: extra?.guard || "",
+    detail: detail || "",
+  });
+  if (!_focusLogTimer) _focusLogTimer = setTimeout(() => { _focusLogTimer = null; _flushFocusLog(); }, 500);
+}
+
+// Log ALL focusin/focusout on card textareas + body focus
+document.addEventListener("focusin", (e) => {
+  const isCardTextarea = e.target.matches?.(".card-input textarea");
+  const isBody = e.target === document.body || e.target === document.documentElement;
+  if (isCardTextarea || isBody) {
+    const agent = _getAgentName(e.target);
+    const relEl = e.relatedTarget;
+    const relDesc = relEl ? (relEl.id || relEl.className?.split?.(" ")?.[0] || relEl.tagName) : "null";
+    const relAgent = _getAgentName(relEl);
+    const userRecent = (Date.now() - _userClickedAt) < 300;
+    _focusLog("focusin", isBody ? "BODY-GOT-FOCUS" : `textarea[${agent}]`, {
+      related: relAgent ? `${relDesc}[${relAgent}]` : relDesc,
+      guard: userRecent ? "user-click" : "programmatic",
+    });
+  }
+}, true);
+
+document.addEventListener("focusout", (e) => {
+  if (!e.target.matches?.(".card-input textarea")) return;
+  const agent = _getAgentName(e.target);
+  const relEl = e.relatedTarget;
+  const relDesc = relEl ? (relEl.id || relEl.className?.split?.(" ")?.[0] || relEl.tagName) : "null";
+  const relAgent = _getAgentName(relEl);
+  const userRecent = (Date.now() - _userClickedAt) < 300;
+  const expectedBlur = e.target._expectedBlur ? "expected" : "";
+  _focusLog("focusout", `textarea[${agent}]`, {
+    related: relAgent ? `${relDesc}[${relAgent}]` : relDesc,
+    guard: [userRecent ? "user-click" : "programmatic", expectedBlur].filter(Boolean).join(","),
+  });
+}, true);
+
+// Log when focus guard fires a restore
+const _origFocusGuardLog = () => {};
+// Patch: instrument the scrollTerminalToBottom and updateTerminal focus saves
+const __focusLogInnerHTML = () => {
+  _focusLog("innerHTML", "terminal innerHTML replaced — potential focus theft");
+};
 
 // --- Tab notifications (title flash + native/browser notifications + dock badge) ---
 let TAB_TITLE_DEFAULT = "CEO Dashboard";
@@ -291,6 +365,7 @@ function getCardDefaultHeight() {
 function masonryLayout() {
 
   const cards = grid.querySelectorAll(".agent-card");
+  const spanChanges = [];
   for (const card of cards) {
     // Desired height: inline style (from drag-resize / saved layout) or CSS default
     const inlineH = card.style.height;
@@ -301,8 +376,16 @@ function masonryLayout() {
     const termOpen = card.querySelector(".agent-terminal-section")?.style.display !== "none";
     const h = card.classList.contains("resizing-height") ? cssH : Math.max(cssH, card.scrollHeight);
     const span = Math.ceil((h + GRID_GAP_PX) / GRID_ROW_PX);
+    const oldSpan = card.style.gridRow;
     if (termOpen) console.log("[masonry]", card.querySelector(".agent-name")?.textContent, { cssH, scrollH: card.scrollHeight, h, span, inlineH });
     card.style.gridRow = `span ${span}`;
+    if (oldSpan && oldSpan !== `span ${span}`) {
+      const name = card.querySelector(".agent-name")?.textContent || "?";
+      spanChanges.push(`${name}:${oldSpan}->${span}`);
+    }
+  }
+  if (spanChanges.length > 0) {
+    _focusLog("masonry-span", `span changes: ${spanChanges.join(", ")}`);
   }
   // Force browser to reflow grid after all spans are set
   void grid.offsetHeight;
@@ -311,6 +394,49 @@ function masonryLayout() {
 
 // Debounced version for frequent calls (resize, output updates)
 let _masonryTimer = null;
+// --- Reusable instant tooltip system ---
+// Shows a tooltip above any element on hover. No delay, positioned above target.
+// Usage: showInstantTooltip(anchorEl, text)  /  hideInstantTooltip()
+// Or attach permanently: attachInstantTooltip(el, textOrFn)
+let _instantTooltip = null;
+function showInstantTooltip(anchor, text) {
+  hideInstantTooltip();
+  _instantTooltip = document.createElement("div");
+  _instantTooltip.className = "instant-tooltip";
+  _instantTooltip.textContent = text;
+  document.body.appendChild(_instantTooltip);
+  const r = anchor.getBoundingClientRect();
+  const tipW = _instantTooltip.offsetWidth;
+  const tipH = _instantTooltip.offsetHeight;
+  // Center above, clamp to viewport
+  let left = r.left + r.width / 2 - tipW / 2;
+  left = Math.max(4, Math.min(left, window.innerWidth - tipW - 4));
+  _instantTooltip.style.left = left + "px";
+  _instantTooltip.style.top = (r.top - tipH - 6) + "px";
+}
+function hideInstantTooltip() {
+  if (_instantTooltip) { _instantTooltip.remove(); _instantTooltip = null; }
+}
+// Attach tooltip to an element. textOrFn can be a string or () => string|null (null = skip).
+function attachInstantTooltip(el, textOrFn) {
+  if (el._hasInstantTooltip) return;
+  el._hasInstantTooltip = true;
+  el.addEventListener("mouseenter", () => {
+    const text = typeof textOrFn === "function" ? textOrFn() : textOrFn;
+    if (!text) return;
+    showInstantTooltip(el, text);
+  });
+  el.addEventListener("mouseleave", hideInstantTooltip);
+}
+
+let _nameTooltip = null; // kept for compat, but delegates to instant tooltip
+function _checkNameTruncation(card) {
+  const el = card.querySelector(".agent-name");
+  if (!el) return;
+  el.classList.toggle("truncated", el.scrollWidth > el.clientWidth);
+  attachInstantTooltip(el, () => el.scrollWidth > el.clientWidth ? el.textContent : null);
+}
+
 function scheduleMasonry() {
   if (_masonryTimer) return;
   _masonryTimer = requestAnimationFrame(() => {
@@ -326,7 +452,10 @@ function scheduleMasonry() {
 }
 
 // Recalc on window resize
-window.addEventListener("resize", scheduleMasonry);
+window.addEventListener("resize", () => {
+  scheduleMasonry();
+  for (const agent of agents.values()) _checkNameTruncation(agent.card);
+});
 
 // Linkify file paths and URLs in terminal HTML output.
 // Splits on HTML tags to only process text nodes, avoiding breakage of ANSI spans.
@@ -435,12 +564,41 @@ function loadCardOrder() {
   try { return JSON.parse(localStorage.getItem(CARD_ORDER_KEY)) || []; } catch { return []; }
 }
 function saveCardOrder() {
-  const grid = document.querySelector(".agents-grid");
-  if (!grid) return;
-  const order = Array.from(grid.querySelectorAll(".agent-card"))
+  const g = document.querySelector(".agents-grid");
+  if (!g) return;
+  const gridNames = Array.from(g.querySelectorAll(".agent-card"))
     .map(c => c.querySelector(".agent-name")?.textContent)
     .filter(Boolean);
-  localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(order));
+  const minNames = new Set(
+    Array.from(minimizedBar.querySelectorAll(".agent-card"))
+      .map(c => c.querySelector(".agent-name")?.textContent)
+      .filter(Boolean)
+  );
+  if (minNames.size === 0) {
+    localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(gridNames));
+    return;
+  }
+  // Merge minimized cards back at their previous saved positions.
+  // Walk previous order: emit grid cards in current DOM order,
+  // and re-insert minimized cards at their old relative positions.
+  const prevOrder = loadCardOrder();
+  const gridSet = new Set(gridNames);
+  const result = [];
+  let gridIdx = 0;
+  for (const name of prevOrder) {
+    if (minNames.has(name)) {
+      result.push(name); // minimized: keep at previous position
+      minNames.delete(name);
+    } else if (gridSet.has(name)) {
+      // Slot for a grid card — emit next grid card in current DOM order
+      if (gridIdx < gridNames.length) result.push(gridNames[gridIdx++]);
+    }
+  }
+  // Append remaining grid cards (new cards not in previous order)
+  while (gridIdx < gridNames.length) result.push(gridNames[gridIdx++]);
+  // Append any minimized cards not in previous order
+  for (const name of minNames) result.push(name);
+  localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(result));
 }
 
 // --- Dismiss status (persisted in localStorage, shared across devices) ---
@@ -532,11 +690,13 @@ function updateDashboardDot() {
 
 function reorderCards() {
   const cards = Array.from(grid.querySelectorAll(".agent-card"));
-  if (cards.length <= 1) { scheduleMasonry(); saveCardOrder(); return; }
+  if (cards.length <= 1) { scheduleMasonry(); return; }
 
   // FIRST: record current positions
   const firstRects = new Map();
   cards.forEach(card => firstRects.set(card, card.getBoundingClientRect()));
+
+  const beforeOrder = cards.map(c => c.querySelector(".agent-name")?.textContent || "?");
 
   // Sort: use saved order if available, then favorites first, then creation order
   const savedOrder = loadCardOrder();
@@ -559,6 +719,8 @@ function reorderCards() {
     return aFav - bFav;
   });
 
+  const afterOrder = cards.map(c => c.querySelector(".agent-name")?.textContent || "?");
+
   // Check if order actually changed — skip DOM moves if already correct
   const currentOrder = Array.from(grid.querySelectorAll(".agent-card"));
   let orderChanged = cards.length !== currentOrder.length;
@@ -569,6 +731,12 @@ function reorderCards() {
   }
 
   if (orderChanged) {
+    // Find which cards moved
+    const movedCards = [];
+    for (let i = 0; i < afterOrder.length; i++) {
+      if (beforeOrder[i] !== afterOrder[i]) movedCards.push(`${beforeOrder[i]}->${afterOrder[i]}`);
+    }
+    _focusLog("reorder", `cards moved: ${movedCards.join(", ") || "none"} | savedOrder has ${savedOrder.length} entries`);
     // Save focused element + cursor position before DOM moves (appendChild causes blur)
     const focused = document.activeElement;
     const focusedInGrid = focused && grid.contains(focused);
@@ -598,13 +766,15 @@ function reorderCards() {
 
     // Restore focus stolen by DOM re-append
     if (focusedInGrid && focused !== document.activeElement) {
+      const agent = _getAgentName(focused);
+      const nowDesc = document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : "null";
+      _focusLog("reorder-restore", `DOM reorder stole focus from [${agent}], now on ${nowDesc}`, { guard: "reorderCards" });
       focused.focus({ preventScroll: true });
       if (cursorStart != null) {
         try { focused.setSelectionRange(cursorStart, cursorEnd); } catch {}
       }
     }
     }
-  saveCardOrder();
 
   // INVERT + PLAY: animate from old position to new
   cards.forEach(card => {
@@ -639,6 +809,23 @@ let _knownVersion = null; // tracks hot-reload version; if it changes on reconne
 let _reloadingPage = false; // set true when reload is triggered — suppresses hotkeys during transition
 
 // Build reload-persist state (used by hot-reload, server-restart, and manual restart)
+// Merge live state with previously saved localStorage state —
+// keeps drafts from the last auto-save if live textarea is now empty
+// (handles race: user was typing, submit cleared field, restart fires instantly)
+function _mergeReloadState(live) {
+  try {
+    const prev = JSON.parse(localStorage.getItem("ceo-reload-state") || "{}");
+    if (prev.drafts && live.drafts) {
+      for (const [name, text] of Object.entries(prev.drafts)) {
+        if (!live.drafts[name] && text) {
+          live.drafts[name] = text;
+        }
+      }
+    }
+  } catch {}
+  return live;
+}
+
 function buildReloadState() {
   const state = {
     scrollY: window.scrollY,
@@ -808,6 +995,10 @@ function connect() {
     fetch("/api/check-update").then(r => r.json()).then(data => {
       if (data.updateAvailable) showUpdateButton(data);
     }).catch(() => {});
+    // On reconnect, trigger immediate reconciliation to catch missing agents
+    if (_loaderDismissed && typeof _reconcileSessions === "function") {
+      setTimeout(_reconcileSessions, 500);
+    }
     // Drain pending send that was queued while disconnected
     if (_pendingSend) {
       const p = _pendingSend;
@@ -887,7 +1078,10 @@ function connect() {
     if (msg.type === "reload") {
       if (_updateErrorShowing) return;
       _reloadingPage = true;
-      sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
+      const _rs = _mergeReloadState(buildReloadState());
+      _focusLog("reload-save", `saving state: drafts=${Object.keys(_rs.drafts||{}).length}, focusedAgent=${_rs.focusedAgent||"none"}, cursor=${_rs.focusCursorStart}-${_rs.focusCursorEnd}, modal=${!!_rs.modal}`);
+      _flushFocusLog();
+      sessionStorage.setItem("ceo-reload-state", JSON.stringify(_rs));
       location.reload();
       return;
     }
@@ -895,7 +1089,10 @@ function connect() {
     if (msg.type === "server-restarting") {
       if (_updateErrorShowing) return;
       _reloadingPage = true;
-      sessionStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
+      const _rs2 = _mergeReloadState(buildReloadState());
+      _focusLog("restart-save", `saving state: drafts=${Object.keys(_rs2.drafts||{}).length}, focusedAgent=${_rs2.focusedAgent||"none"}, cursor=${_rs2.focusCursorStart}-${_rs2.focusCursorEnd}, modal=${!!_rs2.modal}`);
+      _flushFocusLog();
+      sessionStorage.setItem("ceo-reload-state", JSON.stringify(_rs2));
       const pollUntilReady = () => {
         fetch("/api/version", { signal: AbortSignal.timeout(2000) })
           .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
@@ -981,6 +1178,8 @@ function connect() {
       for (const s of msg.sessions) {
         if (s.type !== "terminal") {
           addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+          const a = agents.get(s.name);
+          if (a) a.autoRename = s.autoRename || false;
         }
       }
       for (const s of msg.sessions) {
@@ -1068,6 +1267,64 @@ function connect() {
         // Also update embedded terminal header if open
         updateTerminalHeader(agent.card, undefined, msg.branch, msg.isWorktree, undefined);
       }
+    }
+
+    // Renaming indicator — shown as status badge with spinner
+    if (msg.type === "renaming") {
+      const agent = agents.get(msg.session);
+      if (agent) {
+        const badge = agent.card.querySelector(".status-badge");
+        if (msg.renaming) {
+          agent._prevBadgeClass = badge.className;
+          agent._prevBadgeText = badge.textContent;
+          badge.className = "status-badge renaming";
+          badge.innerHTML = '<span class="rename-spin"></span>renaming';
+          badge.style.display = "";
+        } else if (agent._prevBadgeClass) {
+          badge.className = agent._prevBadgeClass;
+          badge.textContent = agent._prevBadgeText;
+          delete agent._prevBadgeClass;
+          delete agent._prevBadgeText;
+        }
+      }
+    }
+
+    // Server-initiated rename (manual or auto-rename)
+    if (msg.type === "rename") {
+      const agent = agents.get(msg.oldName);
+      if (agent) {
+        // Remove any ghost card that was created under the new name
+        // (can happen if WS output arrived before the rename message)
+        const ghost = agents.get(msg.newName);
+        if (ghost && ghost !== agent) {
+          ghost.card.remove();
+          agents.delete(msg.newName);
+        }
+        // Restore badge state
+        const badge = agent.card.querySelector(".status-badge");
+        if (agent._prevBadgeClass) {
+          badge.className = agent._prevBadgeClass;
+          badge.textContent = agent._prevBadgeText;
+          delete agent._prevBadgeClass;
+          delete agent._prevBadgeText;
+        }
+        agents.delete(msg.oldName);
+        agents.set(msg.newName, agent);
+        agent.card.querySelector(".agent-name").textContent = msg.newName;
+        requestAnimationFrame(() => _checkNameTruncation(agent.card));
+        if (agent._setName) agent._setName(msg.newName);
+        for (const key of [LAYOUT_KEY_DESKTOP, LAYOUT_KEY_MOBILE]) {
+          try {
+            const layouts = JSON.parse(localStorage.getItem(key)) || {};
+            if (layouts[msg.oldName]) {
+              layouts[msg.newName] = layouts[msg.oldName];
+              delete layouts[msg.oldName];
+              localStorage.setItem(key, JSON.stringify(layouts));
+            }
+          } catch {}
+        }
+      }
+      // else: initiating client already renamed locally — nothing to do
     }
 
     // Live input sync from another client
@@ -1204,6 +1461,8 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
                   <button class="header-color-swatch" data-color="#6bb5a0" title="Teal" style="--swatch:#6bb5a0;"></button>
                 </div>
               </div>
+              <button class="more-menu-item" data-action="toggle-auto-rename">Enable Auto-Rename</button>
+              <button class="more-menu-item" data-action="rename-now">Rename Now</button>
               <button class="more-menu-item" data-action="save-memory">Save Memory</button>
               <button class="more-menu-item" data-action="update-memory">Update Memory</button>
               <button class="more-menu-item more-menu-danger" data-action="clear-memory">Clear Memory</button>
@@ -1215,7 +1474,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           <button class="expand-btn" tabindex="0" title="Fullscreen">&#x26F6;</button>
           <button class="popout-btn" tabindex="0" title="Pop out">&#8599;</button>
           <button class="minimize-btn" tabindex="0" title="Minimize">&minus;</button>
-          <button class="kill-btn" tabindex="0" title="Kill agent">&times;</button>
+          <button class="kill-btn" tabindex="0">&times;</button>
         </div>
       </div>
       <div class="card-subheader">
@@ -1786,6 +2045,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
         favoriteBtn.textContent = "\u2606";
       }
       reorderCards();
+      saveCardOrder();
     } catch {}
   });
 
@@ -1794,8 +2054,20 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     e.stopPropagation();
     const isOpen = moreMenu.classList.toggle("visible");
     if (isOpen) {
-      // Focus first item for keyboard nav
-      const firstItem = moreMenu.querySelector(".more-menu-item");
+      // Update auto-rename toggle label
+      const agent = agents.get(name);
+      const arBtn = moreMenu.querySelector('[data-action="toggle-auto-rename"]');
+      if (arBtn && agent) arBtn.textContent = agent.autoRename ? "Disable Auto-Rename" : "Enable Auto-Rename";
+      // Hide "View Diff" if no uncommitted changes
+      const diffBtn = moreMenu.querySelector('[data-action="view-diff"]');
+      if (diffBtn) {
+        diffBtn.style.display = "none";
+        fetch(`/api/sessions/${encodeURIComponent(name)}/diff`).then(r => r.json()).then(d => {
+          if (d.hasDiff) diffBtn.style.display = "";
+        }).catch(() => {});
+      }
+      // Focus first visible item for keyboard nav
+      const firstItem = moreMenu.querySelector(".more-menu-item:not([style*='display: none'])");
       if (firstItem) firstItem.focus();
       // Close on next outside click
       const close = () => { moreMenu.classList.remove("visible"); colorPicker.style.display = "none"; };
@@ -1895,6 +2167,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
           agents.set(data.name, agent);
           // Update displayed name
           card.querySelector(".agent-name").textContent = data.name;
+          requestAnimationFrame(() => _checkNameTruncation(card));
           // Update layout storage (both mobile and desktop keys)
           for (const key of [LAYOUT_KEY_DESKTOP, LAYOUT_KEY_MOBILE]) {
             try {
@@ -1915,6 +2188,30 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       } catch {
         alert("Rename failed");
       }
+      return;
+    }
+
+    if (action === "toggle-auto-rename") {
+      const agent = agents.get(name);
+      const newVal = !agent?.autoRename;
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(name)}/auto-rename`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: newVal }),
+        });
+        if (res.ok) {
+          if (agent) agent.autoRename = newVal;
+          item.textContent = newVal ? "Disable Auto-Rename" : "Enable Auto-Rename";
+        }
+      } catch {}
+      return;
+    }
+
+    if (action === "rename-now") {
+      try {
+        await fetch(`/api/sessions/${encodeURIComponent(name)}/queue-rename`, { method: "POST" });
+      } catch {}
       return;
     }
 
@@ -2068,11 +2365,68 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     } catch {}
   });
 
+  // Fire agent — long-press kill button to activate fire mode
+  // Hold 800ms → growing/shaking animation, release → stable "FIRE!" button, click again → modal
+  let fireTimer = null;
+  let fireActive = false;   // "FIRE!" button showing, waiting for deliberate click
+  let fireHolding = false;  // currently holding (growing/shaking animation plays)
+  let fireResetTimer = null;
+  let skipNextClick = false; // skip the click event from the mouseup that ends the hold
+  const FIRE_TOOLTIP = "Fire this agent \u2014 it writes a lesson to fired.md so future agents learn from the mistake";
+  // Instant tooltip on the kill/fire button — text changes based on state
+  killBtn.removeAttribute("title");
+  attachInstantTooltip(killBtn, () => {
+    if (fireActive) return FIRE_TOOLTIP;
+    return null;
+  });
+  killBtn.addEventListener("mousedown", (e) => {
+    if (e.button !== 0 || fireActive) return;
+    fireHolding = false;
+    clearTimeout(fireResetTimer);
+    fireTimer = setTimeout(() => {
+      fireHolding = true;
+      killBtn.classList.add("fire-holding");
+      killBtn.classList.remove("armed");
+      killArmed = false;
+      clearTimeout(killTimer);
+      killBtn.textContent = "FIRE!";
+      hideInstantTooltip();
+    }, 800);
+  });
+  killBtn.addEventListener("mouseup", () => {
+    clearTimeout(fireTimer);
+    if (fireHolding) {
+      // Finished hold — transition from shaking to stable fire button
+      fireHolding = false;
+      killBtn.classList.remove("fire-holding");
+      killBtn.classList.add("fire-mode");
+      fireActive = true;
+      skipNextClick = true; // don't open modal on this mouseup's click
+      // If click event doesn't fire (long-press suppression), auto-clear the flag
+      setTimeout(() => { skipNextClick = false; }, 100);
+      // Auto-reset after 5s if not clicked
+      fireResetTimer = setTimeout(() => {
+        fireActive = false;
+        killBtn.classList.remove("fire-mode");
+        killBtn.innerHTML = "\u00d7";
+      }, 5000);
+    }
+  });
+  killBtn.addEventListener("mouseleave", () => {
+    clearTimeout(fireTimer);
+    if (fireHolding) {
+      fireHolding = false;
+      killBtn.classList.remove("fire-holding");
+      killBtn.innerHTML = "\u00d7";
+    }
+  });
+
   // Kill agent — favorites require confirm(), non-favorites use double-click arm pattern
   let killArmed = false;
   let killTimer = null;
-  const doKill = async () => {
-    await fetch(`/api/sessions/${name}`, { method: "DELETE" });
+  const doKill = async (cleanWorktree = false) => {
+    const qs = cleanWorktree ? "?cleanWorktree=true" : "";
+    await fetch(`/api/sessions/${name}${qs}`, { method: "DELETE" });
     // Also kill the embedded terminal tmux session if it exists
     const agEntry = agents.get(name);
     if (agEntry?._termName) {
@@ -2101,18 +2455,112 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     updateEmptyState();
     updateDashboardDot();
   };
+
+  const tryKill = async () => {
+    // Check if agent is in a worktree
+    const branchEl = card.querySelector(".branch-info:not(.agent-term-branch)");
+    const isWorktree = branchEl?.classList.contains("worktree");
+    const branchName = branchEl?.textContent?.replace(/^worktree:\s*/, "") || "";
+
+    if (isWorktree && branchName) {
+      // Show worktree cleanup modal
+      const overlay = document.getElementById("worktree-cleanup-overlay");
+      const pathEl = document.getElementById("worktree-cleanup-path");
+      const agentData = agents.get(name);
+      pathEl.textContent = agentData?.workdir || branchName;
+      overlay.classList.remove("hidden");
+
+      // Wire up buttons (one-shot listeners)
+      const cancelBtn = document.getElementById("worktree-cleanup-cancel");
+      const keepBtn = document.getElementById("worktree-cleanup-keep");
+      const removeBtn = document.getElementById("worktree-cleanup-remove");
+      const cleanup = () => {
+        overlay.classList.add("hidden");
+        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+        keepBtn.replaceWith(keepBtn.cloneNode(true));
+        removeBtn.replaceWith(removeBtn.cloneNode(true));
+      };
+      document.getElementById("worktree-cleanup-cancel").addEventListener("click", () => { cleanup(); });
+      document.getElementById("worktree-cleanup-keep").addEventListener("click", async () => { cleanup(); await doKill(false); });
+      document.getElementById("worktree-cleanup-remove").addEventListener("click", async () => { cleanup(); await doKill(true); });
+      // Close on backdrop click
+      const backdropHandler = (e) => { if (e.target === overlay) { cleanup(); } };
+      overlay.addEventListener("click", backdropHandler, { once: true });
+      return;
+    }
+
+    await doKill();
+  };
+
   killBtn.addEventListener("click", async () => {
+    // Skip the click that fires right after the mouseup that ended the hold
+    if (skipNextClick) { skipNextClick = false; return; }
+    // Fire mode — user clicked the "FIRE!" button after holding
+    if (fireActive) {
+      fireActive = false;
+      clearTimeout(fireResetTimer);
+      killBtn.classList.remove("fire-mode");
+      killBtn.innerHTML = "\u00d7";
+      // Show fire modal
+      const overlay = document.getElementById("fire-overlay");
+      const reasonEl = document.getElementById("fire-reason");
+      const cancelBtn = document.getElementById("fire-cancel");
+      const confirmBtn = document.getElementById("fire-confirm");
+      reasonEl.value = "";
+      overlay.classList.remove("hidden");
+      reasonEl.focus();
+      const cleanup = () => {
+        overlay.classList.add("hidden");
+        cancelBtn.replaceWith(cancelBtn.cloneNode(true));
+        confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+      };
+      document.getElementById("fire-cancel").addEventListener("click", () => { cleanup(); }, { once: true });
+      document.getElementById("fire-confirm").addEventListener("click", async () => {
+        const reason = reasonEl.value.trim();
+        cleanup();
+        // Remove card immediately — agent runs in background
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(name)}/fire`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reason: reason || "" }),
+          });
+        } catch {}
+        // Clean up embedded terminal if exists
+        const agEntry = agents.get(name);
+        if (agEntry?._termName) {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "terminal-unsubscribe", session: agEntry._termName }));
+          }
+          if (agEntry._termXterm) { try { agEntry._termXterm.dispose(); } catch {} }
+          if (agEntry._termResizeObserver) { try { agEntry._termResizeObserver.disconnect(); } catch {} }
+        }
+        if (poppedOutAgents.has(name)) {
+          popoutChannel.postMessage({ type: "kill-agent", agent: name });
+          poppedOutAgents.delete(name);
+        }
+        card.remove();
+        agents.delete(name);
+        removeLayout(name);
+        saveCardOrder();
+        updateEmptyState();
+        updateDashboardDot();
+      }, { once: true });
+      // Close on backdrop click
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(); }, { once: true });
+      return;
+    }
     // Favorites: confirm dialog instead of double-click
     if (card.classList.contains("favorited")) {
       if (!confirm(`Kill favorite agent "${name}"? This agent is protected.`)) return;
-      await doKill();
+      await tryKill();
       return;
     }
     // Non-favorites: double-click arm pattern
     if (!killArmed) {
       killArmed = true;
       killBtn.classList.add("armed");
-      killBtn.textContent = "kill";
+      killBtn.textContent = "KILL";
       killTimer = setTimeout(() => {
         killArmed = false;
         killBtn.classList.remove("armed");
@@ -2121,7 +2569,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       return;
     }
     clearTimeout(killTimer);
-    await doKill();
+    await tryKill();
   });
 
   // Change workspace
@@ -2476,6 +2924,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       return;
     }
     card.classList.add("dragging");
+    if (_nameTooltip) { _nameTooltip.remove(); _nameTooltip = null; }
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", name);
   });
@@ -2541,9 +2990,12 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
     minimizedBar.appendChild(card);
   }
   updateBranchDisplay(card, branch, isWorktree);
-  agents.set(name, { card, terminal, status: "working", workdir, _waitGen: 0, pendingAttachments, pasteState });
+  agents.set(name, { card, terminal, status: "working", workdir, autoRename: false, _waitGen: 0, pendingAttachments, pasteState, _setName(n) { name = n; } });
+  // Persist new card in saved order (appended at end by saveCardOrder)
+  saveCardOrder();
   updateEmptyState();
   scheduleMasonry();
+  requestAnimationFrame(() => _checkNameTruncation(card));
 
   // Immediately check for existing docs (badge shows count on load)
   fetch(`/api/agent-docs/${encodeURIComponent(name)}`)
@@ -2959,6 +3411,7 @@ function addTerminalCard(name, workdir) {
 
   // Store in agents map
   agents.set(name, { card, xterm: term, fitAddon, type: "terminal", workdir, status: "terminal" });
+  saveCardOrder();
 
   // Derive parent agent name from terminal name (e.g. "my-agent-term" → "my-agent")
   const parentAgentName = name.endsWith("-term") ? name.slice(0, -5) : null;
@@ -3144,6 +3597,8 @@ function scrollTerminalToBottom(terminal) {
   const active = document.activeElement;
   terminal.scrollTop = terminal.scrollHeight;
   if (active && active !== document.activeElement && active.isConnected) {
+    const agent = _getAgentName(active);
+    _focusLog("scroll-restore", `scrollTerminalToBottom stole focus from textarea[${agent}]`, { guard: "scrollToBottom" });
     active.focus({ preventScroll: true });
   }
 }
@@ -3226,6 +3681,10 @@ function updateTerminal(terminal, lines) {
   terminal.innerHTML = `<pre>${html}</pre>`;
   // Restore focus if innerHTML stole it
   if (_preInnerFocused && _preInnerFocused !== document.activeElement && _preInnerFocused.isConnected) {
+    const agent = _getAgentName(_preInnerFocused);
+    const nowActive = document.activeElement;
+    const nowDesc = nowActive ? (nowActive.id || nowActive.className?.split?.(" ")?.[0] || nowActive.tagName) : "null";
+    _focusLog("innerHTML-restore", `innerHTML stole focus from textarea[${agent}], now on ${nowDesc}`, { guard: "updateTerminal" });
     _preInnerFocused.focus({ preventScroll: true });
     try { if (_preInnerCursorStart != null) _preInnerFocused.setSelectionRange(_preInnerCursorStart, _preInnerCursorEnd); } catch {}
   }
@@ -3449,6 +3908,7 @@ const TOKEN_PRICES = {
 let _tokenShowDollars = localStorage.getItem("ceo-token-show-dollars") === "true";
 
 function formatTokenCount(n) {
+  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
   if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
   if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
   return String(n);
@@ -3462,10 +3922,19 @@ function usageToDollars(u) {
 }
 
 function formatDollars(n) {
-  if (n >= 1000) return "$" + (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  if (n >= 100) return "$" + Math.round(n);
-  if (n >= 1) return "$" + n.toFixed(2);
-  return "$" + n.toFixed(3);
+  if (n >= 10000) return "$" + (n / 1000).toFixed(2) + "k";
+  if (n >= 1000) return "$" + (n / 1000).toFixed(3) + "k";
+  if (n >= 100) return "$" + n.toFixed(2);
+  if (n >= 10) return "$" + n.toFixed(3);
+  if (n >= 1) return "$" + n.toFixed(4);
+  return "$" + n.toFixed(4);
+}
+
+function formatDollarsCompact(n) {
+  if (n >= 10000) return "$" + (n / 1000).toFixed(1) + "k";
+  if (n >= 1000) return "$" + (n / 1000).toFixed(2) + "k";
+  if (n >= 100) return "$" + n.toFixed(2);
+  return "$" + n.toFixed(2);
 }
 
 function sumUsage(u) {
@@ -3475,6 +3944,89 @@ function sumUsage(u) {
 function formatUsageValue(u) {
   if (_tokenShowDollars) return formatDollars(usageToDollars(u));
   return formatTokenCount(sumUsage(u));
+}
+
+const TROLL_DIGITS = "0123456789";
+
+function rollTokenValue(el, newText) {
+  if (!el) return;
+  const oldText = el._tokenText || "";
+  el._tokenText = newText;
+  if (oldText === newText && el._trollBuilt) return;
+
+  // Right-align: pad shorter string on the left
+  const maxLen = Math.max(oldText.length, newText.length);
+  const oldPad = oldText.padStart(maxLen);
+  const newPad = newText.padStart(maxLen);
+
+  // Check if we can reuse existing DOM (same length, already built)
+  if (el._trollBuilt && el._trollLen === maxLen) {
+    // Just update positions
+    const slots = el.querySelectorAll(".troll");
+    for (let i = 0; i < maxLen; i++) {
+      const ch = newPad[i];
+      const slot = slots[i];
+      if (!slot) continue;
+      const strip = slot.querySelector(".troll-strip");
+      if (!strip) continue;
+      const di = TROLL_DIGITS.indexOf(ch);
+      if (di >= 0 && slot._isDigit) {
+        // Slide digit strip
+        strip.style.transform = `translateY(${-di * 1.2}em)`;
+      } else if (ch !== slot._ch) {
+        // Non-digit changed — rebuild this slot
+        strip.innerHTML = "";
+        const s = document.createElement("span");
+        s.textContent = ch === " " ? "\u00A0" : ch;
+        strip.appendChild(s);
+        strip.style.transform = "";
+        slot._isDigit = false;
+      }
+      slot._ch = ch;
+    }
+    return;
+  }
+
+  // Full rebuild
+  el.innerHTML = "";
+  el._trollBuilt = true;
+  el._trollLen = maxLen;
+
+  for (let i = 0; i < maxLen; i++) {
+    const ch = newPad[i];
+    const slot = document.createElement("span");
+    slot.className = "troll";
+    slot._ch = ch;
+
+    const strip = document.createElement("span");
+    strip.className = "troll-strip";
+
+    const di = TROLL_DIGITS.indexOf(ch);
+    if (di >= 0) {
+      // Build a 0-9 column
+      slot._isDigit = true;
+      for (let d = 0; d <= 9; d++) {
+        const s = document.createElement("span");
+        s.textContent = String(d);
+        strip.appendChild(s);
+      }
+      // No transition on first render — snap to position
+      strip.style.transform = `translateY(${-di * 1.2}em)`;
+      // Enable transition after first paint
+      requestAnimationFrame(() => {
+        strip.style.transition = "transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)";
+      });
+    } else {
+      // Static character ($, ., k, M, etc.)
+      slot._isDigit = false;
+      const s = document.createElement("span");
+      s.textContent = ch === " " ? "\u00A0" : ch;
+      strip.appendChild(s);
+    }
+
+    slot.appendChild(strip);
+    el.appendChild(slot);
+  }
 }
 
 function usageTooltip(label, u) {
@@ -3490,17 +4042,16 @@ function updateTokenUsageDisplay(msg) {
   const agentData = payload.agents || {};
   const dailyData = payload.daily || {};
 
-  // Save to localStorage
-  const stored = JSON.parse(localStorage.getItem("ceo-token-usage") || "{}");
-  stored.agents = stored.agents || {};
-  for (const [name, data] of Object.entries(agentData)) {
-    stored.agents[name] = data;
-  }
-  stored.daily = dailyData;
+  // Save to localStorage — full replace (server sends complete state)
+  const stored = { agents: agentData, daily: dailyData };
   localStorage.setItem("ceo-token-usage", JSON.stringify(stored));
 
   updateHeaderTokenTotals(stored);
 }
+
+let _lastKnownAllTimeTokens = 0;
+let _lastKnownMonthTokens = 0;
+let _lastKnownTodayTokens = 0;
 
 function updateHeaderTokenTotals(stored) {
   const allAgents = stored.agents || {};
@@ -3538,19 +4089,98 @@ function updateHeaderTokenTotals(stored) {
 
   const allTimeSum = sumUsage(allTime);
 
-  if (elTotal) { elTotal.textContent = allTimeSum > 0 ? formatUsageValue(allTime) : "—"; elTotal.title = usageTooltip("All time", allTime); }
-  if (elMonth) { elMonth.textContent = sumUsage(monthUsage) > 0 ? formatUsageValue(monthUsage) : "—"; elMonth.title = usageTooltip("This month", monthUsage); }
-  if (elToday) { elToday.textContent = sumUsage(todayUsage) > 0 ? formatUsageValue(todayUsage) : "—"; elToday.title = usageTooltip("Today", todayUsage); }
+  // Store dollar values for the ticker
+  _dollarSnapshots.prev = _dollarSnapshots.current || null;
+  _dollarSnapshots.current = {
+    today: usageToDollars(todayUsage),
+    month: usageToDollars(monthUsage),
+    allTime: usageToDollars(allTime),
+    time: Date.now(),
+  };
 
-  // Show/hide wrapper
+  // Store tooltips
+  if (elTotal) elTotal.title = usageTooltip("All time", allTime);
+  if (elMonth) elMonth.title = usageTooltip("This month", monthUsage);
+  if (elToday) elToday.title = usageTooltip("Today", todayUsage);
+
+  if (_tokenShowDollars) {
+    // In dollar mode, the ticker handles rendering
+    _startDollarTicker();
+  } else {
+    _stopDollarTicker();
+    if (elTotal) { rollTokenValue(elTotal, allTimeSum > 0 ? formatTokenCount(sumUsage(allTime)) : "—"); }
+    if (elMonth) { rollTokenValue(elMonth, sumUsage(monthUsage) > 0 ? formatTokenCount(sumUsage(monthUsage)) : "—"); }
+    if (elToday) { rollTokenValue(elToday, sumUsage(todayUsage) > 0 ? formatTokenCount(sumUsage(todayUsage)) : "—"); }
+  }
+
   const wrap = document.getElementById("token-usage-wrap");
   if (wrap) wrap.style.display = allTimeSum > 0 ? "" : "none";
+
+  // Check for milestone celebrations
+  const todaySum = sumUsage(todayUsage);
+  const monthSum = sumUsage(monthUsage);
+  if (todaySum > 0) checkMilestone(todaySum, "today");
+  if (monthSum > 0) checkMilestone(monthSum, "month");
+  if (allTimeSum > 0) checkMilestone(allTimeSum, "alltime");
+}
+
+// --- Dollar ticker: interpolates between server updates ---
+const _dollarSnapshots = { prev: null, current: null };
+let _dollarTickerInterval = null;
+
+function _getDollarRate() {
+  const { prev, current } = _dollarSnapshots;
+  if (!prev || !current || current.time === prev.time) return { today: 0, month: 0, allTime: 0 };
+  const dt = (current.time - prev.time) / 1000; // seconds
+  return {
+    today: (current.today - prev.today) / dt,
+    month: (current.month - prev.month) / dt,
+    allTime: (current.allTime - prev.allTime) / dt,
+  };
+}
+
+function _tickDollars() {
+  const { current } = _dollarSnapshots;
+  if (!current) return;
+  const rate = _getDollarRate();
+  const elapsed = (Date.now() - current.time) / 1000;
+
+  const today = current.today + rate.today * elapsed;
+  const month = current.month + rate.month * elapsed;
+  const allTime = current.allTime + rate.allTime * elapsed;
+
+  const elTotal = document.getElementById("token-usage-total");
+  const elMonth = document.getElementById("token-usage-month");
+  const elToday = document.getElementById("token-usage-today");
+
+  if (elToday) rollTokenValue(elToday, today > 0 ? formatDollars(today) : "—");
+  if (elMonth) rollTokenValue(elMonth, month > 0 ? formatDollars(month) : "—");
+  if (elTotal) rollTokenValue(elTotal, allTime > 0 ? formatDollars(allTime) : "—");
+}
+
+function _startDollarTicker() {
+  if (_dollarTickerInterval) return;
+  _tickDollars(); // immediate first tick
+  _dollarTickerInterval = setInterval(_tickDollars, 500);
+}
+
+function _stopDollarTicker() {
+  if (_dollarTickerInterval) {
+    clearInterval(_dollarTickerInterval);
+    _dollarTickerInterval = null;
+  }
+  // Clear stored text so rollTokenValue works fresh after switching back
+  for (const id of ["token-usage-total", "token-usage-month", "token-usage-today"]) {
+    const el = document.getElementById(id);
+    if (el) el._tokenText = null;
+  }
 }
 
 // Click to toggle between tokens and dollars
 document.getElementById("token-usage-wrap")?.addEventListener("click", () => {
   _tokenShowDollars = !_tokenShowDollars;
   localStorage.setItem("ceo-token-show-dollars", _tokenShowDollars);
+  if (!_tokenShowDollars) _stopDollarTicker();
   const stored = JSON.parse(localStorage.getItem("ceo-token-usage") || "{}");
   if (stored.agents) updateHeaderTokenTotals(stored);
 });
@@ -3799,6 +4429,8 @@ document.addEventListener("keydown", (e) => {
     if (_lastActiveTextarea && _lastActiveTextarea.isConnected && (Date.now() - _lastActiveTextareaAt) < 5000 && (Date.now() - _userClickedAt) > 300) {
       if (!e.metaKey && !e.ctrlKey && !e.altKey) {
         const ta = _lastActiveTextarea;
+        const agent = _getAgentName(ta);
+        _focusLog("keydown-redirect", `key="${e.key}" redirected to textarea[${agent}] (focus was on body)`, { guard: "hotkey-guard" });
         ta.focus({ preventScroll: true });
         // Insert the printable character that was meant for the textarea
         if (e.key.length === 1) {
@@ -4049,6 +4681,8 @@ function dismissPageLoader() {
   }
   // Now that loader is dismissed, let empty state show if there are genuinely 0 agents
   updateEmptyState();
+  // Start session reconciliation — catches any loading failure
+  _startSessionReconciliation();
   // Restore remaining state (panels, scroll, modals) after a frame so layout settles
   requestAnimationFrame(() => {
     try {
@@ -4109,6 +4743,59 @@ for (const ms of [4000, 6000]) {
   }, ms);
 }
 
+// --- Session reconciliation ---
+// Periodically re-fetches sessions to catch any loading failure.
+// Runs every 3s for the first 30s after page load, then every 10s ongoing.
+let _reconcileTimer = null;
+function _startSessionReconciliation() {
+  if (_reconcileTimer) return;
+  _reconcileTimer = setInterval(_reconcileSessions, 3000);
+  // After 30s, slow down to every 10s
+  setTimeout(() => {
+    if (_reconcileTimer) {
+      clearInterval(_reconcileTimer);
+      _reconcileTimer = setInterval(_reconcileSessions, 10000);
+    }
+  }, 30000);
+}
+function _reconcileSessions() {
+  // Only reconcile when WS is open (server is reachable)
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  fetch("/api/sessions", { signal: AbortSignal.timeout(3000) })
+    .then((r) => r.json())
+    .then((sessions) => {
+      if (!sessions || sessions.length === 0) return;
+      let added = false;
+      for (const s of sessions) {
+        if (agents.has(s.name)) continue;
+        added = true;
+        try {
+          if (s.type === "terminal") {
+            addTerminalCard(s.name, s.workdir);
+          } else {
+            addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
+          }
+        } catch (e) {
+          console.error("[reconcile] Failed to add card for", s.name, e);
+        }
+      }
+      if (added) {
+        console.log("[reconcile] Added missing agent cards");
+        reorderCards();
+        updateEmptyState();
+        // Request fresh output for new cards
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          for (const s of sessions) {
+            if (!agents.get(s.name)?.terminal?._lastContent) {
+              ws.send(JSON.stringify({ type: "request-refresh", session: s.name }));
+            }
+          }
+        }
+      }
+    })
+    .catch(() => {});
+}
+
 // Load existing sessions first, then connect WebSocket
 function _loadSessions(retries) {
   fetch("/api/sessions", { signal: AbortSignal.timeout(5000) })
@@ -4159,6 +4846,7 @@ try {
     sessionStorage.removeItem("ceo-reload-state");
     localStorage.removeItem("ceo-reload-state");
     _savedReloadState = JSON.parse(saved);
+    _focusLog("reload-loaded", `found saved state: drafts=${Object.keys(_savedReloadState.drafts||{}).length}, focusedAgent=${_savedReloadState.focusedAgent||"none"}, modal=${!!_savedReloadState.modal}, cursor=${_savedReloadState.focusCursorStart}-${_savedReloadState.focusCursorEnd}`);
   }
 } catch {}
 
@@ -4166,11 +4854,14 @@ try {
 // pagehide fires reliably in WKWebView and mobile Safari; beforeunload does not.
 window.addEventListener("pagehide", () => {
   try {
-    localStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
+    const _ph = _mergeReloadState(buildReloadState());
+    _focusLog("pagehide-save", `drafts=${Object.keys(_ph.drafts||{}).length}, focusedAgent=${_ph.focusedAgent||"none"}, cursor=${_ph.focusCursorStart}-${_ph.focusCursorEnd}`);
+    _flushFocusLog();
+    localStorage.setItem("ceo-reload-state", JSON.stringify(_ph));
   } catch {}
 });
 
-// Auto-save drafts every 5s so force-kills don't lose input
+// Auto-save drafts every 1s so force-kills/restarts don't lose input
 setInterval(() => {
   try {
     // Only save if there are actual drafts or pasted content worth preserving
@@ -4186,7 +4877,18 @@ setInterval(() => {
       localStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState()));
     }
   } catch {}
-}, 5000);
+}, 1000);
+
+// Immediate debounced save on any card textarea input (catches typing between auto-saves)
+let _draftSaveTimer = null;
+document.addEventListener("input", (e) => {
+  if (!e.target.matches?.(".card-input textarea")) return;
+  if (_draftSaveTimer) clearTimeout(_draftSaveTimer);
+  _draftSaveTimer = setTimeout(() => {
+    _draftSaveTimer = null;
+    try { localStorage.setItem("ceo-reload-state", JSON.stringify(buildReloadState())); } catch {}
+  }, 300);
+}, true);
 
 // Early restore: drafts + focus applied as soon as cards exist (before loader dismisses).
 // This lets the user start typing immediately during load.
@@ -4194,6 +4896,7 @@ let _earlyStateApplied = false;
 function _applyEarlyState(state) {
   if (_earlyStateApplied) return;
   _earlyStateApplied = true;
+  _focusLog("reload-early", `restoring state: drafts=${Object.keys(state.drafts||{}).length}, focusedAgent=${state.focusedAgent||"none"}, focusedId=${state.focusedId||"none"}, cursor=${state.focusCursorStart}-${state.focusCursorEnd}`);
   // 1. Restore input drafts
   if (state.drafts) {
     for (const [name, text] of Object.entries(state.drafts)) {
@@ -4204,7 +4907,10 @@ function _applyEarlyState(state) {
           textarea.value = text;
           textarea.style.height = "1px";
           textarea.style.height = Math.min(textarea.scrollHeight, 150) + "px";
+          _focusLog("reload-draft", `restored draft for [${name}]: ${text.length} chars`);
         }
+      } else {
+        _focusLog("reload-draft-miss", `agent [${name}] not found for draft restore`);
       }
     }
   }
@@ -4243,14 +4949,17 @@ function _applyRestoredState(state) {
   // 3. Force all terminals to scroll to bottom on reload.
   // Saved scroll positions are unreliable after innerHTML rebuild — the offsets
   // become stale and leave terminals stuck at the top.
-  for (const [, agent] of agents) {
+  let _scrolledCount = 0;
+  for (const [name, agent] of agents) {
     if (agent.terminal) {
       agent.terminal._userScrolledUp = false;
       agent.terminal._forceScrollUntil = Date.now() + 5000;
       agent.terminal._wheelGraceUntil = Date.now() + 1500;
       scrollTerminalToBottom(agent.terminal);
+      _scrolledCount++;
     }
   }
+  _focusLog("reload-scroll", `force-scrolled ${_scrolledCount} terminals to bottom`);
   // 4. Restore page scroll position
   window.scrollTo(0, state.scrollY || 0);
   // 5. Restore current view (todo vs agents)
@@ -4284,6 +4993,7 @@ function _applyRestoredState(state) {
   }
   // 6. Restore new-agent modal state if it was open
   if (state.modal) {
+    _focusLog("reload-modal", `restoring modal: name="${state.modal.name}", prompt=${(state.modal.prompt||"").length} chars, workdir=${state.modal.selectedWorkdirPath || "default"}`);
     modalOverlay.classList.remove("hidden");
     if (state.modal.selectedSessionId) {
       selectedSessionId = state.modal.selectedSessionId;
@@ -4383,51 +5093,56 @@ function _applyRestoredState(state) {
 
 // Shared focus restoration — used by both early and late restore phases
 function _restoreFocusFromState(state) {
-  function restoreFocus(el) {
+  function restoreFocus(el, source) {
     if (!el) return false;
     el.focus({ preventScroll: true });
     if (state.focusCursorStart != null && el.setSelectionRange) {
       try {
         const len = el.value?.length ?? 0;
-        // If cursor was at or near end of text, snap to actual end
-        // (text length may differ slightly after restore)
         const wasNearEnd = state.focusCursorStart >= (state._savedTextLength || len) - 2;
         if (wasNearEnd) {
           el.setSelectionRange(len, len);
+          _focusLog("reload-focus", `restored focus via ${source}, cursor snapped to end (${len})`, { guard: "restoreFocus" });
         } else {
           const start = Math.min(state.focusCursorStart, len);
           const end = Math.min(state.focusCursorEnd ?? start, len);
           el.setSelectionRange(start, end);
+          _focusLog("reload-focus", `restored focus via ${source}, cursor at ${start}-${end} (len=${len})`, { guard: "restoreFocus" });
         }
       } catch {}
+    } else {
+      _focusLog("reload-focus", `restored focus via ${source}, no cursor to set`, { guard: "restoreFocus" });
     }
     return true;
   }
   if (state.focusedId) {
     const el = document.getElementById(state.focusedId);
-    if (el && restoreFocus(el)) return;
+    if (el && restoreFocus(el, `id:${state.focusedId}`)) return;
+    _focusLog("reload-focus-miss", `focusedId=${state.focusedId} not found`);
   }
   if (state.focusedTodo) {
     let el = null;
     if (state.focusedTodo === "title") el = document.querySelector(".todo-title-input");
     else if (state.focusedTodo === "editor") el = document.querySelector(".todo-editor");
     else if (state.focusedTodo === "rich-editor") el = document.getElementById("todo-rich-editor");
-    if (el && restoreFocus(el)) return;
+    if (el && restoreFocus(el, `todo:${state.focusedTodo}`)) return;
   }
   if (state.focusedAgent) {
     const agent = agents.get(state.focusedAgent);
     if (agent) {
       const textarea = agent.card.querySelector(".card-input textarea");
-      if (textarea && restoreFocus(textarea)) return;
+      if (textarea && restoreFocus(textarea, `agent:${state.focusedAgent}`)) return;
     }
+    _focusLog("reload-focus-miss", `focusedAgent=${state.focusedAgent} not found in agents map`);
   }
   if (state.focusedDocAgent) {
     const agent = agents.get(state.focusedDocAgent);
     if (agent) {
       const editArea = agent.card.querySelector(".agent-doc-edit-area");
-      if (editArea && editArea.style.display !== "none" && restoreFocus(editArea)) return;
+      if (editArea && editArea.style.display !== "none" && restoreFocus(editArea, `doc:${state.focusedDocAgent}`)) return;
     }
   }
+  _focusLog("reload-focus-miss", `no focus target matched (focusedAgent=${state.focusedAgent}, focusedId=${state.focusedId})`);
 }
 
 // --- iOS Keyboard Handling ---
@@ -4468,3 +5183,248 @@ if (window.visualViewport && isMobile()) {
   // Mobile focusin scroll is handled by the global focusin handler (line ~3093)
   // which accounts for shell panel height and card context — no duplicate needed here.
 }
+
+
+// ═══════════════════════════════════════════════════
+// Milestone Celebration System (DOM-based, GPU-accelerated)
+// ═══════════════════════════════════════════════════
+
+const CONFETTI_COLORS = ["#ff6b6b","#ffd93d","#6bcb77","#4d96ff","#ff6eb4","#a855f7","#fb923c","#f472b6","#34d399"];
+const MONEY_EMOJIS = ["💵", "💰", "💸", "🪙", "💲"];
+
+const TOKEN_MILESTONES = [
+  1_000,              // 1K
+  5_000,              // 5K
+  10_000,             // 10K
+  50_000,             // 50K
+  100_000,            // 100K
+  500_000,            // 500K
+  1_000_000,          // 1M
+  5_000_000,          // 5M
+  10_000_000,         // 10M
+  25_000_000,         // 25M
+  50_000_000,         // 50M
+  100_000_000,        // 100M
+  200_000_000,        // 200M
+  500_000_000,        // 500M
+  1_000_000_000,      // 1B
+  2_000_000_000,      // 2B
+  5_000_000_000,      // 5B
+  10_000_000_000,     // 10B
+  20_000_000_000,     // 20B
+  50_000_000_000,     // 50B
+  100_000_000_000,    // 100B
+];
+
+function getConfettiStyle() {
+  return localStorage.getItem("ceo-confetti-style") || "auto";
+}
+function setConfettiStyle(id) {
+  localStorage.setItem("ceo-confetti-style", id);
+}
+function _milestoneStorageKey(period) {
+  if (period === "today") {
+    const d = new Date();
+    return `ceo-seen-milestones-today-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  if (period === "month") {
+    const d = new Date();
+    return `ceo-seen-milestones-month-${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  }
+  return "ceo-seen-milestones";
+}
+function getSeenMilestones(period) {
+  try { return JSON.parse(localStorage.getItem(_milestoneStorageKey(period)) || "[]"); } catch { return []; }
+}
+function markMilestoneSeen(m, period) {
+  const key = _milestoneStorageKey(period);
+  const seen = getSeenMilestones(period);
+  if (!seen.includes(m)) { seen.push(m); localStorage.setItem(key, JSON.stringify(seen)); }
+}
+
+const _PERIOD_LABELS = { today: "Today!", month: "This Month!", alltime: "All Time!" };
+
+function checkMilestone(newTotal, period) {
+  let prev;
+  if (period === "today") { prev = _lastKnownTodayTokens; _lastKnownTodayTokens = newTotal; }
+  else if (period === "month") { prev = _lastKnownMonthTokens; _lastKnownMonthTokens = newTotal; }
+  else { prev = _lastKnownAllTimeTokens; _lastKnownAllTimeTokens = newTotal; }
+  if (prev === 0) return;
+  const seen = getSeenMilestones(period);
+  for (const m of TOKEN_MILESTONES) {
+    if (newTotal >= m && prev < m && !seen.includes(m)) {
+      markMilestoneSeen(m, period);
+      triggerCelebration(m, period);
+      return;
+    }
+  }
+}
+
+function triggerCelebration(milestone, period) {
+  const style = getConfettiStyle();
+  if (style === "none") return;
+  const useMoney = style === "auto" ? _tokenShowDollars : style === "money";
+  _launchRockets(useMoney);
+  _showMilestoneToast(milestone, period);
+}
+
+function _showMilestoneToast(milestone, period) {
+  const toast = document.createElement("div");
+  toast.className = "milestone-toast";
+  const emoji = _tokenShowDollars ? "💰" : "🎉";
+  const periodLabel = _PERIOD_LABELS[period] || "All Time!";
+  toast.innerHTML = `
+    <div class="milestone-period">${periodLabel}</div>
+    <div class="milestone-emoji">${emoji}</div>
+    <div class="milestone-label">Milestone Reached</div>
+    <div class="milestone-value">${formatTokenCount(milestone)} tokens</div>
+  `;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.animation = "milestoneOut 0.5s ease forwards";
+    setTimeout(() => toast.remove(), 500);
+  }, 3000);
+}
+
+// DOM-based rockets + explosion — all CSS transforms = GPU composited, no canvas
+function _launchRockets(useMoney) {
+  const container = document.createElement("div");
+  container.style.cssText = "position:fixed;inset:0;pointer-events:none;z-index:100000;overflow:hidden";
+  document.body.appendChild(container);
+
+  const W = window.innerWidth, H = window.innerHeight;
+  const rocketCount = 7;
+
+  for (let i = 0; i < rocketCount; i++) {
+    // Spread evenly across the full width with slight randomness
+    const slotWidth = W / rocketCount;
+    const startX = slotWidth * i + slotWidth * (0.2 + Math.random() * 0.6);
+    const explodeY = H * 0.12 + Math.random() * H * 0.3;
+    const travelTime = 600 + Math.random() * 400;
+    const delay = i * 150;
+
+    // Rocket element
+    const rocket = document.createElement("div");
+    rocket.textContent = "🚀";
+    rocket.style.cssText = `position:absolute;font-size:32px;left:${startX}px;bottom:-40px;will-change:transform;transition:transform ${travelTime}ms ease-out;z-index:2`;
+    container.appendChild(rocket);
+
+    setTimeout(() => {
+      rocket.style.transform = `translateY(-${H - explodeY + 40}px)`;
+
+      setTimeout(() => {
+        rocket.remove();
+        _spawnExplosion(container, startX, explodeY, useMoney);
+      }, travelTime);
+    }, delay);
+  }
+
+  // Cleanup container after all animations done
+  setTimeout(() => container.remove(), rocketCount * 150 + 1200 + 2500);
+}
+
+function _spawnExplosion(container, cx, cy, useMoney) {
+  const count = useMoney ? 20 : 30;
+
+  for (let i = 0; i < count; i++) {
+    const el = document.createElement("div");
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 80 + Math.random() * 200;
+    const dx = Math.cos(angle) * dist;
+    const dy = Math.sin(angle) * dist + 60; // gravity bias downward
+    const duration = 1200 + Math.random() * 800;
+
+    if (useMoney) {
+      el.textContent = MONEY_EMOJIS[Math.floor(Math.random() * MONEY_EMOJIS.length)];
+      el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;font-size:${16 + Math.random() * 14}px;will-change:transform,opacity;transition:transform ${duration}ms cubic-bezier(.2,.8,.3,1),opacity ${duration}ms ease;opacity:1;z-index:1;pointer-events:none`;
+    } else {
+      const color = CONFETTI_COLORS[Math.floor(Math.random() * CONFETTI_COLORS.length)];
+      const w = 6 + Math.random() * 6;
+      const h = 4 + Math.random() * 4;
+      el.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:${w}px;height:${h}px;background:${color};border-radius:1px;will-change:transform,opacity;transition:transform ${duration}ms cubic-bezier(.2,.8,.3,1),opacity ${duration}ms ease;opacity:1;z-index:1;pointer-events:none`;
+    }
+
+    container.appendChild(el);
+
+    // Force layout then animate
+    el.offsetWidth;
+    const spin = Math.random() * 720 - 360;
+    el.style.transform = `translate(${dx}px, ${dy}px) rotate(${spin}deg)`;
+    el.style.opacity = "0";
+
+    setTimeout(() => el.remove(), duration + 50);
+  }
+}
+
+// --- Confetti Picker ---
+const _CONFETTI_OPTIONS = [
+  { id: "auto", name: "Auto", desc: "Money when viewing $, confetti when viewing tokens", preview: "🔄" },
+  { id: "money", name: "Money Rockets", desc: "Rockets explode into money emojis", preview: "🚀💰💵" },
+  { id: "confetti", name: "Confetti Rockets", desc: "Rockets explode into colorful confetti", preview: "🚀🎉🎊" },
+  { id: "none", name: "None", desc: "No celebration effect", preview: "🔇" },
+];
+
+function openConfettiPicker() {
+  const existing = document.querySelector(".confetti-picker-overlay");
+  if (existing) existing.remove();
+
+  const currentId = getConfettiStyle();
+  const overlay = document.createElement("div");
+  overlay.className = "confetti-picker-overlay";
+
+  const cardsHtml = _CONFETTI_OPTIONS.map(s => `
+    <div class="confetti-picker-card${s.id === currentId ? " selected" : ""}" data-style-id="${s.id}">
+      <div class="picker-preview">${s.preview}</div>
+      <div class="picker-name">${s.name}</div>
+      <div class="picker-desc">${s.desc}</div>
+    </div>
+  `).join("");
+
+  overlay.innerHTML = `
+    <div class="confetti-picker-modal">
+      <h2>Milestone Celebration Style</h2>
+      <div class="picker-subtitle">Rockets launch, then explode. Click a card to preview.</div>
+      <div class="confetti-picker-grid">${cardsHtml}</div>
+      <div class="confetti-picker-actions">
+        <button class="btn-cancel">Cancel</button>
+        <button class="btn-save">Save</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  let selectedId = currentId;
+
+  overlay.querySelectorAll(".confetti-picker-card").forEach(card => {
+    card.addEventListener("click", () => {
+      overlay.querySelectorAll(".confetti-picker-card").forEach(c => c.classList.remove("selected"));
+      card.classList.add("selected");
+      selectedId = card.dataset.styleId;
+      if (selectedId !== "none") {
+        const useMoney = selectedId === "auto" ? _tokenShowDollars : selectedId === "money";
+        _launchRockets(useMoney);
+      }
+    });
+  });
+
+  overlay.querySelector(".btn-save").addEventListener("click", () => {
+    setConfettiStyle(selectedId);
+    updateConfettiLabel();
+    overlay.remove();
+  });
+  overlay.querySelector(".btn-cancel").addEventListener("click", () => overlay.remove());
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove(); });
+}
+
+function updateConfettiLabel() {
+  const label = document.getElementById("confetti-current-label");
+  if (!label) return;
+  const opt = _CONFETTI_OPTIONS.find(o => o.id === getConfettiStyle());
+  label.textContent = opt ? `Current: ${opt.name}` : "";
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("setting-confetti-picker");
+  if (btn) btn.addEventListener("click", openConfettiPicker);
+  updateConfettiLabel();
+});

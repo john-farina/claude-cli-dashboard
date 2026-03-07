@@ -45,6 +45,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown-dark.css" integrity="sha384-7kLxZXax7DhezxjpSqH13QX4VIrQqiJNQfdb16B+7+GB2sFHVDbb9ZlKP+Gk1m90" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" integrity="sha384-tStR1zLfWgsiXCF3IgfB3lBa8KmBe/lG287CL9WCeKgQYcp1bjb4/+mwN6oti4Co" crossorigin="anonymous">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/css/diff2html.min.css" integrity="sha384-iBvSlI3tNrrSIy7s6mvLg+5B2Z/QXbR4L0Pzg1nRf8zkXrz5JF316MLm2igMIpi2" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/vs2015.min.css" crossorigin="anonymous">
 </head>
 <body>
   <!-- Full-page loading overlay — visible until agents are laid out -->
@@ -222,6 +223,35 @@
     </div>
   </div>
 
+  <!-- Worktree Cleanup Modal -->
+  <div id="worktree-cleanup-overlay" class="modal-overlay hidden">
+    <div class="modal worktree-cleanup-modal">
+      <h2>🌳 Clean up worktree?</h2>
+      <p class="worktree-cleanup-desc">This agent is working in a git worktree:</p>
+      <code id="worktree-cleanup-path" class="worktree-cleanup-path"></code>
+      <p class="worktree-cleanup-desc">Want to remove the worktree too, or just kill the agent?</p>
+      <div class="modal-actions worktree-cleanup-actions">
+        <button type="button" id="worktree-cleanup-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="worktree-cleanup-keep" class="btn-secondary">Kill only</button>
+        <button type="button" id="worktree-cleanup-remove" class="btn-primary btn-danger">Kill &amp; clean worktree</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Fire Agent Modal -->
+  <div id="fire-overlay" class="modal-overlay hidden">
+    <div class="modal fire-modal">
+      <h2>Fire Agent</h2>
+      <p class="fire-desc">The agent will investigate what went wrong and save a lesson to <code>fired.md</code> so future agents don't repeat the mistake.</p>
+      <label class="fire-label" for="fire-reason">What went wrong? <span class="fire-optional">(optional — leave blank for self-investigation)</span></label>
+      <textarea id="fire-reason" class="fire-reason" rows="3" placeholder="e.g. Kept deleting files without asking, ignored my instructions about..."></textarea>
+      <div class="modal-actions">
+        <button type="button" id="fire-cancel" class="btn-secondary">Cancel</button>
+        <button type="button" id="fire-confirm" class="btn-primary btn-fire">Fire</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Update Error Modal -->
   <div id="update-error-overlay" class="modal-overlay hidden">
     <div class="modal update-error-modal">
@@ -258,10 +288,18 @@
           <span id="diff-workdir" class="diff-workdir"></span>
         </div>
         <div class="diff-modal-controls">
+          <div class="diff-context-group" id="diff-context-group">
+            <span class="diff-context-label">Context:</span>
+            <button class="diff-ctx-btn active" data-ctx="3">3</button>
+            <button class="diff-ctx-btn" data-ctx="10">10</button>
+            <button class="diff-ctx-btn" data-ctx="25">25</button>
+            <button class="diff-ctx-btn" data-ctx="all">All</button>
+          </div>
           <div class="diff-tab-group" id="diff-tab-group">
             <button class="diff-tab active" data-view="unified">Unified</button>
             <button class="diff-tab" data-view="side-by-side">Split</button>
           </div>
+          <span id="diff-live-dot" class="diff-live-dot" title="Live updating"></span>
           <button id="diff-refresh" class="diff-icon-btn" title="Refresh diff">&#8635;</button>
           <button id="diff-close" class="diff-icon-btn diff-close-btn" title="Close">&times;</button>
         </div>
@@ -536,6 +574,12 @@
               </div>
             </div>
           </div>
+          <div class="customize-color-section" data-setting-id="milestone-celebration">
+            <span class="settings-label">Milestone Celebration</span>
+            <span class="settings-desc">Choose the confetti effect when you hit a new token milestone</span>
+            <button id="setting-confetti-picker" class="btn-settings-action" style="margin-top:6px">Choose Style</button>
+            <span id="confetti-current-label" class="settings-desc" style="margin-top:4px"></span>
+          </div>
           <p id="customize-rebuild-hint" class="settings-hint hidden">To update the Dock app icon and name, go to <strong>Settings → Rebuild &amp; Relaunch</strong> in the menu bar (⌘⇧B).</p>
         </div>
       </div>
@@ -547,6 +591,26 @@
           <span class="settings-section-title" style="margin:0">Agent Defaults</span>
         </button>
         <div id="agent-defaults-body" class="settings-collapse-body hidden">
+          <div class="settings-inline-row" data-setting-id="auto-rename-agents">
+            <div class="settings-row-info">
+              <span class="settings-label">Auto-Rename Agents</span>
+              <span class="settings-desc">Automatically names agents based on what they're working on. After the first task, the agent gets a descriptive name (e.g. "fix-auth-redirect"). On each subsequent task, a lightweight check runs to see if the name still fits — if not, it updates. Per-agent control via <strong>⋯ → Enable/Disable Auto-Rename</strong>, or trigger manually with <strong>⋯ → Rename Now</strong>.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-auto-rename">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-inline-row" id="auto-rename-new-only-row" style="display:none;">
+            <div class="settings-row-info">
+              <span class="settings-label">New Sessions Only</span>
+              <span class="settings-desc">Only apply auto-rename to newly created agents. Turn off to enable auto-rename for all existing agents too.</span>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="setting-auto-rename-new-only" checked>
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
           <div class="settings-inline-row">
             <div class="settings-row-info">
               <span class="settings-label">Default Name</span>
@@ -692,10 +756,11 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js" integrity="sha384-S1biLeI8L/bFduIVvCxbn/l4EtaG4nTqQjGF7qCYTbsGXGFe8KgIKXtw4+UWxprv" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js" integrity="sha384-suTk5GfzCaPxAJRzhqzQQvM81UskMll+stLgqXpay997ORTnMRm1IAJi143VfhXU" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js" integrity="sha384-1tVmtFdzvhqVP3vQWJmKYvD0uTtR0r+FhlLWw+vG6F/vNDS7yegNMNNHRS12fSyR" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
   <script src="js/theme.js?v=20260305e"></script>
   <script src="js/modals.js?v=20260305e"></script>
   <script src="js/todos.js?v=20260305e"></script>
-  <script src="js/settings.js?v=20260305e"></script>
+  <script src="js/settings.js?v=20260306a"></script>
   <script src="js/shell.js?v=20260305e"></script>
   <script src="app.js?v=20260305f"></script>
 </body>

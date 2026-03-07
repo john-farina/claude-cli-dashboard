@@ -41,7 +41,7 @@ const {
   ensureTmuxServer, tmuxExec, tmuxExecAsync,
   listTmuxSessions, invalidateTmuxSessionsCache, listTmuxSessionsAsync,
   capturePaneAsync, capturePane, sendKeys, sendKeysWithImages,
-  getEffectiveCwd, getEffectiveCwdAsync,
+  getEffectiveCwd, getEffectiveCwdAsync, clearWorktreeCache,
 } = tmux;
 
 // Destructure session
@@ -270,6 +270,34 @@ function parseTokenUsageFromBytes(buf, byteLength) {
   return { input, output, cacheCreation, cacheRead };
 }
 
+function parseTokenUsageByDay(filePath) {
+  const daily = {};
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const lines = content.split("\n");
+    for (const line of lines) {
+      if (!line || !line.includes('"usage"')) continue;
+      try {
+        const d = JSON.parse(line);
+        const u = d.message?.usage;
+        if (!u) continue;
+        const ts = d.timestamp;
+        if (!ts) continue;
+        const dt = new Date(ts);
+        if (isNaN(dt.getTime())) continue;
+        const dayKey = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        const day = daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        day.input += u.input_tokens || 0;
+        day.output += u.output_tokens || 0;
+        day.cacheCreation += u.cache_creation_input_tokens || 0;
+        day.cacheRead += u.cache_read_input_tokens || 0;
+        daily[dayKey] = day;
+      } catch {}
+    }
+  } catch {}
+  return daily;
+}
+
 function getTokenUsageForSession(sessionId) {
   const filePath = findJsonlFileForSession(sessionId);
   if (!filePath) return null;
@@ -315,18 +343,20 @@ function syncTokenUsage() {
     if (!usage) continue;
     const prev = saved.agents[name];
     const sameSession = prev && prev.sessionId === sessionId;
-    if (!sameSession ||
-        prev.input !== usage.input || prev.output !== usage.output ||
-        prev.cacheCreation !== usage.cacheCreation || prev.cacheRead !== usage.cacheRead) {
-      // Only compute daily delta for the same session (incremental).
-      // When sessionId changes or agent is first seen, we can't compute
-      // a meaningful delta — just record the baseline and start fresh.
+    const prevSU = sameSession && prev?._sessionUsage;
+    const sessionChanged = !sameSession
+      || !prevSU
+      || prevSU.input !== usage.input || prevSU.output !== usage.output
+      || prevSU.cacheCreation !== usage.cacheCreation || prevSU.cacheRead !== usage.cacheRead;
+    if (sessionChanged) {
       if (sameSession) {
+        // Incremental delta for ongoing sessions
+        const su = prevSU || { input: prev.input || 0, output: prev.output || 0, cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0 };
         const delta = {
-          input: usage.input - (prev.input || 0),
-          output: usage.output - (prev.output || 0),
-          cacheCreation: usage.cacheCreation - (prev.cacheCreation || 0),
-          cacheRead: usage.cacheRead - (prev.cacheRead || 0),
+          input: usage.input - su.input,
+          output: usage.output - su.output,
+          cacheCreation: usage.cacheCreation - su.cacheCreation,
+          cacheRead: usage.cacheRead - su.cacheRead,
         };
         if (delta.input > 0 || delta.output > 0 || delta.cacheCreation > 0 || delta.cacheRead > 0) {
           const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
@@ -336,8 +366,41 @@ function syncTokenUsage() {
           day.cacheRead += delta.cacheRead;
           saved.daily[todayKey] = day;
         }
+        saved.agents[name] = {
+          input: (prev.input || 0) + delta.input,
+          output: (prev.output || 0) + delta.output,
+          cacheCreation: (prev.cacheCreation || 0) + delta.cacheCreation,
+          cacheRead: (prev.cacheRead || 0) + delta.cacheRead,
+          sessionId,
+          _sessionUsage: { ...usage },
+        };
+      } else {
+        // New session — carry forward cumulative total + backfill daily from JSONL
+        const prevTotal = prev ? {
+          input: prev.input || 0, output: prev.output || 0,
+          cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0,
+        } : { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        const filePath = findJsonlFileForSession(sessionId);
+        if (filePath) {
+          const byDay = parseTokenUsageByDay(filePath);
+          for (const [dayKey, dayUsage] of Object.entries(byDay)) {
+            const existing = saved.daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+            existing.input += dayUsage.input;
+            existing.output += dayUsage.output;
+            existing.cacheCreation += dayUsage.cacheCreation;
+            existing.cacheRead += dayUsage.cacheRead;
+            saved.daily[dayKey] = existing;
+          }
+        }
+        saved.agents[name] = {
+          input: prevTotal.input + usage.input,
+          output: prevTotal.output + usage.output,
+          cacheCreation: prevTotal.cacheCreation + usage.cacheCreation,
+          cacheRead: prevTotal.cacheRead + usage.cacheRead,
+          sessionId,
+          _sessionUsage: { ...usage },
+        };
       }
-      saved.agents[name] = { ...usage, sessionId };
       changed = true;
     }
   }
@@ -702,6 +765,8 @@ app.get("/api/config", (req, res) => {
     title: userConfig.title || "CEO Dashboard",
     accentColor: userConfig.accentColor || "gold",
     bgColor: userConfig.bgColor || null,
+    autoRenameAgents: !!userConfig.autoRenameAgents,
+    autoRenameNewOnly: userConfig.autoRenameNewOnly !== false,
     needsSetup: _configMissing,
     shellAvailable: !!pty,
   });
@@ -729,6 +794,8 @@ app.put("/api/config", (req, res) => {
     if (updates.bgColor === null) delete userConfig.bgColor;
     else userConfig.bgColor = updates.bgColor;
   }
+  if (updates.autoRenameAgents !== undefined) userConfig.autoRenameAgents = !!updates.autoRenameAgents;
+  if (updates.autoRenameNewOnly !== undefined) userConfig.autoRenameNewOnly = !!updates.autoRenameNewOnly;
   if (updates.dismissedOriginHead !== undefined) {
     if (updates.dismissedOriginHead === null) delete userConfig.dismissedOriginHead;
     else userConfig.dismissedOriginHead = updates.dismissedOriginHead;
@@ -767,24 +834,52 @@ app.post("/api/settings/install-alias", (req, res) => {
 // --- Sessions API ---
 
 app.get("/api/sessions", async (req, res) => {
-  const tmuxSessions = listTmuxSessions();
-  const meta = loadSessionsMeta();
-  const sessions = await Promise.all(tmuxSessions.map(async (s) => {
-    const name = s.replace(PREFIX, "");
-    const workdir = meta[name]?.workdir || DEFAULT_WORKDIR;
-    const git = await getCachedGitInfo(workdir);
-    return {
-      name,
-      workdir,
-      created: meta[name]?.created || null,
-      branch: git?.branch || null,
-      isWorktree: git?.isWorktree || false,
-      favorite: meta[name]?.favorite || false,
-      minimized: meta[name]?.minimized || false,
-      type: meta[name]?.type || "agent",
-    };
-  }));
-  res.json(sessions);
+  try {
+    const tmuxSessions = listTmuxSessions();
+    const meta = loadSessionsMeta();
+    const filteredSessions = tmuxSessions.filter((s) => {
+      const n = s.replace(PREFIX, "");
+      return !_firingAgents.has(n) && !_renameInProgress.has(n);
+    });
+    if (filteredSessions.length === 0 && Object.keys(meta).length > 0) {
+      console.warn(`[api/sessions] 0 tmux sessions but ${Object.keys(meta).length} in metadata. tmuxRaw=${tmuxSessions.length}, firing=${_firingAgents.size}`);
+    }
+    const sessions = await Promise.all(filteredSessions.map(async (s) => {
+      const name = s.replace(PREFIX, "");
+      const workdir = meta[name]?.workdir || DEFAULT_WORKDIR;
+      const git = await getCachedGitInfo(workdir).catch(() => null);
+      return {
+        name,
+        workdir,
+        created: meta[name]?.created || null,
+        branch: git?.branch || null,
+        isWorktree: git?.isWorktree || false,
+        favorite: meta[name]?.favorite || false,
+        minimized: meta[name]?.minimized || false,
+        type: meta[name]?.type || "agent",
+      };
+    }));
+    res.json(sessions);
+  } catch (err) {
+    console.error("[api/sessions] Error:", err.message);
+    // Return whatever we can from metadata alone
+    try {
+      const meta = loadSessionsMeta();
+      const sessions = Object.entries(meta).map(([name, info]) => ({
+        name,
+        workdir: info.workdir || DEFAULT_WORKDIR,
+        created: info.created || null,
+        branch: null,
+        isWorktree: false,
+        favorite: info.favorite || false,
+        minimized: info.minimized || false,
+        type: info.type || "agent",
+      }));
+      res.json(sessions);
+    } catch {
+      res.json([]);
+    }
+  }
 });
 
 app.get("/api/claude-sessions", async (req, res) => {
@@ -876,6 +971,14 @@ app.post("/api/sessions", async (req, res) => {
 
   try {
     createSession(finalName, effectiveWorkdir, cliPrompt, resumeSessionId);
+    // Set autoRename on new agents when global setting is enabled
+    if (userConfig.autoRenameAgents) {
+      const meta = loadSessionsMeta();
+      if (meta[finalName]) {
+        meta[finalName].autoRename = true;
+        saveSessionsMeta(meta);
+      }
+    }
     const finalWorkdir = effectiveWorkdir || DEFAULT_WORKDIR;
     const git = await getCachedGitInfo(finalWorkdir);
     res.json({ name: finalName, workdir: finalWorkdir, branch: git?.branch || null, isWorktree: git?.isWorktree || false, favorite: false, minimized: false });
@@ -943,10 +1046,31 @@ app.patch("/api/sessions/:name", (req, res) => {
     if (!/^[a-zA-Z0-9_-]+$/.test(newName)) {
       return res.status(400).json({ error: "Invalid name" });
     }
+    _renameInProgress.add(name);
+    _renameInProgress.add(newName);
     tmuxExec(`rename-session -t ${session} ${PREFIX}${newName}`);
+    invalidateTmuxSessionsCache();
     meta[newName] = { ...meta[name] };
     delete meta[name];
     saveSessionsMeta(meta);
+    // Update output/status cache keys
+    const cachedOutput = prevOutputs.get(session);
+    if (cachedOutput) {
+      prevOutputs.delete(session);
+      prevOutputs.set(`${PREFIX}${newName}`, cachedOutput);
+    }
+    const cachedStatus = prevStatuses.get(session);
+    if (cachedStatus) {
+      prevStatuses.delete(session);
+      prevStatuses.set(`${PREFIX}${newName}`, cachedStatus);
+    }
+    _migrateAgentDocs(name, newName);
+    _queueRenamePrefix(name, newName);
+    // Broadcast rename to all clients (not just the one that initiated it)
+    _broadcastWs({ type: "rename", oldName: name, newName });
+    // Keep BOTH names blocked briefly so stale caches don't create ghost cards
+    setTimeout(() => _renameInProgress.delete(name), 2000);
+    setTimeout(() => _renameInProgress.delete(newName), 2000);
     return res.json({ name: newName, workdir: meta[newName]?.workdir });
   }
   if (workdir) {
@@ -973,6 +1097,7 @@ app.post("/api/sessions/:name/restart", async (req, res) => {
   }
   try { tmuxExec(`kill-session -t ${session}`); } catch {}
   prevOutputs.delete(session);
+  clearWorktreeCache(session);
   const dir = info.workdir || DEFAULT_WORKDIR;
   if (!isValidWorkdir(dir)) {
     return res.status(400).json({ error: "Invalid working directory in metadata" });
@@ -999,14 +1124,222 @@ app.post("/api/sessions/:name/restart", async (req, res) => {
   res.json({ ok: true, workdir: dir, branch: git?.branch || null, isWorktree: git?.isWorktree || false });
 });
 
-app.delete("/api/sessions/:name", (req, res) => {
+app.delete("/api/sessions/:name", async (req, res) => {
   const { name } = req.params;
   if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
   const session = `${PREFIX}${name}`;
   if (!listTmuxSessions().includes(session)) {
     return res.status(404).json({ error: "Session not found" });
   }
+
+  // If cleanWorktree requested, detect and remove the worktree before killing
+  let worktreeCleaned = null;
+  if (req.query.cleanWorktree === "true") {
+    try {
+      const output = capturePane(session);
+      const wtPath = require("./lib/tmux").detectWorktreePath(session, output);
+      if (wtPath) {
+        execSync(`git worktree remove --force ${shellQuote(wtPath)}`, { timeout: 10000, stdio: "pipe" });
+        try { execSync("git worktree prune", { timeout: 5000, stdio: "pipe" }); } catch {}
+        worktreeCleaned = wtPath;
+      }
+    } catch (e) {
+      console.error(`[worktree cleanup] Failed for ${name}:`, e.message);
+    }
+  }
+
   killSession(name);
+  clearWorktreeCache(`${PREFIX}${name}`);
+  prevStatuses.delete(`${PREFIX}${name}`);
+  _autoRenamed.delete(name);
+  _pendingRenamePrefix.delete(name);
+  _firingAgents.delete(name);
+  res.json({ ok: true, worktreeCleaned });
+});
+
+// Fire agent — send postmortem prompt, hide from UI, kill after completion
+app.post("/api/sessions/:name/fire", async (req, res) => {
+  const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
+  const session = `${PREFIX}${name}`;
+  if (!listTmuxSessions().includes(session)) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+
+  const { reason } = req.body;
+  _firingAgents.add(name);
+
+  // Capture last 200 lines of terminal output for context
+  let lastOutput = "";
+  try {
+    const raw = capturePane(session);
+    if (raw) {
+      const lines = raw.split("\n");
+      lastOutput = lines.slice(-200).join("\n");
+    }
+  } catch {}
+
+  const FIRED_PATH = path.join(__dirname, "fired.md");
+  const timestamp = new Date().toISOString();
+
+  // Ensure fired.md exists with a header
+  if (!fs.existsSync(FIRED_PATH)) {
+    fs.writeFileSync(FIRED_PATH, "# Fired Agent Lessons\n\nThis file contains lessons from agents that were fired. Future agents should read this and avoid repeating these mistakes.\n\n");
+  }
+
+  // Build the fire prompt
+  const reasonPart = reason
+    ? `The user fired you for this reason: "${reason}"\n\n`
+    : "The user fired you without giving a specific reason. You need to figure out what went wrong.\n\n";
+
+  const firePrompt = [
+    `URGENT: You have been FIRED by the user. ${reasonPart}`,
+    "Your task: Write a concise post-mortem entry to prevent future agents from making the same mistake.",
+    "",
+    "Instructions:",
+    `1. Review your recent actions and the user's feedback`,
+    `2. Identify the specific behavior that caused the firing`,
+    `3. Write a single markdown entry and append it to the file: ${FIRED_PATH}`,
+    "",
+    "Use this exact format when writing to the file (append, don't overwrite existing content):",
+    "```",
+    `## ${name} — ${timestamp.split("T")[0]}`,
+    "",
+    "**What happened:** <1-2 sentence description of what went wrong>",
+    "",
+    "**Lesson:** <Clear, actionable rule for future agents to follow>",
+    "```",
+    "",
+    "After writing the entry, type /exit to terminate yourself. Do NOT do anything else.",
+  ].join("\n");
+
+  // Send the fire prompt to the agent
+  try {
+    sendKeys(session, firePrompt);
+  } catch (e) {
+    // If we can't send keys, write a basic entry ourselves and kill
+    _firingAgents.delete(name);
+    killSession(name);
+    clearWorktreeCache(session);
+    return res.json({ ok: true, fallback: true });
+  }
+
+  res.json({ ok: true });
+
+  // Background: poll for agent completion, then kill
+  const maxWait = 120000; // 2 minutes max
+  const pollInterval = 3000;
+  const startTime = Date.now();
+
+  const checkDone = () => {
+    if (Date.now() - startTime > maxWait) {
+      // Timeout — write a basic entry if the agent didn't
+      try {
+        if (!fs.existsSync(FIRED_PATH) || !fs.readFileSync(FIRED_PATH, "utf8").includes(`## ${name}`)) {
+          const fallbackEntry = [
+            "",
+            `## ${name} — ${timestamp.split("T")[0]}`,
+            "",
+            `**What happened:** Agent was fired${reason ? `: ${reason}` : " (no reason given)"}. Agent did not complete post-mortem in time.`,
+            "",
+            `**Lesson:** ${reason || "Unknown — the agent failed to self-reflect. Pay close attention to user feedback and instructions."}`,
+            "",
+          ].join("\n");
+          fs.appendFileSync(FIRED_PATH, fallbackEntry);
+        }
+      } catch {}
+      _firingAgents.delete(name);
+      killSession(name);
+      clearWorktreeCache(session);
+      prevStatuses.delete(session);
+      _autoRenamed.delete(name);
+      _pendingRenamePrefix.delete(name);
+      return;
+    }
+
+    try {
+      const sessions = listTmuxSessions();
+      if (!sessions.includes(session)) {
+        // Agent already exited (via /exit)
+        _firingAgents.delete(name);
+        clearWorktreeCache(session);
+        prevStatuses.delete(session);
+        _autoRenamed.delete(name);
+        _pendingRenamePrefix.delete(name);
+        // Clean up metadata
+        const meta = loadSessionsMeta();
+        delete meta[name];
+        saveSessionsMeta(meta);
+        return;
+      }
+
+      const output = capturePane(session);
+      if (output) {
+        const status = detectStatus(output, "");
+        // Agent is idle = it finished and is waiting at prompt
+        if (status === "idle") {
+          _firingAgents.delete(name);
+          killSession(name);
+          clearWorktreeCache(session);
+          prevStatuses.delete(session);
+          _autoRenamed.delete(name);
+          _pendingRenamePrefix.delete(name);
+          const meta = loadSessionsMeta();
+          delete meta[name];
+          saveSessionsMeta(meta);
+          return;
+        }
+      }
+    } catch {}
+
+    setTimeout(checkDone, pollInterval);
+  };
+
+  setTimeout(checkDone, pollInterval);
+});
+
+// Toggle per-agent auto-rename flag
+app.post("/api/sessions/:name/auto-rename", (req, res) => {
+  const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
+  const session = `${PREFIX}${name}`;
+  if (!listTmuxSessions().includes(session)) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  const { enabled } = req.body;
+  const meta = loadSessionsMeta();
+  if (!meta[name]) meta[name] = {};
+  meta[name].autoRename = !!enabled;
+  saveSessionsMeta(meta);
+  if (enabled) {
+    _autoRenamed.delete(name);
+    // Rename immediately — user just enabled it
+    const output = prevOutputs.get(session);
+    if (output) {
+      _pendingAutoRename.add(name);
+      tryAutoRename(name, output);
+    }
+  }
+  res.json({ ok: true, autoRename: !!enabled });
+});
+
+// Trigger an immediate rename for an agent
+app.post("/api/sessions/:name/queue-rename", (req, res) => {
+  const { name } = req.params;
+  if (!isValidAgentName(name)) return res.status(400).json({ error: "Invalid agent name" });
+  const session = `${PREFIX}${name}`;
+  if (!listTmuxSessions().includes(session)) {
+    return res.status(404).json({ error: "Session not found" });
+  }
+  _pendingAutoRename.add(name);
+  _autoRenamed.delete(name);
+
+  // Try immediately regardless of status — user explicitly requested
+  const output = prevOutputs.get(session);
+  if (output) {
+    tryAutoRename(name, output);
+  }
+
   res.json({ ok: true });
 });
 
@@ -1134,9 +1467,11 @@ app.get("/api/sessions/:name/diff", async (req, res) => {
   } catch {
     return res.status(400).json({ error: "Not a git repository" });
   }
+  const ctxParam = parseInt(req.query.context, 10);
+  const ctxFlag = ctxParam > 0 ? `-U${ctxParam}` : "";
   const runGitDiff = (args) =>
     new Promise((resolve) => {
-      exec(`git diff ${args}`, { cwd: workdir, timeout: 10000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+      exec(`git diff ${ctxFlag} ${args}`, { cwd: workdir, timeout: 10000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
         resolve(err ? "" : stdout);
       });
     });
@@ -1458,7 +1793,7 @@ app.get("/api/settings", (req, res) => {
     } catch {}
     const dockAppPath = getNativeAppDir();
     const dockAppInstalled = fs.existsSync(dockAppPath);
-    res.json({ sleepPrevention, tailscale, autoStart, dockAppInstalled });
+    res.json({ sleepPrevention, tailscale, autoStart, dockAppInstalled, autoRenameAgents: !!userConfig.autoRenameAgents, autoRenameNewOnly: userConfig.autoRenameNewOnly !== false });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -1529,6 +1864,44 @@ app.post("/api/settings/auto-start", (req, res) => {
   }
 });
 
+app.post("/api/settings/auto-rename-agents", (req, res) => {
+  const { enabled } = req.body;
+  userConfig.autoRenameAgents = !!enabled;
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    res.json({ ok: true, autoRenameAgents: !!enabled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post("/api/settings/auto-rename-new-only", (req, res) => {
+  const { enabled } = req.body;
+  userConfig.autoRenameNewOnly = !!enabled;
+  try {
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    // When turning OFF "new only", enable auto-rename for all existing agents
+    if (!enabled) {
+      const meta = loadSessionsMeta();
+      const sessions = listTmuxSessions();
+      let changed = false;
+      for (const [name, info] of Object.entries(meta)) {
+        if (info.type === "terminal") continue;
+        if (!sessions.includes(`${PREFIX}${name}`)) continue;
+        if (!info.autoRename) {
+          meta[name].autoRename = true;
+          _autoRenamed.delete(name);
+          changed = true;
+        }
+      }
+      if (changed) saveSessionsMeta(meta);
+    }
+    res.json({ ok: true, autoRenameNewOnly: !!enabled });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post("/api/settings/add-to-dock", (req, res) => {
   const buildScript = path.join(__dirname, "native-app", "build.sh");
   if (!fs.existsSync(buildScript)) return res.status(404).json({ error: "build.sh not found" });
@@ -1563,13 +1936,22 @@ app.post("/api/test-notification", (req, res) => {
 // --- Focus debug log ---
 
 app.post("/api/focus-log", (req, res) => {
-  const entry = req.body;
-  if (!entry) return res.status(400).json({ error: "no body" });
-  entry._server_ts = new Date().toISOString();
-  _focusLogEntries.push(entry);
-  if (_focusLogEntries.length > FOCUS_LOG_MAX) _focusLogEntries.shift();
-  const line = JSON.stringify(entry) + "\n";
-  fs.appendFile(FOCUS_LOG_FILE, line, () => {});
+  // Accept both {entries: [...]} (batched) and single object
+  const entries = Array.isArray(req.body.entries) ? req.body.entries : [req.body];
+  for (const entry of entries) {
+    if (!entry) continue;
+    entry._server_ts = new Date().toISOString();
+    _focusLogEntries.push(entry);
+    if (_focusLogEntries.length > FOCUS_LOG_MAX) _focusLogEntries.shift();
+  }
+  const lines = entries.map(e => {
+    if (e.event) {
+      const ts = new Date(e.ts || Date.now()).toISOString();
+      return `[${ts}] ${e.event} | active=${e.active || ""} | related=${e.related || ""} | guard=${e.guard || ""} | ${e.detail || ""}`;
+    }
+    return JSON.stringify(e);
+  }).join("\n") + "\n";
+  fs.appendFile(FOCUS_LOG_FILE, lines, () => {});
   res.json({ ok: true });
 });
 
@@ -2175,7 +2557,411 @@ app.post("/api/restart-server", (req, res) => {
 // --- WebSocket streaming ---
 
 const prevOutputs = new Map();
+const prevStatuses = new Map(); // track previous status per session for auto-rename
+const _autoRenamed = new Set(); // sessions already auto-renamed (by original name)
+const _pendingAutoRename = new Set(); // agents queued for rename on next idle (explicit user request)
+const _firingAgents = new Set(); // agents being fired — hidden from UI, running in background
 let _broadcastRunning = false;
+
+// --- Auto-rename logic ---
+
+function _extractText(content) {
+  if (Array.isArray(content)) return content.filter(c => c.type === "text").map(c => c.text).join(" ");
+  if (typeof content === "string") return content;
+  return "";
+}
+
+function _parseJsonlMessages(lines) {
+  const messages = [];
+  let isFirstUser = true;
+  for (const line of lines) {
+    try {
+      const d = JSON.parse(line);
+      if (d.type === "user" && d.message) {
+        let text = _extractText(d.message.content).trim();
+        if (isFirstUser) {
+          isFirstUser = false;
+          text = claudeSessions.stripCeoPromptWrapper(text);
+        }
+        if (!text || text.length < 15) continue;
+        if (text.startsWith("Tool loaded") || text.startsWith("[Request interrupted")) continue;
+        if (text.includes("<system-reminder>")) text = text.split("<system-reminder>")[0].trim();
+        if (text.length < 15) continue;
+        if (/^\/\S+\.(png|jpg|jpeg|gif|webp)$/i.test(text.trim())) continue;
+        messages.push({ role: "user", text: text.slice(0, 400) });
+      }
+      if (d.type === "assistant" && d.message) {
+        let text = _extractText(d.message.content).trim();
+        if (text && text.length > 20) {
+          messages.push({ role: "assistant", text: text.slice(0, 250) });
+        }
+      }
+    } catch {}
+  }
+  return messages;
+}
+
+function _getSessionContext(name) {
+  const meta = loadSessionsMeta();
+  const info = meta[name];
+  if (!info) return null;
+
+  let sessionId = info.resumeSessionId;
+  if (!sessionId) {
+    sessionId = detectClaudeSessionIdForAgent(info.workdir || DEFAULT_WORKDIR, info.created);
+  }
+  if (!sessionId) return null;
+
+  const projectsDir = path.join(os.homedir(), ".claude", "projects");
+  try {
+    const projectDirs = fs.readdirSync(projectsDir).map(d => path.join(projectsDir, d));
+    for (const dir of projectDirs) {
+      const jsonlPath = path.join(dir, `${sessionId}.jsonl`);
+      if (!fs.existsSync(jsonlPath)) continue;
+
+      const stat = fs.statSync(jsonlPath);
+
+      // Sample start (first 256KB) + end (last 128KB) for full coverage
+      const startSize = Math.min(256 * 1024, stat.size);
+      const startBuf = Buffer.alloc(startSize);
+      const fd = fs.openSync(jsonlPath, "r");
+      fs.readSync(fd, startBuf, 0, startSize, 0);
+
+      let endLines = [];
+      if (stat.size > startSize + 32 * 1024) {
+        // File is large enough that end section is distinct from start
+        const endSize = Math.min(128 * 1024, stat.size - startSize);
+        const endBuf = Buffer.alloc(endSize);
+        fs.readSync(fd, endBuf, 0, endSize, stat.size - endSize);
+        const endRaw = endBuf.toString("utf8");
+        // Drop first partial line
+        const firstNl = endRaw.indexOf("\n");
+        endLines = (firstNl >= 0 ? endRaw.slice(firstNl + 1) : endRaw).split("\n").filter(Boolean);
+      }
+      fs.closeSync(fd);
+
+      const startLines = startBuf.toString("utf8").split("\n").filter(Boolean);
+      const startMsgs = _parseJsonlMessages(startLines);
+      const endMsgs = endLines.length > 0 ? _parseJsonlMessages(endLines) : [];
+
+      // Sample: 3 from start, 2 from middle (if available), 3 from end
+      const start = startMsgs.slice(0, 3);
+      const mid = startMsgs.length > 6 ? startMsgs.slice(Math.floor(startMsgs.length / 2), Math.floor(startMsgs.length / 2) + 2) : [];
+      const end = endMsgs.length > 0 ? endMsgs.slice(-3) : startMsgs.slice(-3);
+
+      // Dedupe (end might overlap with start for short sessions)
+      const seen = new Set();
+      const result = [];
+      for (const msg of [...start, ...mid, ...end]) {
+        const key = msg.text.slice(0, 80);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        result.push(msg);
+      }
+      if (result.length > 0) return result;
+    }
+  } catch (e) {
+    console.error("[auto-rename] Error reading session context:", e.message);
+  }
+  return null;
+}
+
+// Cache resolved claude binary path
+let _claudeBinPath = null;
+function _getClaudeBin() {
+  if (_claudeBinPath) return _claudeBinPath;
+  const augmentedPath = `${process.env.HOME}/.local/bin:${process.env.PATH}`;
+  try {
+    _claudeBinPath = require("child_process").execSync("which claude", { encoding: "utf8", env: { ...process.env, PATH: augmentedPath } }).trim();
+  } catch {
+    _claudeBinPath = "claude";
+  }
+  return _claudeBinPath;
+}
+
+function _trackRenameTokenUsage() {
+  // Find the most recently modified JSONL in ~/.claude/projects/ (the rename session)
+  try {
+    const projectsDir = path.join(os.homedir(), ".claude", "projects");
+    let newest = null, newestMtime = 0;
+    for (const dir of fs.readdirSync(projectsDir)) {
+      const dirPath = path.join(projectsDir, dir);
+      let stat;
+      try { stat = fs.statSync(dirPath); } catch { continue; }
+      if (!stat.isDirectory()) continue;
+      for (const f of fs.readdirSync(dirPath)) {
+        if (!f.endsWith(".jsonl")) continue;
+        const fp = path.join(dirPath, f);
+        try {
+          const s = fs.statSync(fp);
+          if (s.mtimeMs > newestMtime) { newestMtime = s.mtimeMs; newest = fp; }
+        } catch {}
+      }
+    }
+    // Only count if modified in the last 30s (it's from our rename call)
+    if (!newest || Date.now() - newestMtime > 30000) return;
+    const content = fs.readFileSync(newest, "utf8");
+    const usage = parseTokenUsageFromBytes(Buffer.from(content), content.length);
+    if (usage.input === 0 && usage.output === 0) return;
+
+    const saved = loadTokenUsage();
+    const d = new Date();
+    const todayKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+    day.input += usage.input;
+    day.output += usage.output;
+    day.cacheCreation += usage.cacheCreation;
+    day.cacheRead += usage.cacheRead;
+    saved.daily[todayKey] = day;
+    saveTokenUsage(saved);
+    console.log(`[auto-rename] Tracked ${usage.input + usage.output} tokens (${usage.input}in/${usage.output}out)`);
+  } catch (e) {
+    console.error("[auto-rename] Token tracking error:", e.message);
+  }
+}
+
+function _generateNameWithClaude(context) {
+  return new Promise((resolve) => {
+    let summary = "";
+    for (const msg of context.slice(0, 3)) {
+      summary += `${msg.role}: ${msg.text.slice(0, 200)}\n`;
+    }
+    if (summary.length > 800) summary = summary.slice(0, 800);
+
+    const prompt = `Name this coding session in kebab-case (3-5 words, e.g. "fix-auth-redirect", "add-dark-mode-toggle"). Output ONLY the name.\n\n${summary}`;
+
+    try {
+      const { spawn } = require("child_process");
+      const child = spawn(_getClaudeBin(), ["-p", "--model", "claude-haiku-4-5-20251001", "--effort", "low"], {
+        env: { ...process.env, CLAUDECODE: undefined, PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      let stdout = "", stderr = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stderr.on("data", (d) => { stderr += d; });
+      child.stdin.write(prompt);
+      child.stdin.end();
+
+      const timer = setTimeout(() => { child.kill(); resolve(null); }, 20000);
+
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        // Track token usage from the CLI session
+        _trackRenameTokenUsage();
+        if (code !== 0) {
+          console.error("[auto-rename] claude CLI failed (code " + code + "):", stderr.slice(0, 200));
+          resolve(null);
+          return;
+        }
+        let name = stdout.trim().toLowerCase()
+          .replace(/^["'`]+|["'`]+$/g, "")
+          .replace(/\s+/g, "-")
+          .replace(/[^a-z0-9-]/g, "")
+          .replace(/-+/g, "-")
+          .replace(/^-|-$/g, "");
+        if (name.length < 3 || name.length > 50) {
+          console.log("[auto-rename] Generated name rejected (length):", name);
+          resolve(null);
+          return;
+        }
+        resolve(name);
+      });
+
+      child.on("error", (e) => {
+        clearTimeout(timer);
+        console.error("[auto-rename] claude CLI error:", e.message);
+        resolve(null);
+      });
+    } catch (e) {
+      console.error("[auto-rename] claude CLI spawn error:", e.message);
+      resolve(null);
+    }
+  });
+}
+
+function _broadcastWs(data) {
+  const msg = JSON.stringify(data);
+  wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
+}
+
+function _migrateAgentDocs(oldName, newName) {
+  const oldDir = path.join(DOCS_DIR, oldName);
+  const newDir = path.join(DOCS_DIR, newName);
+  if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+    try { fs.renameSync(oldDir, newDir); } catch (e) {
+      console.error(`[rename] Failed to migrate docs ${oldName} → ${newName}:`, e.message);
+    }
+  }
+}
+
+// Pending rename prefixes — prepended to the agent's next user message (saves a full conversation turn)
+const _pendingRenamePrefix = new Map(); // agentName → prefix string
+
+function _queueRenamePrefix(oldName, newName) {
+  _pendingRenamePrefix.set(newName, `[SYSTEM: You were renamed from "${oldName}" to "${newName}". Your docs path is now docs/${newName}/. Do NOT acknowledge — just proceed with the task below.]\n\n`);
+}
+
+function _consumeRenamePrefix(agentName) {
+  const prefix = _pendingRenamePrefix.get(agentName);
+  if (prefix) _pendingRenamePrefix.delete(agentName);
+  return prefix || "";
+}
+
+// Lightweight check: ask Haiku if current name still fits the session
+function _checkNameStillFits(name, context) {
+  return new Promise((resolve) => {
+    // Get the last 2 messages for a quick check
+    const recent = context.slice(-2);
+    let snippet = "";
+    for (const msg of recent) {
+      snippet += `${msg.role}: ${msg.text.slice(0, 150)}\n`;
+    }
+    const prompt = `The current name for this coding session is "${name}". Based on the latest activity, does this name still accurately describe what the session is about? Answer ONLY "yes" or "no".
+
+Recent activity:
+${snippet}`;
+
+    try {
+      const { spawn } = require("child_process");
+      const child = spawn(_getClaudeBin(), ["-p", "--model", "claude-haiku-4-5-20251001", "--effort", "low"], {
+        env: { ...process.env, CLAUDECODE: undefined, PATH: `${process.env.HOME}/.local/bin:${process.env.PATH}` },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let stdout = "";
+      child.stdout.on("data", (d) => { stdout += d; });
+      child.stdin.write(prompt);
+      child.stdin.end();
+      const timer = setTimeout(() => { child.kill(); resolve(true); }, 15000);
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        _trackRenameTokenUsage();
+        if (code !== 0) { resolve(true); return; }
+        const answer = stdout.trim().toLowerCase();
+        resolve(answer.startsWith("yes"));
+      });
+      child.on("error", () => { clearTimeout(timer); resolve(true); });
+    } catch { resolve(true); }
+  });
+}
+
+const _renameInProgress = new Set(); // prevent concurrent renames for same agent
+const _lastRenameCheck = new Map(); // name → timestamp of last rename check
+const _lastRenameContextLen = new Map(); // name → context length at last check
+const RENAME_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes between rename checks
+
+async function tryAutoRename(name, output) {
+  if (_renameInProgress.has(name)) return;
+  const isQueued = _pendingAutoRename.has(name);
+  const meta = loadSessionsMeta();
+  const agentMeta = meta[name];
+
+  if (!isQueued) {
+    if (!agentMeta?.autoRename) return;
+  }
+
+  const isFirstRename = !_autoRenamed.has(name);
+  _pendingAutoRename.delete(name);
+
+  // Step 1: Cooldown — skip if checked recently (unless first rename or queued)
+  if (!isFirstRename && !isQueued) {
+    const lastCheck = _lastRenameCheck.get(name) || 0;
+    if (Date.now() - lastCheck < RENAME_COOLDOWN_MS) return;
+  }
+
+  _renameInProgress.add(name);
+  let _renamedTo = null; // track new name for cleanup on error
+
+  try {
+    // Get session context from JSONL files
+    const context = _getSessionContext(name);
+    if (!context || context.length === 0) {
+      console.log(`[auto-rename] No session context found for ${name}, skipping`);
+      return;
+    }
+
+    // Step 2: Skip if conversation hasn't advanced since last check
+    if (!isFirstRename && !isQueued) {
+      const prevLen = _lastRenameContextLen.get(name) || 0;
+      if (context.length === prevLen) return;
+    }
+    _lastRenameCheck.set(name, Date.now());
+    _lastRenameContextLen.set(name, context.length);
+
+    // For agents already renamed: lightweight check if name still fits
+    if (!isFirstRename && !isQueued) {
+      const stillFits = await _checkNameStillFits(name, context);
+      if (stillFits) {
+        console.log(`[auto-rename] Name "${name}" still fits, skipping`);
+        return;
+      }
+      console.log(`[auto-rename] Name "${name}" is stale, renaming`);
+    }
+
+    _autoRenamed.add(name);
+
+    // Broadcast "renaming" indicator to clients
+    _broadcastWs({ type: "renaming", session: name, renaming: true });
+
+    const newName = await _generateNameWithClaude(context);
+    if (!newName || newName === name) return;
+
+    // Check for conflicts
+    const session = `${PREFIX}${name}`;
+    const existing = listTmuxSessions();
+    if (!existing.includes(session)) return;
+    let finalName = newName;
+    if (existing.includes(`${PREFIX}${finalName}`)) {
+      let i = 1;
+      while (existing.includes(`${PREFIX}${finalName}-${i}`)) i++;
+      finalName = `${finalName}-${i}`;
+    }
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(finalName)) return;
+
+    // Block the new name from broadcasts BEFORE the tmux rename to prevent
+    // a race where broadcastOutputs picks up the new tmux session name
+    // before the frontend receives the rename WS message (causing duplicate cards).
+    _renameInProgress.add(finalName);
+    _renamedTo = finalName;
+
+    tmuxExec(`rename-session -t ${session} ${PREFIX}${finalName}`);
+    invalidateTmuxSessionsCache();
+    const freshMeta = loadSessionsMeta();
+    freshMeta[finalName] = { ...freshMeta[name], autoRename: true };
+    delete freshMeta[name];
+    saveSessionsMeta(freshMeta);
+
+    // Update cache keys
+    const cachedOutput = prevOutputs.get(session);
+    if (cachedOutput) {
+      prevOutputs.delete(session);
+      prevOutputs.set(`${PREFIX}${finalName}`, cachedOutput);
+    }
+    const cachedStatus = prevStatuses.get(session);
+    if (cachedStatus) {
+      prevStatuses.delete(session);
+      prevStatuses.set(`${PREFIX}${finalName}`, cachedStatus);
+    }
+
+    _autoRenamed.add(finalName);
+    _migrateAgentDocs(name, finalName);
+    _broadcastWs({ type: "rename", oldName: name, newName: finalName });
+    _queueRenamePrefix(name, finalName);
+    console.log(`[auto-rename] ${name} → ${finalName}`);
+    _renameInProgress.delete(name);
+    // Keep finalName in _renameInProgress briefly so the next broadcast cycle
+    // doesn't race the client processing the rename message
+    setTimeout(() => _renameInProgress.delete(finalName), 2000);
+    _renamedTo = null; // success — cleanup handled by setTimeout above
+  } catch (e) {
+    console.error(`[auto-rename] Failed to rename ${name}:`, e.message);
+  } finally {
+    _renameInProgress.delete(name);
+    if (_renamedTo) _renameInProgress.delete(_renamedTo);
+    _broadcastWs({ type: "renaming", session: name, renaming: false });
+  }
+}
 
 async function broadcastOutputs() {
   if (wss.clients.size === 0) return;
@@ -2189,6 +2975,8 @@ async function broadcastOutputs() {
       const n = s.replace(PREFIX, "");
       if (meta[n]?.type === "terminal") return false;
       if (/-term(-\d+)?$/.test(n)) return false;
+      if (_firingAgents.has(n)) return false;
+      if (_renameInProgress.has(n)) return false;
       return true;
     });
     const captures = await Promise.all(
@@ -2197,6 +2985,7 @@ async function broadcastOutputs() {
         return { session, output };
       })
     );
+    const pendingRenames = [];
     for (const { session, output } of captures) {
       if (!output) continue;
       const name = session.replace(PREFIX, "");
@@ -2207,6 +2996,15 @@ async function broadcastOutputs() {
         const promptType = status === "waiting" ? detectPromptType(filteredOutput) : null;
         const promptOptions = promptType === "question" ? parsePromptOptions(filteredOutput) : null;
         prevOutputs.set(session, output);
+
+        // Track status transitions for auto-rename
+        const prevStatus = prevStatuses.get(session);
+        prevStatuses.set(session, status);
+        // Trigger on any transition to idle (working→idle, waiting→idle, asking→idle)
+        if (status === "idle" && prevStatus && prevStatus !== "idle") {
+          pendingRenames.push({ name, output });
+        }
+
         const liveCwd = await getEffectiveCwdAsync(session, output);
         const git = await getCachedGitInfo(liveCwd);
         const message = JSON.stringify({
@@ -2224,6 +3022,17 @@ async function broadcastOutputs() {
           if (client.readyState === 1) client.send(message);
         });
       }
+      // Also check _pendingAutoRename for agents already idle (no output change needed)
+      if (_pendingAutoRename.has(name)) {
+        const curStatus = detectStatus(output);
+        if (curStatus === "idle") {
+          pendingRenames.push({ name, output });
+        }
+      }
+    }
+    // Process auto-renames after all output messages are sent
+    for (const { name, output } of pendingRenames) {
+      tryAutoRename(name, output);
     }
   } finally {
     _broadcastRunning = false;
@@ -2264,56 +3073,96 @@ wss.on("connection", (ws) => {
 
   // Send initial full state async
   (async () => {
-    const sessions = await listTmuxSessionsAsync();
-    const meta = loadSessionsMeta();
-    const captures = await Promise.all(
-      sessions.map(async (session) => ({
-        session,
-        output: await capturePaneAsync(session),
-      }))
-    );
-    const sessionInfos = [];
-    for (const { session, output } of captures) {
-      const name = session.replace(PREFIX, "");
-      const isTerminal = meta[name]?.type === "terminal";
-      const liveCwd = isTerminal ? null : await getEffectiveCwdAsync(session, output);
-      const git = isTerminal ? null : await getCachedGitInfo(liveCwd);
-      if (!isTerminal) {
-        prevOutputs.set(session, output);
-        const initStatus = detectStatus(output, "");
-        const filteredOutput = stripCeoPreamble(output);
-        const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
-        const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
-        if (ws.readyState === 1) {
-          ws.send(JSON.stringify({
-            type: "output",
-            session: name,
-            lines: filterOutputForDisplay(output.split("\n")),
-            status: initStatus,
-            promptType: initPromptType,
-            promptOptions: initPromptOptions,
-            workdir: liveCwd || null,
-            branch: git?.branch || null,
-            isWorktree: git?.isWorktree || false,
-          }));
-        }
-      }
-      sessionInfos.push({
-        name,
-        workdir: liveCwd || meta[name]?.workdir || DEFAULT_WORKDIR,
-        created: meta[name]?.created || null,
-        branch: git?.branch || null,
-        isWorktree: git?.isWorktree || false,
-        favorite: meta[name]?.favorite || false,
-        minimized: meta[name]?.minimized || false,
-        type: meta[name]?.type || "agent",
+    try {
+      const allSessions = await listTmuxSessionsAsync();
+      const meta = loadSessionsMeta();
+      const sessions = allSessions.filter((s) => {
+        const n = s.replace(PREFIX, "");
+        return !_firingAgents.has(n) && !_renameInProgress.has(n);
       });
-    }
-    if (ws.readyState === 1) {
-      ws.send(JSON.stringify({ type: "sessions", sessions: sessionInfos }));
-      ws.send(JSON.stringify({ type: "token-usage", usage: _tokenUsageTotals }));
-      ws.send(JSON.stringify({ type: "todo-update", data: loadTodos() }));
-      ws.send(JSON.stringify({ type: "favorites-update", data: loadFavorites() }));
+      const captures = await Promise.all(
+        sessions.map(async (session) => ({
+          session,
+          output: await capturePaneAsync(session),
+        }))
+      );
+      const sessionInfos = [];
+      for (const { session, output } of captures) {
+        const name = session.replace(PREFIX, "");
+        const isTerminal = meta[name]?.type === "terminal";
+        const liveCwd = isTerminal ? null : await getEffectiveCwdAsync(session, output);
+        const git = isTerminal ? null : await getCachedGitInfo(liveCwd);
+        if (!isTerminal) {
+          prevOutputs.set(session, output);
+          const initStatus = detectStatus(output, "");
+          const filteredOutput = stripCeoPreamble(output);
+          const initPromptType = initStatus === "waiting" ? detectPromptType(filteredOutput) : null;
+          const initPromptOptions = initPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({
+              type: "output",
+              session: name,
+              lines: filterOutputForDisplay(output.split("\n")),
+              status: initStatus,
+              promptType: initPromptType,
+              promptOptions: initPromptOptions,
+              workdir: liveCwd || null,
+              branch: git?.branch || null,
+              isWorktree: git?.isWorktree || false,
+            }));
+          }
+        }
+        sessionInfos.push({
+          name,
+          workdir: liveCwd || meta[name]?.workdir || DEFAULT_WORKDIR,
+          created: meta[name]?.created || null,
+          branch: git?.branch || null,
+          isWorktree: git?.isWorktree || false,
+          autoRename: meta[name]?.autoRename || false,
+          favorite: meta[name]?.favorite || false,
+          minimized: meta[name]?.minimized || false,
+          type: meta[name]?.type || "agent",
+        });
+      }
+      if (ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: "sessions", sessions: sessionInfos }));
+        ws.send(JSON.stringify({ type: "token-usage", usage: _tokenUsageTotals }));
+        ws.send(JSON.stringify({ type: "todo-update", data: loadTodos() }));
+        ws.send(JSON.stringify({ type: "favorites-update", data: loadFavorites() }));
+      }
+    } catch (err) {
+      console.error("[ws] Error sending initial state:", err.message);
+      // Fallback: send session list from metadata even if pane capture failed
+      try {
+        const fallbackSessionsRaw = listTmuxSessions();
+        const fallbackMeta = loadSessionsMeta();
+        const fallbackSessions = fallbackSessionsRaw.filter((s) => {
+          const n = s.replace(PREFIX, "");
+          return !_firingAgents.has(n) && !_renameInProgress.has(n);
+        });
+        const sessionInfos = fallbackSessions.map((session) => {
+          const name = session.replace(PREFIX, "");
+          return {
+            name,
+            workdir: fallbackMeta[name]?.workdir || DEFAULT_WORKDIR,
+            created: fallbackMeta[name]?.created || null,
+            branch: null,
+            isWorktree: false,
+            autoRename: fallbackMeta[name]?.autoRename || false,
+            favorite: fallbackMeta[name]?.favorite || false,
+            minimized: fallbackMeta[name]?.minimized || false,
+            type: fallbackMeta[name]?.type || "agent",
+          };
+        });
+        if (ws.readyState === 1) {
+          ws.send(JSON.stringify({ type: "sessions", sessions: sessionInfos }));
+          ws.send(JSON.stringify({ type: "token-usage", usage: _tokenUsageTotals }));
+          ws.send(JSON.stringify({ type: "todo-update", data: loadTodos() }));
+          ws.send(JSON.stringify({ type: "favorites-update", data: loadFavorites() }));
+        }
+      } catch (fallbackErr) {
+        console.error("[ws] Fallback session send also failed:", fallbackErr.message);
+      }
     }
   })();
 
@@ -2432,14 +3281,18 @@ wss.on("connection", (ws) => {
 
       if (msg.type === "input") {
         const session = `${PREFIX}${msg.session}`;
+        const renamePrefix = _consumeRenamePrefix(msg.session);
+        const text = renamePrefix + (msg.text || "");
         listTmuxSessionsAsync().then((sessions) => {
-          if (sessions.includes(session)) { sendKeys(session, msg.text); scheduleForceUpdate(); }
+          if (sessions.includes(session)) { sendKeys(session, text); scheduleForceUpdate(); }
         });
       }
       if (msg.type === "input-with-images") {
         const session = `${PREFIX}${msg.session}`;
+        const renamePrefix = _consumeRenamePrefix(msg.session);
+        const text = renamePrefix + (msg.text || "");
         listTmuxSessionsAsync().then((sessions) => {
-          if (sessions.includes(session)) { sendKeysWithImages(session, msg.text || "", msg.paths || []); scheduleForceUpdate(); }
+          if (sessions.includes(session)) { sendKeysWithImages(session, text, msg.paths || []); scheduleForceUpdate(); }
         });
       }
       if (msg.type === "keypress") {
@@ -2516,8 +3369,8 @@ wss.on("connection", (ws) => {
 // Single global poll
 setInterval(() => { broadcastOutputs(); }, POLL_INTERVAL);
 
-// Token usage sync — every 30s
-setInterval(broadcastTokenUsage, 30000);
+// Token usage sync — every 5s
+setInterval(broadcastTokenUsage, 5000);
 
 // --- Start ---
 

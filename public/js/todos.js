@@ -413,7 +413,7 @@ function renderActiveList() {
     if (!deleteArmed) {
       deleteArmed = true;
       deleteBtn.classList.add("armed");
-      deleteBtn.textContent = "delete";
+      deleteBtn.textContent = "DELETE";
       deleteTimer = setTimeout(() => {
         deleteArmed = false;
         deleteBtn.classList.remove("armed");
