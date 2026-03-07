@@ -322,19 +322,21 @@ function parseTokenUsageFromBytes(buf, byteLength) {
   const str = buf.toString("utf8", 0, byteLength);
   const lines = str.split("\n");
   let input = 0, output = 0, cacheCreation = 0, cacheRead = 0;
+  let model = null;
   for (const line of lines) {
     if (!line || !line.includes('"usage"')) continue;
     try {
       const d = JSON.parse(line);
       const u = d.message?.usage;
       if (!u) continue;
+      if (!model && d.message?.model) model = d.message.model;
       input += u.input_tokens || 0;
       output += u.output_tokens || 0;
       cacheCreation += u.cache_creation_input_tokens || 0;
       cacheRead += u.cache_read_input_tokens || 0;
     } catch {}
   }
-  return { input, output, cacheCreation, cacheRead };
+  return { input, output, cacheCreation, cacheRead, model };
 }
 
 function parseTokenUsageByDay(filePath) {
@@ -386,6 +388,7 @@ function getTokenUsageForSession(sessionId) {
       output: prev.output + delta.output,
       cacheCreation: prev.cacheCreation + delta.cacheCreation,
       cacheRead: prev.cacheRead + delta.cacheRead,
+      model: delta.model || prev.model || null,
     };
     _tokenUsageCache.set(sessionId, { bytesRead: stat.size, usage });
     return usage;
@@ -427,6 +430,7 @@ function syncTokenUsage() {
           output: (prev.output || 0) + delta.output,
           cacheCreation: (prev.cacheCreation || 0) + delta.cacheCreation,
           cacheRead: (prev.cacheRead || 0) + delta.cacheRead,
+          model: usage.model || prev.model || null,
           sessionId,
           _sessionUsage: { ...usage },
         };
@@ -441,6 +445,7 @@ function syncTokenUsage() {
           output: prevTotal.output + usage.output,
           cacheCreation: prevTotal.cacheCreation + usage.cacheCreation,
           cacheRead: prevTotal.cacheRead + usage.cacheRead,
+          model: usage.model || (prev && prev.model) || null,
           sessionId,
           _sessionUsage: { ...usage },
         };
@@ -547,10 +552,33 @@ function _todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-function _computeDollars(usage) {
-  // Same pricing as frontend: $15/M input, $75/M output, $12.50/M cacheCreation, $1.50/M cacheRead
-  return ((usage.input || 0) * 15 + (usage.output || 0) * 75 +
-    (usage.cacheCreation || 0) * 12.5 + (usage.cacheRead || 0) * 1.5) / 1000000;
+// Claude API pricing per 1M tokens — keyed by model prefix
+const MODEL_PRICING = {
+  "claude-opus-4-6":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-5":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-1":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-opus-4-0":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-sonnet-4-6": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-5": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-0": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-haiku-4-5":  { input: 1,    output: 5,    cacheCreation: 1.25,  cacheRead: 0.10 },
+  "claude-haiku-3-5":  { input: 0.80, output: 4,    cacheCreation: 1,     cacheRead: 0.08 },
+};
+const DEFAULT_PRICING = MODEL_PRICING["claude-opus-4-6"];
+
+function _getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  // Match against known prefixes (handles snapshot dates like claude-opus-4-6-20250514)
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (model.startsWith(prefix)) return pricing;
+  }
+  return DEFAULT_PRICING;
+}
+
+function _computeDollars(usage, model) {
+  const p = _getPricing(model);
+  return ((usage.input || 0) * p.input + (usage.output || 0) * p.output +
+    (usage.cacheCreation || 0) * p.cacheCreation + (usage.cacheRead || 0) * p.cacheRead) / 1000000;
 }
 
 function broadcastTokenUsage() {

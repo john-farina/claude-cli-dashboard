@@ -3648,13 +3648,28 @@ function updateBranchDisplay(card, branch, isWorktree) {
 
 // --- Token Usage Display ---
 
-// Claude Opus 4.6 pricing per 1M tokens (https://docs.anthropic.com/en/docs/about-claude/pricing)
-const TOKEN_PRICES = {
-  input: 5,           // $5/M input
-  output: 25,         // $25/M output
-  cacheCreation: 6.25, // $6.25/M cache write (5-min)
-  cacheRead: 0.50,    // $0.50/M cache read
+// Claude API pricing per 1M tokens, keyed by model prefix
+// https://docs.anthropic.com/en/docs/about-claude/pricing
+const MODEL_PRICING = {
+  "claude-opus-4-6":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-5":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-1":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-opus-4-0":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-sonnet-4-6": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-5": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-0": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-haiku-4-5":  { input: 1,    output: 5,    cacheCreation: 1.25,  cacheRead: 0.10 },
+  "claude-haiku-3-5":  { input: 0.80, output: 4,    cacheCreation: 1,     cacheRead: 0.08 },
 };
+const DEFAULT_PRICING = MODEL_PRICING["claude-opus-4-6"];
+
+function _getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (model.startsWith(prefix)) return pricing;
+  }
+  return DEFAULT_PRICING;
+}
 
 let _tokenShowDollars = localStorage.getItem("ceo-token-show-dollars") === "true";
 
@@ -3663,11 +3678,12 @@ function formatTokenCount(n) {
   return n.toLocaleString("en-US");
 }
 
-function usageToDollars(u) {
-  return ((u.input || 0) * TOKEN_PRICES.input
-    + (u.output || 0) * TOKEN_PRICES.output
-    + (u.cacheCreation || 0) * TOKEN_PRICES.cacheCreation
-    + (u.cacheRead || 0) * TOKEN_PRICES.cacheRead) / 1_000_000;
+function usageToDollars(u, model) {
+  const p = _getPricing(model);
+  return ((u.input || 0) * p.input
+    + (u.output || 0) * p.output
+    + (u.cacheCreation || 0) * p.cacheCreation
+    + (u.cacheRead || 0) * p.cacheRead) / 1_000_000;
 }
 
 function formatDollars(n) {
@@ -3687,8 +3703,8 @@ function sumUsage(u) {
   return (u.input || 0) + (u.output || 0);
 }
 
-function formatUsageValue(u) {
-  if (_tokenShowDollars) return formatDollars(usageToDollars(u));
+function formatUsageValue(u, model) {
+  if (_tokenShowDollars) return formatDollars(usageToDollars(u, model));
   return formatTokenCount(sumUsage(u));
 }
 
@@ -3775,9 +3791,9 @@ function rollTokenValue(el, newText) {
   }
 }
 
-function usageTooltip(label, u) {
+function usageTooltip(label, u, model) {
   const tokens = `In: ${formatTokenCount(u.input || 0)} | Out: ${formatTokenCount(u.output || 0)} | Cache write: ${formatTokenCount(u.cacheCreation || 0)} | Cache read: ${formatTokenCount(u.cacheRead || 0)}`;
-  const dollars = formatDollars(usageToDollars(u));
+  const dollars = formatDollars(usageToDollars(u, model));
   return `${label} — ${tokens}\nCost: ${dollars}`;
 }
 
@@ -3874,13 +3890,24 @@ function updateHeaderTokenTotals(stored) {
   const allAgents = stored.agents || {};
   const dailyData = stored.daily || {};
 
-  // All time total
+  // All time total — compute per-agent dollars using each agent's detected model
   const allTime = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  let allTimeDollars = 0;
+  // Detect dominant model for daily/monthly aggregate pricing
+  const modelCounts = {};
   for (const data of Object.values(allAgents)) {
     allTime.input += data.input || 0;
     allTime.output += data.output || 0;
     allTime.cacheCreation += data.cacheCreation || 0;
     allTime.cacheRead += data.cacheRead || 0;
+    allTimeDollars += usageToDollars(data, data.model);
+    if (data.model) modelCounts[data.model] = (modelCounts[data.model] || 0) + (data.output || 0);
+  }
+  // Use most-used model (by output tokens) for daily/monthly aggregates
+  let dominantModel = null;
+  let maxOutput = 0;
+  for (const [m, count] of Object.entries(modelCounts)) {
+    if (count > maxOutput) { maxOutput = count; dominantModel = m; }
   }
 
   // Today
@@ -3907,18 +3934,19 @@ function updateHeaderTokenTotals(stored) {
   const allTimeSum = sumUsage(allTime);
 
   // Store dollar values for the ticker
+  // All-time uses precise per-agent pricing; today/month use dominant model
   _dollarSnapshots.prev = _dollarSnapshots.current || null;
   _dollarSnapshots.current = {
-    today: usageToDollars(todayUsage),
-    month: usageToDollars(monthUsage),
-    allTime: usageToDollars(allTime),
+    today: usageToDollars(todayUsage, dominantModel),
+    month: usageToDollars(monthUsage, dominantModel),
+    allTime: allTimeDollars,
     time: Date.now(),
   };
 
   // Store tooltips
-  if (elTotal) elTotal.title = usageTooltip("All time", allTime);
-  if (elMonth) elMonth.title = usageTooltip("This month", monthUsage);
-  if (elToday) elToday.title = usageTooltip("Today", todayUsage);
+  if (elTotal) elTotal.title = usageTooltip("All time", allTime, dominantModel);
+  if (elMonth) elMonth.title = usageTooltip("This month", monthUsage, dominantModel);
+  if (elToday) elToday.title = usageTooltip("Today", todayUsage, dominantModel);
 
   if (_tokenShowDollars) {
     // In dollar mode, the ticker handles rendering
