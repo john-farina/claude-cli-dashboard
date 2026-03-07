@@ -2493,6 +2493,10 @@ app.post("/api/worktrees/delete-all", (req, res) => {
 
 // --- System info ---
 
+app.get("/api/agent-templates", (req, res) => {
+  res.json(userConfig.agentTemplates || []);
+});
+
 app.get("/api/system-info", (req, res) => {
   const info = {};
   try { info.dashboardVersion = execSync("git rev-parse --short HEAD", { cwd: __dirname, encoding: "utf8", timeout: 3000 }).trim(); } catch { info.dashboardVersion = "unknown"; }

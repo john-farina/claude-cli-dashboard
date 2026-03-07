@@ -9,5 +9,31 @@
   "shellCommand": "ceo",
   "prLinkStyle": "graphite",
   "title": "CEO Dashboard",
-  "bugReportRepo": "john-farina/claude-cli-dashboard"
+  "bugReportRepo": "john-farina/claude-cli-dashboard",
+  "agentTemplates": [
+    {
+      "name": "Frontend",
+      "prefix": "fe-",
+      "prompt": "You are a frontend specialist. Focus on UI components, styling, and user experience.",
+      "icon": "F"
+    },
+    {
+      "name": "Backend",
+      "prefix": "be-",
+      "prompt": "You are a backend specialist. Focus on APIs, databases, and server logic.",
+      "icon": "B"
+    },
+    {
+      "name": "Reviewer",
+      "prefix": "rev-",
+      "prompt": "You are a code reviewer. Focus on code quality, security, and best practices.",
+      "icon": "R"
+    },
+    {
+      "name": "Data",
+      "prefix": "data-",
+      "prompt": "You are a data specialist. Focus on data pipelines, SQL, analysis, and visualization.",
+      "icon": "D"
+    }
+  ]
 }

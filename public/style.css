@@ -6410,3 +6410,19 @@ header .btn-primary kbd {
 .split-view-input-wrap textarea:focus {
   border-color: var(--accent);
 }
+
+/* --- Agent Template Cards --- */
+.template-cards { display: flex; gap: 8px; padding: 0 0 12px; overflow-x: auto; }
+.template-card {
+  flex-shrink: 0; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border, #333);
+  display: flex; align-items: center; gap: 8px; font-size: 13px;
+  transition: border-color 0.15s, background 0.15s;
+}
+.template-card:hover { background: rgba(255,255,255,0.08); }
+.template-card.selected { border-color: var(--accent); background: rgba(var(--accent-rgb, 201,168,76), 0.1); }
+.template-card-icon {
+  width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center;
+  justify-content: center; font-weight: 700; font-size: 12px;
+  background: rgba(var(--accent-rgb, 201,168,76), 0.15); color: var(--accent);
+}

@@ -507,9 +507,89 @@ function updateCardNumbers() {
 }
 // --- Modals ---
 
+let _selectedTemplate = null;
+
+async function fetchAndRenderTemplates() {
+  // Find or create container above the form fields
+  let container = document.getElementById("template-cards-container");
+  if (!container) {
+    container = document.createElement("div");
+    container.id = "template-cards-container";
+    container.className = "template-cards";
+    // Insert before the first label/field in the form
+    const firstLabel = newAgentForm.querySelector("label, .form-group, #workdir-options");
+    const target = firstLabel ? firstLabel.parentElement : newAgentForm;
+    if (firstLabel) {
+      target.insertBefore(container, firstLabel);
+    } else {
+      newAgentForm.prepend(container);
+    }
+  }
+  container.innerHTML = "";
+  _selectedTemplate = null;
+
+  try {
+    const res = await fetch("/api/agent-templates");
+    const templates = await res.json();
+    if (!templates || templates.length === 0) {
+      container.style.display = "none";
+      return;
+    }
+    container.style.display = "";
+    for (const tpl of templates) {
+      const card = document.createElement("div");
+      card.className = "template-card";
+      card.title = tpl.prompt || "";
+      card.innerHTML = `
+        <span class="template-card-icon">${escapeHtml(tpl.icon || tpl.name.charAt(0).toUpperCase())}</span>
+        <span>${escapeHtml(tpl.name)}</span>
+      `;
+      card.addEventListener("click", () => {
+        const nameInput = document.getElementById("agent-name");
+        const promptInput = document.getElementById("agent-prompt");
+        if (_selectedTemplate === tpl) {
+          // Deselect
+          card.classList.remove("selected");
+          _selectedTemplate = null;
+          nameInput.value = _defaultAgentName;
+          // Remove prepended prompt
+          if (tpl.prompt && promptInput.value.startsWith(tpl.prompt)) {
+            promptInput.value = promptInput.value.slice(tpl.prompt.length).replace(/^\n+/, "");
+          }
+          nameInput.focus();
+          nameInput.select();
+          return;
+        }
+        // Deselect previous
+        container.querySelectorAll(".template-card").forEach(c => c.classList.remove("selected"));
+        card.classList.add("selected");
+        // Remove previous template prompt if any
+        if (_selectedTemplate && _selectedTemplate.prompt && promptInput.value.startsWith(_selectedTemplate.prompt)) {
+          promptInput.value = promptInput.value.slice(_selectedTemplate.prompt.length).replace(/^\n+/, "");
+        }
+        _selectedTemplate = tpl;
+        // Set prefix
+        nameInput.value = tpl.prefix || _defaultAgentName;
+        // Prepend prompt
+        if (tpl.prompt) {
+          const existing = promptInput.value.trim();
+          promptInput.value = existing ? tpl.prompt + "\n" + existing : tpl.prompt;
+        }
+        nameInput.focus();
+        nameInput.select();
+      });
+      container.appendChild(card);
+    }
+  } catch (err) {
+    console.error("[templates] Failed to load agent templates:", err);
+    container.style.display = "none";
+  }
+}
+
 newAgentBtn.addEventListener("click", () => {
   modalOverlay.classList.remove("hidden");
   fetchClaudeSessions();
+  fetchAndRenderTemplates();
   const nameInput = document.getElementById("agent-name");
   if (!nameInput.value) nameInput.value = _defaultAgentName;
   nameInput.focus();
@@ -543,6 +623,11 @@ function closeNewAgentModal() {
   sessionSearch.value = "";
   sessionList.innerHTML = "";
   document.getElementById("agent-name").value = "";
+  document.getElementById("agent-prompt").value = "";
+  // Clear template selection
+  _selectedTemplate = null;
+  const tplContainer = document.getElementById("template-cards-container");
+  if (tplContainer) tplContainer.querySelectorAll(".template-card").forEach(c => c.classList.remove("selected"));
   // Clear modal attachments
   modalPendingAttachments.length = 0;
   const chips = document.getElementById("modal-attachment-chips");
