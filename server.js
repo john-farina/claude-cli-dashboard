@@ -1865,6 +1865,10 @@ app.get("/api/bankroll", (req, res) => {
   res.json(bankroll.getInfo());
 });
 
+app.get("/api/bankroll/stats", (req, res) => {
+  res.json(bankroll.getStats());
+});
+
 app.post("/api/bankroll/wager", (req, res) => {
   const { amount } = req.body || {};
   if (typeof amount !== "number" || amount <= 0) return res.status(400).json({ error: "invalid" });

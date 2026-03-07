@@ -3648,12 +3648,12 @@ function updateBranchDisplay(card, branch, isWorktree) {
 
 // --- Token Usage Display ---
 
-// Claude Opus 4 pricing per 1M tokens
+// Claude Opus 4.6 pricing per 1M tokens (https://docs.anthropic.com/en/docs/about-claude/pricing)
 const TOKEN_PRICES = {
-  input: 15,          // $15/M input
-  output: 75,         // $75/M output
-  cacheCreation: 18.75, // $18.75/M cache write
-  cacheRead: 1.50,    // $1.50/M cache read
+  input: 5,           // $5/M input
+  output: 25,         // $25/M output
+  cacheCreation: 6.25, // $6.25/M cache write (5-min)
+  cacheRead: 0.50,    // $0.50/M cache read
 };
 
 let _tokenShowDollars = localStorage.getItem("ceo-token-show-dollars") === "true";
@@ -4263,6 +4263,7 @@ function _toggleHelpOverlay() {
             ${K("R", "Restart")}
             ${K("!", "Bug Report")}
             ${K("@", "Arcade")}
+            ${K("W", "Wallet")}
             ${K("/", "Focus First Card")}
             ${K("1-9", "Focus Card N")}
             ${K("?", "This Help")}
@@ -4360,6 +4361,11 @@ document.addEventListener("keydown", (e) => {
     if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
       e.preventDefault();
       closeDiffModal();
+      return;
+    }
+    if (_walletOverlay && !_walletOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _closeWallet();
       return;
     }
     if (_arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
@@ -4553,6 +4559,11 @@ document.addEventListener("keydown", (e) => {
     _openArcade();
     return;
   }
+  if (key === "w") {
+    e.preventDefault();
+    _openWallet();
+    return;
+  }
   if (key === "n") {
     e.preventDefault();
     newAgentBtn.click();
@@ -4589,6 +4600,124 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 });
+
+// --- Wallet Panel (W hotkey) ---
+let _walletOverlay = null;
+
+function _openWallet() {
+  if (!_walletOverlay) {
+    _walletOverlay = document.createElement("div");
+    _walletOverlay.id = "wallet-overlay";
+    _walletOverlay.className = "command-palette-overlay";
+    _walletOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _walletOverlay) _closeWallet();
+    });
+    document.body.appendChild(_walletOverlay);
+  }
+  _walletOverlay.classList.remove("hidden");
+  _walletOverlay.innerHTML = '<div class="wallet-panel"><div class="wallet-loading">Loading...</div></div>';
+  fetch("/api/bankroll/stats").then(r => r.json()).then(_renderWallet).catch(() => {
+    _walletOverlay.innerHTML = '<div class="wallet-panel"><div class="wallet-loading">Failed to load wallet</div></div>';
+  });
+}
+
+function _closeWallet() {
+  if (_walletOverlay) _walletOverlay.classList.add("hidden");
+}
+
+function _renderWallet(stats) {
+  const pnlColor = stats.gamingPnl >= 0 ? "#4ade80" : "#ef4444";
+  const pnlSign = stats.gamingPnl >= 0 ? "+" : "";
+  const ltColor = stats.lifetimePnl >= 0 ? "#4ade80" : "#ef4444";
+  const ltSign = stats.lifetimePnl >= 0 ? "+" : "";
+  const fmt = (n) => "$" + Math.abs(n).toLocaleString("en-US");
+  const capPct = stats.dailyCap > 0 ? Math.round((stats.dailyEarned / stats.dailyCap) * 100) : 0;
+
+  // Recent earnings by day (last 7 days)
+  const days = Object.entries(stats.earningsByDay || {}).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
+  const maxDay = Math.max(1, ...days.map(d => d[1]));
+
+  _walletOverlay.innerHTML = `
+    <div class="wallet-panel">
+      <div class="wallet-header">
+        <span>Wallet</span>
+        <button class="wallet-close" onclick="_closeWallet()">&times;</button>
+      </div>
+
+      <div class="wallet-balance">
+        <div class="wallet-balance-label">BALANCE</div>
+        <div class="wallet-balance-amount">${fmt(stats.balance)}</div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">LIFETIME P&L</div>
+        <div class="wallet-pnl" style="color:${ltColor}">${ltSign}${fmt(stats.lifetimePnl)}</div>
+      </div>
+
+      <div class="wallet-grid">
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">EARNED (WORK)</div>
+          <div class="wallet-stat-value" style="color:#4ade80">${fmt(stats.totalEarned)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">GAMING P&L</div>
+          <div class="wallet-stat-value" style="color:${pnlColor}">${pnlSign}${fmt(stats.gamingPnl)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">WAGERED</div>
+          <div class="wallet-stat-value">${fmt(stats.totalWagered)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">WON</div>
+          <div class="wallet-stat-value">${fmt(stats.totalWon)}</div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">WORK BREAKDOWN</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Tasks completed</span><span>${stats.breakdown.taskComplete} &times; $100 = ${fmt(stats.breakdown.taskComplete * 100)}</span></div>
+          <div class="wallet-row"><span>Commits</span><span>${stats.breakdown.commits} &times; $200 = ${fmt(stats.breakdown.commits * 200)}</span></div>
+          <div class="wallet-row"><span>Docs saved</span><span>${stats.breakdown.docSaves} &times; $50 = ${fmt(stats.breakdown.docSaves * 50)}</span></div>
+          <div class="wallet-row"><span>Agent cleanups</span><span>${stats.breakdown.agentCleanups} &times; $25 = ${fmt(stats.breakdown.agentCleanups * 25)}</span></div>
+          <div class="wallet-row"><span>Daily seeds</span><span>${stats.breakdown.dailySeeds} &times; $500 = ${fmt(stats.breakdown.dailySeeds * 500)}</span></div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">GAMING</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Games played</span><span>${stats.gaming.played}</span></div>
+          <div class="wallet-row"><span>Games won</span><span>${stats.gaming.won}</span></div>
+          <div class="wallet-row"><span>Win rate</span><span>${stats.gaming.winRate}%</span></div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">DAILY EARNINGS (${capPct}% of $${stats.dailyCap.toLocaleString()} cap)</div>
+        <div class="wallet-cap-bar">
+          <div class="wallet-cap-fill" style="width:${Math.min(100, capPct)}%"></div>
+        </div>
+        ${days.length > 0 ? '<div class="wallet-chart">' + days.map(([day, amount]) => {
+          const pct = Math.max(4, (amount / maxDay) * 100);
+          const label = day.slice(5); // MM-DD
+          return '<div class="wallet-chart-bar"><div class="wallet-bar-fill" style="height:' + pct + '%"></div><div class="wallet-bar-label">' + label + '</div></div>';
+        }).join("") + '</div>' : ''}
+      </div>
+
+      <div class="wallet-section wallet-help">
+        <div class="wallet-section-title">HOW TO EARN</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Agent completes a task</span><span class="wallet-earn">+$100</span></div>
+          <div class="wallet-row"><span>Agent makes a commit</span><span class="wallet-earn">+$200</span></div>
+          <div class="wallet-row"><span>Agent saves a document</span><span class="wallet-earn">+$50</span></div>
+          <div class="wallet-row"><span>Kill/cleanup an agent</span><span class="wallet-earn">+$25</span></div>
+          <div class="wallet-row"><span>Daily login bonus</span><span class="wallet-earn">+$500</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
 
 // --- Games Arcade ---
 // To add a game: put the HTML file in public/, add an entry here
@@ -4753,6 +4882,8 @@ async function _refreshBankroll() {
 }
 setInterval(_refreshBankroll, 10000);
 _refreshBankroll();
+// Click bankroll display to open wallet
+document.getElementById("bankroll-display")?.addEventListener("click", _openWallet);
 
 // --- Bankroll postMessage bridge for game iframes ---
 window.addEventListener("message", (e) => {
