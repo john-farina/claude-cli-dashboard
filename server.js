@@ -1338,6 +1338,7 @@ app.delete("/api/sessions/:name", async (req, res) => {
   clearWorktreeCache(`${PREFIX}${name}`);
   prevStatuses.delete(`${PREFIX}${name}`);
   _autoRenamed.delete(name);
+  _seenCommits.delete(name);
   _pendingRenamePrefix.delete(name);
   _firingAgents.delete(name);
   fileTracker.removeAgent(name);
@@ -3010,6 +3011,7 @@ app.post("/api/restart-server", (req, res) => {
 
 const prevOutputs = new Map();
 const prevStatuses = new Map(); // track previous status per session for auto-rename
+const _seenCommits = new Map(); // agent -> Set of commit hashes already rewarded
 const _autoRenamed = new Set(); // sessions already auto-renamed (by original name)
 const _pendingAutoRename = new Set(); // agents queued for rename on next idle (explicit user request)
 const _firingAgents = new Set(); // agents being fired — hidden from UI, running in background
@@ -3542,9 +3544,18 @@ async function broadcastOutputs() {
           }
         }
 
-        // Bankroll: detect commits in output
-        if (/\[[\w\s-]+\s+[0-9a-f]{7,10}\]/.test(output)) {
-          bankroll.earn(200, "commit", name);
+        // Bankroll: detect commits in output (dedupe by hash)
+        const commitMatch = output.match(/\[[\w\s-]+\s+([0-9a-f]{7,10})\]/g);
+        if (commitMatch) {
+          if (!_seenCommits.has(name)) _seenCommits.set(name, new Set());
+          const seen = _seenCommits.get(name);
+          for (const m of commitMatch) {
+            const hash = m.match(/([0-9a-f]{7,10})\]/)?.[1];
+            if (hash && !seen.has(hash)) {
+              seen.add(hash);
+              bankroll.earn(200, "commit", name);
+            }
+          }
         }
 
         const liveCwd = await getEffectiveCwdAsync(session, output);
