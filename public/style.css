@@ -6556,6 +6556,7 @@ header .btn-primary kbd {
 .activity-timeline-time { color: var(--text-dim); font-size: 10px; font-family: var(--font-mono, monospace); white-space: nowrap; }
 
 /* --- Games Arcade --- */
+#arcade-overlay { padding-top: 5vh; align-items: flex-start; }
 .game-modal {
   background: #0a0a1a; border-radius: 12px; overflow: hidden;
   width: 90vw; max-width: 1000px; height: 85vh;
