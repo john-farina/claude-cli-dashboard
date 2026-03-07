@@ -1947,6 +1947,19 @@ app.get("/api/activity", (req, res) => {
   res.json(activityEvents.getEvents(since, agent));
 });
 
+app.get("/api/prs", (req, res) => {
+  const meta = loadSessionsMeta();
+  const branches = [];
+  for (const [name, info] of Object.entries(meta)) {
+    if (info.type === "terminal") continue;
+    try {
+      const git = getGitInfo(info.workdir || DEFAULT_WORKDIR);
+      if (git?.branch) branches.push(git.branch);
+    } catch {}
+  }
+  res.json(prDashboard.getPRs(branches));
+});
+
 app.get("/api/ceo-md", (req, res) => {
   try {
     const content = fs.readFileSync(CEO_MD_PATH, "utf8");
