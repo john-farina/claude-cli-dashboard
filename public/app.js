@@ -3488,13 +3488,8 @@ function updateTokenUsageDisplay(msg) {
   const agentData = payload.agents || {};
   const dailyData = payload.daily || {};
 
-  // Save to localStorage
-  const stored = JSON.parse(localStorage.getItem("ceo-token-usage") || "{}");
-  stored.agents = stored.agents || {};
-  for (const [name, data] of Object.entries(agentData)) {
-    stored.agents[name] = data;
-  }
-  stored.daily = dailyData;
+  // Save to localStorage — full replace (server sends complete state)
+  const stored = { agents: agentData, daily: dailyData };
   localStorage.setItem("ceo-token-usage", JSON.stringify(stored));
 
   updateHeaderTokenTotals(stored);

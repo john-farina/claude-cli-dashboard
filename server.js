@@ -315,29 +315,57 @@ function syncTokenUsage() {
     if (!usage) continue;
     const prev = saved.agents[name];
     const sameSession = prev && prev.sessionId === sessionId;
-    if (!sameSession ||
-        prev.input !== usage.input || prev.output !== usage.output ||
-        prev.cacheCreation !== usage.cacheCreation || prev.cacheRead !== usage.cacheRead) {
-      // Only compute daily delta for the same session (incremental).
-      // When sessionId changes or agent is first seen, we can't compute
-      // a meaningful delta — just record the baseline and start fresh.
-      if (sameSession) {
-        const delta = {
-          input: usage.input - (prev.input || 0),
-          output: usage.output - (prev.output || 0),
-          cacheCreation: usage.cacheCreation - (prev.cacheCreation || 0),
-          cacheRead: usage.cacheRead - (prev.cacheRead || 0),
+
+    if (sameSession) {
+      // Same session — compute delta from last known session usage
+      // If _sessionUsage is missing (pre-upgrade data), assume stored values ARE the session usage
+      const lastSU = prev._sessionUsage || { input: prev.input || 0, output: prev.output || 0, cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0 };
+      const delta = {
+        input: usage.input - lastSU.input,
+        output: usage.output - lastSU.output,
+        cacheCreation: usage.cacheCreation - lastSU.cacheCreation,
+        cacheRead: usage.cacheRead - lastSU.cacheRead,
+      };
+      if (delta.input > 0 || delta.output > 0 || delta.cacheCreation > 0 || delta.cacheRead > 0) {
+        const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        day.input += delta.input;
+        day.output += delta.output;
+        day.cacheCreation += delta.cacheCreation;
+        day.cacheRead += delta.cacheRead;
+        saved.daily[todayKey] = day;
+        saved.agents[name] = {
+          input: (prev.input || 0) + delta.input,
+          output: (prev.output || 0) + delta.output,
+          cacheCreation: (prev.cacheCreation || 0) + delta.cacheCreation,
+          cacheRead: (prev.cacheRead || 0) + delta.cacheRead,
+          sessionId,
+          _sessionUsage: { ...usage },
         };
-        if (delta.input > 0 || delta.output > 0 || delta.cacheCreation > 0 || delta.cacheRead > 0) {
-          const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-          day.input += delta.input;
-          day.output += delta.output;
-          day.cacheCreation += delta.cacheCreation;
-          day.cacheRead += delta.cacheRead;
-          saved.daily[todayKey] = day;
-        }
+        changed = true;
       }
-      saved.agents[name] = { ...usage, sessionId };
+    } else {
+      // New session — carry forward old cumulative total, add new session's usage
+      const prevTotal = prev ? {
+        input: prev.input || 0, output: prev.output || 0,
+        cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0,
+      } : { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+      // Add new session's full usage to daily
+      if (usage.input > 0 || usage.output > 0 || usage.cacheCreation > 0 || usage.cacheRead > 0) {
+        const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        day.input += usage.input;
+        day.output += usage.output;
+        day.cacheCreation += usage.cacheCreation;
+        day.cacheRead += usage.cacheRead;
+        saved.daily[todayKey] = day;
+      }
+      saved.agents[name] = {
+        input: prevTotal.input + usage.input,
+        output: prevTotal.output + usage.output,
+        cacheCreation: prevTotal.cacheCreation + usage.cacheCreation,
+        cacheRead: prevTotal.cacheRead + usage.cacheRead,
+        sessionId,
+        _sessionUsage: { ...usage },
+      };
       changed = true;
     }
   }
