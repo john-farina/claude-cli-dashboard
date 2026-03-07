@@ -1140,23 +1140,34 @@ function _diffReviewGetLineInfo(tr) {
   if (!nameEl) return null;
   const filePath = nameEl.textContent.trim();
 
-  // Determine side
-  const side = tr.classList.contains("d2h-del") ? "old" : "new";
-
-  // Line number — unified vs split
+  let side = null;
   let lineNumber = null;
+
   const sideLineNum = tr.querySelector(".d2h-code-side-linenumber");
   const uniLineNum = tr.querySelector(".d2h-code-linenumber");
   if (sideLineNum) {
-    lineNumber = sideLineNum.textContent.trim();
+    // Split view: read only text nodes to exclude injected "+" button text
+    lineNumber = _diffGetTextOnly(sideLineNum);
+    // First side-linenumber in the row = old, second = new
+    const allSideCells = tr.querySelectorAll(".d2h-code-side-linenumber");
+    side = (allSideCells.length >= 2 && sideLineNum === allSideCells[1]) ? "new" : "old";
   } else if (uniLineNum) {
-    // Unified: has two numbers, pick based on side
-    const raw = uniLineNum.textContent.trim();
-    // d2h renders line numbers with inner spans or plain text
-    const nums = raw.split(/\s+/).filter(Boolean);
-    if (side === "old" && nums.length >= 1) lineNumber = nums[0];
-    else if (nums.length >= 2) lineNumber = nums[1];
-    else lineNumber = nums[0];
+    // Unified view: use .line-num1 (old) / .line-num2 (new) divs
+    const ln1 = uniLineNum.querySelector(".line-num1")?.textContent?.trim() || "";
+    const ln2 = uniLineNum.querySelector(".line-num2")?.textContent?.trim() || "";
+    if (ln1 && !ln2) {
+      side = "old";
+      lineNumber = ln1;
+    } else if (ln2) {
+      side = "new";
+      lineNumber = ln2;
+    } else {
+      // Fallback: read text nodes only (excludes injected button)
+      const raw = _diffGetTextOnly(uniLineNum);
+      const nums = raw.split(/\s+/).filter(Boolean);
+      side = "new";
+      lineNumber = nums[0] || null;
+    }
   }
   if (!lineNumber || lineNumber === "…") return null;
 
@@ -1164,6 +1175,16 @@ function _diffReviewGetLineInfo(tr) {
   const codeSnippet = codeEl ? codeEl.textContent : "";
 
   return { filePath, lineNumber, side, codeSnippet };
+}
+
+// Read text content from a DOM node, excluding injected review button text
+function _diffGetTextOnly(el) {
+  let text = "";
+  for (const node of el.childNodes) {
+    if (node.nodeType === 3) text += node.textContent;
+    else if (node.nodeType === 1 && !node.classList.contains("diff-review-add-btn")) text += node.textContent;
+  }
+  return text.trim();
 }
 
 function _diffReviewInjectGutterButtons(container) {
