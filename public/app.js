@@ -4167,7 +4167,7 @@ function _toggleHelpOverlay() {
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">!</kbd><span>Bug Report</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">/</kbd><span>Focus First Card</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">1-9</kbd><span>Focus Card N</span>
-            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Cmd+Shift+E/R</kbd><span>Navigate Cards</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">j/k</kbd><span>Navigate Cards (Esc first)</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">?</kbd><span>This Help</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Esc</kbd><span>Close / Back</span>
           </div>
@@ -4336,8 +4336,12 @@ document.addEventListener("keydown", (e) => {
       document.getElementById("shell-header").focus();
       return;
     }
-    // If typing in a card input, just blur
-    if (inInput && !inShell && !inFilesPanel) return;
+    // If typing in a card input, blur it (vim-style: Esc exits insert mode, then j/k navigates)
+    if (inInput && !inShell && !inFilesPanel) {
+      e.target._expectedBlur = true;
+      e.target.blur();
+      return;
+    }
     // Agent card: send Escape to tmux
     const card = e.target.closest(".agent-card");
     if (card) {
@@ -4350,26 +4354,6 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  // Cmd+Shift+E / Cmd+Shift+R: navigate between agent cards (works even when typing)
-  if (e.metaKey && e.shiftKey && (e.code === "KeyE" || e.code === "KeyR")) {
-    e.preventDefault();
-    const cards = [...grid.querySelectorAll(".agent-card:not(.minimized)")];
-    if (cards.length === 0) return;
-    const focused = document.activeElement?.closest(".agent-card");
-    let idx = focused ? cards.indexOf(focused) : -1;
-    if (e.code === "KeyR") {
-      idx = idx < cards.length - 1 ? idx + 1 : 0;
-    } else {
-      idx = idx > 0 ? idx - 1 : cards.length - 1;
-    }
-    const target = cards[idx];
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      const inp = target.querySelector(".card-input textarea");
-      if (inp) inp.focus({ preventScroll: true });
-    }
-    return;
-  }
 
   // Modifier keys — never hijack browser shortcuts
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -4406,6 +4390,26 @@ document.addEventListener("keydown", (e) => {
 
   // Remaining hotkeys — skip if typing in any input
   if (inInput) return;
+
+  // j/k: navigate between agent cards (Esc to exit card first, then j/k)
+  if (key === "j" || key === "k") {
+    e.preventDefault();
+    const cards = [...grid.querySelectorAll(".agent-card:not(.minimized)")];
+    if (cards.length === 0) return;
+    const focused = document.activeElement?.closest(".agent-card");
+    let idx = focused ? cards.indexOf(focused) : -1;
+    if (key === "j") {
+      idx = idx < cards.length - 1 ? idx + 1 : 0;
+    } else {
+      idx = idx > 0 ? idx - 1 : cards.length - 1;
+    }
+    const target = cards[idx];
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.querySelector(".terminal")?.focus({ preventScroll: true });
+    }
+    return;
+  }
   if (key === "?") {
     e.preventDefault();
     _toggleHelpOverlay();
