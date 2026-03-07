@@ -2587,6 +2587,7 @@ header h1 {
   gap: 8px;
   align-items: stretch;
 }
+.bug-screenshot-row.hidden { display: none; }
 .bug-screenshot-capture-btn {
   display: flex;
   align-items: center;
@@ -2597,6 +2598,7 @@ header h1 {
   border-radius: 8px;
   flex-shrink: 0;
 }
+.bug-screenshot-capture-btn.hidden { display: none; }
 .bug-screenshot-capture-btn svg {
   flex-shrink: 0;
 }

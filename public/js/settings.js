@@ -140,8 +140,8 @@
 
   // Capture screenshot via macOS screencapture
   bugScreenshotCapture.addEventListener("click", async () => {
-    // Hide the modal so user can capture the screen
-    bugOverlay.style.display = "none";
+    // Hide the modal so user can capture the screen (use classList not inline style)
+    bugOverlay.classList.add("hidden");
     bugScreenshotCapture.disabled = true;
     bugScreenshotCapture.textContent = "Capturing...";
 
@@ -160,7 +160,7 @@
       // User cancelled or error — do nothing
     } finally {
       // Show the modal again
-      bugOverlay.style.display = "";
+      bugOverlay.classList.remove("hidden");
       bugScreenshotCapture.disabled = false;
       bugScreenshotCapture.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M5 3L6 1h4l1 2"/></svg> Capture Screen`;
     }

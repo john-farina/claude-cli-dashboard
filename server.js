@@ -2103,16 +2103,16 @@ app.post("/api/bug-report", (req, res) => {
 
 app.get("/api/screenshot-preview", (req, res) => {
   const filePath = req.query.path;
-  if (!filePath || !filePath.startsWith(path.join(os.tmpdir(), "ceo-dashboard-uploads"))) {
+  const resolved = filePath ? path.resolve(filePath) : "";
+  if (!resolved || !resolved.startsWith(UPLOADS_DIR + path.sep)) {
     return res.status(403).json({ error: "Invalid path" });
   }
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Not found" });
-  res.sendFile(filePath);
+  if (!fs.existsSync(resolved)) return res.status(404).json({ error: "Not found" });
+  res.sendFile(resolved);
 });
 
 app.post("/api/screenshot", (req, res) => {
-  const { execFile } = require("child_process");
-  const screenshotPath = path.join(os.tmpdir(), `ceo-dashboard-uploads`, `screenshot-${Date.now()}.png`);
+  const screenshotPath = path.join(UPLOADS_DIR, `screenshot-${Date.now()}.png`);
   fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
   // screencapture -i: interactive selection mode (user drags to select area)
   // Returns exit code 1 if user cancels (presses Escape)
