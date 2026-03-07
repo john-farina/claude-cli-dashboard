@@ -3468,11 +3468,14 @@ function updateStatus(agent, status, promptType) {
     agent._waitGen = (agent._waitGen || 0) + 1;
   }
 
+  const prevStatus = agent.status;
   agent.status = status;
 
-  // Alert in game arcade when agent needs attention (works whether arcade is visible or hidden)
-  if (isNeedy && !wasNeedy && _activeGame) {
-    _showArcadeAlert(name, status);
+  // Alert in game arcade when agent finishes working (ready for your next prompt)
+  const doneWorking = prevStatus === "working" && status !== "working";
+  if (doneWorking && _activeGame) {
+    const alertLabel = status === "waiting" ? "needs input" : status === "asking" ? "has a question" : "ready for you";
+    _showArcadeAlert(name, alertLabel);
   }
 
   const badge = agent.card.querySelector(".status-badge");
@@ -4702,8 +4705,8 @@ function _showPauseLayer() {
   });
 }
 
-// Alert banner when agent needs attention during gameplay
-function _showArcadeAlert(agentName, status) {
+// Alert banner when agent finishes working during gameplay
+function _showArcadeAlert(agentName, label) {
   if (!_arcadeModal) return;
   // If arcade is hidden, pop it open so the user sees the alert
   if (_arcadeOverlay?.classList.contains("hidden")) {
@@ -4711,7 +4714,6 @@ function _showArcadeAlert(agentName, status) {
   }
   // Remove previous alert if any
   _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
-  const label = status === "waiting" ? "needs input" : "has a question";
   const alert = document.createElement("div");
   alert.className = "arcade-agent-alert";
   alert.innerHTML = `<span class="arcade-alert-pulse"></span><strong>${agentName}</strong> ${label} <button class="arcade-alert-go">Go to agent</button>`;
