@@ -11,9 +11,9 @@ Single-page Node.js app — modular backend (`lib/`) and frontend (`public/js/`)
 | File | Purpose |
 |------|---------|
 | `server.js` | Thin orchestrator — Express routes + WebSocket wiring, imports `lib/` modules |
-| `lib/*.js` | 10 backend modules (security, tmux, git, output, session, claude-sessions, update, scrollback, terminal-cards, shell-pty) |
+| `lib/*.js` | 13 backend modules (security, tmux, git, output, session, claude-sessions, update, scrollback, terminal-cards, shell-pty, file-tracker, activity-events, constants) |
 | `public/app.js` | Core frontend — DOM init, WebSocket, agent cards, xterm infra, layout |
-| `public/js/*.js` | 5 frontend modules (theme, modals, todos, settings, shell) |
+| `public/js/*.js` | 13 frontend modules (theme, modals, todos, settings, shell, command-palette, split-view, output-search, cards, dependency-graph, activity-timeline, polling-manager, constants) |
 | `public/style.css` | All styles (dark theme, CSS variables in `:root`) |
 | `public/index.html` | Shell HTML — modals, file browser panel, CDN scripts |
 
@@ -116,6 +116,52 @@ Supporting files:
 **Bug Report** (header button, keyboard shortcut `!`): File GitHub issues directly from the dashboard. Collects system info, severity, screenshots. Uses `gh` CLI with `execFile` (no shell injection).
 
 **Full details:** Read `dev-docs/bug-report.md`
+
+**Command Palette** (Cmd+K):
+- Fuzzy search across agents, actions, panels, views
+- Central action registry — new features auto-register
+- `public/js/command-palette.js`
+
+**Focus View** (via command palette):
+- 1-4 agents in smart layouts (full/split/thirds/2x2 grid)
+- Replaces grid area, keeps header and shell visible
+- `public/js/split-view.js`
+
+**Output Search** (Cmd+F on agent card):
+- Client-side text search through terminal output
+- Highlights matches, navigate with Enter/Shift+Enter
+- Server endpoint for full scrollback search
+- `public/js/output-search.js`
+
+**Dependency Graph** (G hotkey):
+- SVG visualization of agents as nodes, shared files as edges
+- Red edges when both agents are working on same files
+- Polls `/api/file-overlaps` when open
+- `public/js/dependency-graph.js`, `lib/file-tracker.js`
+
+**Cross-Agent Awareness**:
+- Warning banners on cards when agents share files
+- Broadcast via WebSocket every 15s
+- Advisory only — no automatic intervention
+
+**Activity Timeline** (L hotkey):
+- Live feed of status changes, file edits, doc saves
+- Fixed panel above shell, polls every 5s
+- `public/js/activity-timeline.js`, `lib/activity-events.js`
+
+**Cost Budgets** (config.json):
+- Daily/per-agent token budgets with warning thresholds
+- Progress bar in header (green->yellow->red)
+- Configure via `budgets` in config.json
+
+**Agent Templates** (config.json):
+- Pre-configured profiles in New Agent modal
+- Configure via `agentTemplates` in config.json
+
+**Games Arcade** (header button):
+- Modular game launcher, currently ships Block Drop
+- Pause on close, resume preserves game state
+- Add games: put HTML in `public/`, add to `_games` array
 
 **Git/Worktree Detection**:
 - `getGitInfo()` — branch name + worktree status (`.git` is a file in worktrees, directory in main repos)

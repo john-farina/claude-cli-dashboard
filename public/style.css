@@ -46,6 +46,11 @@
   --status-waiting-color: #d9534f;
   --status-asking-bg: rgba(201, 168, 76, 0.1);
   --status-asking-color: #c9a84c;
+  --dep-status-working: #4ade80;
+  --dep-status-idle: #60a5fa;
+  --dep-status-waiting: #fbbf24;
+  --dep-status-other: #888;
+  --dep-status-conflict: #ef4444;
 }
 
 

@@ -1,6 +1,10 @@
 (function() {
   "use strict";
 
+  function _getCssVar(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || null;
+  }
+
   let _panel = null;
   let _svg = null;
   let _pollInterval = null;
@@ -38,10 +42,10 @@
       <div class="dep-graph-body">
         <svg class="dep-graph-svg"></svg>
         <div class="dep-graph-legend">
-          <span><span class="dep-dot" style="background:#4ade80"></span> working</span>
-          <span><span class="dep-dot" style="background:#60a5fa"></span> idle</span>
-          <span><span class="dep-dot" style="background:#fbbf24"></span> waiting</span>
-          <span><span class="dep-dot" style="background:#888"></span> other</span>
+          <span><span class="dep-dot" style="background:var(--dep-status-working)"></span> working</span>
+          <span><span class="dep-dot" style="background:var(--dep-status-idle)"></span> idle</span>
+          <span><span class="dep-dot" style="background:var(--dep-status-waiting)"></span> waiting</span>
+          <span><span class="dep-dot" style="background:var(--dep-status-other)"></span> other</span>
           <span><span class="dep-line dep-line-red"></span> conflict</span>
         </div>
         <div class="dep-graph-empty" style="display:none">No agents or no file overlaps detected yet.</div>
@@ -127,7 +131,7 @@
           var aStatus = aAgent ? aAgent.status : "";
           var bStatus = bAgent ? bAgent.status : "";
           var isConflict = aStatus === "working" && bStatus === "working";
-          var color = isConflict ? "#ef4444" : "rgba(255,255,255,0.15)";
+          var color = isConflict ? (_getCssVar("--dep-status-conflict") || "#ef4444") : "rgba(255,255,255,0.15)";
           var strokeW = isConflict ? 2.5 : 1.5;
           var title = typeof sharedFiles === "string" ? sharedFiles : "";
           parts.push('<line x1="' + a.x + '" y1="' + a.y + '" x2="' + b.x + '" y2="' + b.y + '" stroke="' + color + '" stroke-width="' + strokeW + '"><title>' + _escHtml(title) + '</title></line>');
@@ -143,18 +147,23 @@
           var pb = positions[agentList[bi].name];
           if (pa && pb) {
             var bothWorking = agentList[ai].status === "working" && agentList[bi].status === "working";
-            parts.push('<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '" stroke="' + (bothWorking ? "#ef4444" : "rgba(255,255,255,0.08)") + '" stroke-width="1" stroke-dasharray="4,4"><title>Same branch: ' + _escHtml(agentList[ai].branch) + '</title></line>');
+            parts.push('<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '" stroke="' + (bothWorking ? (_getCssVar("--dep-status-conflict") || "#ef4444") : "rgba(255,255,255,0.08)") + '" stroke-width="1" stroke-dasharray="4,4"><title>Same branch: ' + _escHtml(agentList[ai].branch) + '</title></line>');
           }
         }
       }
     }
 
     // Draw nodes
-    var statusColors = { working: "#4ade80", idle: "#60a5fa", waiting: "#fbbf24", asking: "#888" };
+    var statusColors = {
+      working: _getCssVar("--dep-status-working") || "#4ade80",
+      idle: _getCssVar("--dep-status-idle") || "#60a5fa",
+      waiting: _getCssVar("--dep-status-waiting") || "#fbbf24",
+      asking: _getCssVar("--dep-status-other") || "#888"
+    };
     for (var ni = 0; ni < agentList.length; ni++) {
       var agent = agentList[ni];
       var p = positions[agent.name];
-      var nodeColor = statusColors[agent.status] || "#888";
+      var nodeColor = statusColors[agent.status] || (_getCssVar("--dep-status-other") || "#888");
       parts.push('<circle cx="' + p.x + '" cy="' + p.y + '" r="' + nodeRadius + '" fill="' + nodeColor + '" opacity="0.85" style="cursor:pointer" data-agent="' + _escHtml(agent.name) + '"><title>' + _escHtml(agent.name) + " (" + agent.status + ")" + '</title></circle>');
       parts.push('<text x="' + p.x + '" y="' + (p.y + nodeRadius + 14) + '" text-anchor="middle" fill="var(--text-dim, #999)" font-size="11" font-family="var(--font-mono, monospace)">' + _escHtml(agent.name) + '</text>');
     }
