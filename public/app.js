@@ -3470,8 +3470,8 @@ function updateStatus(agent, status, promptType) {
 
   agent.status = status;
 
-  // Alert in game arcade when agent needs attention
-  if (isNeedy && !wasNeedy && _arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
+  // Alert in game arcade when agent needs attention (works whether arcade is visible or hidden)
+  if (isNeedy && !wasNeedy && _activeGame) {
     _showArcadeAlert(name, status);
   }
 
@@ -4705,6 +4705,10 @@ function _showPauseLayer() {
 // Alert banner when agent needs attention during gameplay
 function _showArcadeAlert(agentName, status) {
   if (!_arcadeModal) return;
+  // If arcade is hidden, pop it open so the user sees the alert
+  if (_arcadeOverlay?.classList.contains("hidden")) {
+    _arcadeOverlay.classList.remove("hidden");
+  }
   // Remove previous alert if any
   _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
   const label = status === "waiting" ? "needs input" : "has a question";
