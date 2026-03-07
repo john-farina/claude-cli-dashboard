@@ -28,6 +28,7 @@ const updateMod = require("./lib/update");
 const { createScrollback, getScrollback, appendScrollback, clearScrollback } = require("./lib/scrollback");
 const terminalCards = require("./lib/terminal-cards");
 const shellPtyMod = require("./lib/shell-pty");
+const fileTracker = require("./lib/file-tracker");
 
 // Destructure security
 const {
@@ -1226,6 +1227,7 @@ app.delete("/api/sessions/:name", async (req, res) => {
   _autoRenamed.delete(name);
   _pendingRenamePrefix.delete(name);
   _firingAgents.delete(name);
+  fileTracker.removeAgent(name);
   res.json({ ok: true, worktreeCleaned });
 });
 
@@ -1761,6 +1763,17 @@ app.delete("/api/agent-docs/:name/:doc", (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// File tracker endpoints
+app.get("/api/file-overlaps", (req, res) => {
+  res.json(fileTracker.getOverlaps());
+});
+
+app.get("/api/agent-files/:name", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  res.json(fileTracker.getAgentFiles(name));
 });
 
 app.get("/api/ceo-md", (req, res) => {
@@ -3166,6 +3179,7 @@ async function broadcastOutputs() {
         const promptType = status === "waiting" ? detectPromptType(filteredOutput) : null;
         const promptOptions = promptType === "question" ? parsePromptOptions(filteredOutput) : null;
         prevOutputs.set(session, output);
+        fileTracker.updateAgentFiles(name, output);
 
         // Track status transitions for auto-rename
         const prevStatus = prevStatuses.get(session);
