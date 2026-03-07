@@ -3556,6 +3556,13 @@ setInterval(() => { broadcastOutputs(); }, POLL_INTERVAL);
 // Token usage sync — every 5s
 setInterval(broadcastTokenUsage, 5000);
 
+// Broadcast file overlaps every 15s
+setInterval(() => {
+  const overlaps = fileTracker.getOverlaps();
+  const msg = JSON.stringify({ type: "file-overlaps", overlaps: overlaps.length > 0 ? overlaps : [] });
+  wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
+}, 15000);
+
 // --- Start ---
 
 // Caffeinate

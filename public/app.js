@@ -884,6 +884,11 @@ function connect() {
       return;
     }
 
+    if (msg.type === "file-overlaps") {
+      _updateOverlapBanners(msg.overlaps || []);
+      return;
+    }
+
     if (msg.type === "todo-update") {
       if (typeof handleTodoUpdate === "function") handleTodoUpdate(msg.data);
       // Refresh agent todo refs on all cards
@@ -3765,6 +3770,46 @@ function usageTooltip(label, u) {
   const tokens = `In: ${formatTokenCount(u.input || 0)} | Out: ${formatTokenCount(u.output || 0)} | Cache write: ${formatTokenCount(u.cacheCreation || 0)} | Cache read: ${formatTokenCount(u.cacheRead || 0)}`;
   const dollars = formatDollars(usageToDollars(u));
   return `${label} — ${tokens}\nCost: ${dollars}`;
+}
+
+function _updateOverlapBanners(overlaps) {
+  // Clear all existing banners
+  document.querySelectorAll(".overlap-banner").forEach(b => b.remove());
+
+  if (overlaps.length === 0) return;
+
+  // Build a map: agentName -> [{ file, otherAgents }]
+  const agentOverlaps = new Map();
+  for (const { file, agents: overlapAgents } of overlaps) {
+    for (const name of overlapAgents) {
+      if (!agentOverlaps.has(name)) agentOverlaps.set(name, []);
+      const others = overlapAgents.filter(a => a !== name);
+      agentOverlaps.get(name).push({ file, others });
+    }
+  }
+
+  // Render banners on affected cards
+  for (const [name, files] of agentOverlaps) {
+    const agent = agents.get(name);
+    if (!agent?.card) continue;
+
+    const banner = document.createElement("div");
+    banner.className = "overlap-banner";
+
+    const fileCount = files.length;
+    const otherAgents = [...new Set(files.flatMap(f => f.others))];
+    banner.innerHTML = `<span class="overlap-banner-icon">\u26A0</span> ` +
+      `${fileCount} shared file${fileCount > 1 ? "s" : ""} with ${otherAgents.join(", ")}`;
+    banner.title = files.map(f => f.file.split("/").pop() + " (" + f.others.join(", ") + ")").join("\n");
+
+    // Insert after the card header (before terminal)
+    const header = agent.card.querySelector(".card-header");
+    if (header && header.nextSibling) {
+      header.parentNode.insertBefore(banner, header.nextSibling);
+    } else {
+      agent.card.prepend(banner);
+    }
+  }
 }
 
 function updateTokenUsageDisplay(msg) {

@@ -6480,3 +6480,13 @@ header .btn-primary kbd {
 .dep-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 .dep-line-red { display: inline-block; width: 16px; height: 2px; background: #ef4444; margin-right: 4px; vertical-align: middle; }
 .dep-graph-empty { padding: 24px 16px; text-align: center; color: var(--text-dim); font-size: 13px; }
+
+/* --- Overlap Warning Banners --- */
+.overlap-banner {
+  padding: 6px 14px; font-size: 12px;
+  background: rgba(239, 68, 68, 0.1); color: #fca5a5;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.2);
+  display: flex; align-items: center; gap: 6px;
+  cursor: default;
+}
+.overlap-banner-icon { font-size: 13px; }
