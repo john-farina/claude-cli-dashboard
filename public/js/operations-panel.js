@@ -140,10 +140,11 @@
         reviewHtml = '<span style="color:var(--text-dim)">pending</span>';
       }
 
+      var repoLabel = pr.repo ? '<span class="ops-pr-repo">' + _escHtml(pr.repo) + '</span> ' : '';
       html += '<div class="ops-pr-row" data-url="' + _escHtml(pr.url || pr.html_url || "") + '">' +
-        '<div class="ops-pr-title">#' + (pr.number || "") + " " + _escHtml(pr.title || "") + '</div>' +
+        '<div class="ops-pr-title">' + repoLabel + '#' + (pr.number || "") + " " + _escHtml(pr.title || "") + '</div>' +
         '<div class="ops-pr-meta">' +
-          '<span class="ops-pr-branch">' + _escHtml(pr.branch || pr.head && pr.head.ref || "") + '</span>' +
+          '<span class="ops-pr-branch">' + _escHtml(pr.headRefName || pr.branch || "") + '</span>' +
           '<span class="' + checksClass + '">' + checksIcon + '</span>' +
           reviewHtml +
           '<span>' + _relativeTime(pr.createdAt || pr.created_at) + '</span>' +

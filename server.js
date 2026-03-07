@@ -2117,15 +2117,21 @@ app.get("/api/workspace-status", (req, res) => {
 
 app.get("/api/prs", (req, res) => {
   const meta = loadSessionsMeta();
-  const branches = [];
+  const agentBranches = [];
   for (const [name, info] of Object.entries(meta)) {
     if (info.type === "terminal") continue;
     try {
-      const git = getGitInfo(info.workdir || DEFAULT_WORKDIR);
-      if (git?.branch) branches.push(git.branch);
+      const wd = info.workdir || DEFAULT_WORKDIR;
+      const git = getGitInfo(wd);
+      if (git?.branch) agentBranches.push({ branch: git.branch, workdir: wd });
     } catch {}
   }
-  res.json(prDashboard.getPRs(branches));
+  const workspaces = [...new Set([
+    ...(userConfig.workspaces || []).map(w => w.path || w),
+    DEFAULT_WORKDIR,
+    ...agentBranches.map(a => a.workdir),
+  ])].filter(Boolean);
+  res.json(prDashboard.getPRs(agentBranches, workspaces));
 });
 
 app.get("/api/ceo-md", (req, res) => {
