@@ -4287,6 +4287,7 @@ function _toggleHelpOverlay() {
             ${K("D", "Todos")}
             ${K("G", "Dependency Graph")}
             ${K("L", "Activity Timeline")}
+            ${K("O", "Operations")}
             ${K("C", "CEO Prompt")}
             ${K("R", "Restart")}
             ${K("!", "Bug Report")}
@@ -4468,6 +4469,12 @@ document.addEventListener("keydown", (e) => {
       DependencyGraph.close();
       return;
     }
+    // Operations panel
+    if (typeof OpsPanel !== "undefined" && OpsPanel.isOpen()) {
+      e.preventDefault();
+      OpsPanel.close();
+      return;
+    }
     // Bookmarks panel
     if (_bmPanel && _bmPanel.classList.contains("visible")) {
       e.preventDefault();
@@ -4555,6 +4562,11 @@ document.addEventListener("keydown", (e) => {
   if (key === "l" && !inInput) {
     e.preventDefault();
     if (typeof ActivityTimeline !== "undefined") ActivityTimeline.toggle();
+    return;
+  }
+  if (key === "o" && !inInput) {
+    e.preventDefault();
+    if (typeof OpsPanel !== "undefined") OpsPanel.toggle();
     return;
   }
 
@@ -4980,6 +4992,14 @@ if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
     keywords: "split side by side compare focus agents",
     icon: "\u25A8",
     handler: () => SplitView.promptAndOpen(),
+  });
+}
+if (typeof CommandPalette !== "undefined" && typeof OpsPanel !== "undefined") {
+  CommandPalette.registerAction({
+    id: "ops-panel", category: "Views", label: "Operations",
+    keywords: "ops prs diffs workspace git pull requests",
+    icon: "\u2699", hint: "O",
+    handler: () => OpsPanel.toggle(),
   });
 }
 

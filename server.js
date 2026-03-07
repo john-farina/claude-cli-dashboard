@@ -1947,6 +1947,23 @@ app.get("/api/activity", (req, res) => {
   res.json(activityEvents.getEvents(since, agent));
 });
 
+app.get("/api/workspace-status", (req, res) => {
+  const meta = loadSessionsMeta();
+  const workspaces = {};
+  for (const s of meta) {
+    const wd = s.workdir || "unknown";
+    if (!workspaces[wd]) workspaces[wd] = [];
+    const files = fileTracker.getAgentFiles(s.name);
+    workspaces[wd].push({
+      name: s.name,
+      status: s.status || "idle",
+      branch: s.branch || null,
+      files: files
+    });
+  }
+  res.json({ workspaces });
+});
+
 app.get("/api/prs", (req, res) => {
   const meta = loadSessionsMeta();
   const branches = [];
