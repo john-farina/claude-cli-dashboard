@@ -315,14 +315,20 @@
         </label>
         <label>
           Screenshot <span class="optional">(optional)</span>
-          <div id="bug-screenshot-zone" class="bug-screenshot-zone">
-            <input type="file" id="bug-screenshot-input" accept="image/*" style="display:none">
-            <div id="bug-screenshot-placeholder" class="bug-screenshot-placeholder">
-              <span>Click or drag an image here</span>
-            </div>
-            <div id="bug-screenshot-preview" class="bug-screenshot-preview hidden">
-              <img id="bug-screenshot-img" alt="Screenshot preview">
-              <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove-btn">&times;</button>
+          <div class="bug-screenshot-row">
+            <button type="button" id="bug-screenshot-capture" class="btn-secondary bug-screenshot-capture-btn">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M5 3L6 1h4l1 2"/></svg>
+              Capture Screen
+            </button>
+            <div id="bug-screenshot-zone" class="bug-screenshot-zone">
+              <input type="file" id="bug-screenshot-input" accept="image/*" style="display:none">
+              <div id="bug-screenshot-placeholder" class="bug-screenshot-placeholder">
+                <span>Click or drag an image here</span>
+              </div>
+              <div id="bug-screenshot-preview" class="bug-screenshot-preview hidden">
+                <img id="bug-screenshot-img" alt="Screenshot preview">
+                <button type="button" id="bug-screenshot-remove" class="bug-screenshot-remove-btn">&times;</button>
+              </div>
             </div>
           </div>
         </label>
@@ -354,9 +360,9 @@
       <div class="bug-success-icon">&#10003;</div>
       <h2>Bug Report Filed</h2>
       <p id="bug-success-msg" class="bug-success-msg"></p>
-      <p class="bug-success-ask">Would you like to spawn an agent to fix this bug?</p>
+      <p class="bug-success-ask">A fix agent will be spawned to investigate and fix this bug, run a security check, and create a PR (or file an issue if it can't be resolved).</p>
       <div class="modal-actions">
-        <button type="button" id="bug-success-close" class="btn-secondary">No Thanks</button>
+        <button type="button" id="bug-success-close" class="btn-secondary">Skip — Don't Spawn</button>
         <button type="button" id="bug-success-spawn" class="btn-primary">Spawn Fix Agent</button>
       </div>
     </div>

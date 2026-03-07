@@ -2099,6 +2099,31 @@ app.post("/api/bug-report", (req, res) => {
   });
 });
 
+// --- Screenshot Capture ---
+
+app.get("/api/screenshot-preview", (req, res) => {
+  const filePath = req.query.path;
+  if (!filePath || !filePath.startsWith(path.join(os.tmpdir(), "ceo-dashboard-uploads"))) {
+    return res.status(403).json({ error: "Invalid path" });
+  }
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: "Not found" });
+  res.sendFile(filePath);
+});
+
+app.post("/api/screenshot", (req, res) => {
+  const { execFile } = require("child_process");
+  const screenshotPath = path.join(os.tmpdir(), `ceo-dashboard-uploads`, `screenshot-${Date.now()}.png`);
+  fs.mkdirSync(path.dirname(screenshotPath), { recursive: true });
+  // screencapture -i: interactive selection mode (user drags to select area)
+  // Returns exit code 1 if user cancels (presses Escape)
+  execFile("screencapture", ["-i", screenshotPath], { timeout: 120000 }, (err) => {
+    if (err || !fs.existsSync(screenshotPath)) {
+      return res.json({ ok: false, cancelled: true });
+    }
+    res.json({ ok: true, path: screenshotPath });
+  });
+});
+
 // --- Native app rebuild ---
 
 app.post("/api/rebuild-native-app", (req, res) => {
