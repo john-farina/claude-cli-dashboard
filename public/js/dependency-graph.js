@@ -638,7 +638,6 @@
     // Chain hitarea click (edit existing chain)
     _svg.querySelectorAll(".workflow-chain-hitarea").forEach(function(hitarea) {
       hitarea.addEventListener("click", function(e) {
-        if (!_editMode) return;
         e.stopPropagation();
         var chainId = hitarea.dataset.chainId;
         if (!chainId) return;
@@ -657,7 +656,6 @@
       var chainId = hitarea.dataset.chainId;
       var visiblePath = _svg.querySelector('.existing-chain[data-chain-id="' + chainId + '"]');
       hitarea.addEventListener("mouseenter", function() {
-        if (!_editMode) return;
         if (visiblePath) {
           visiblePath.setAttribute("stroke", "#e8c960");
           visiblePath.setAttribute("stroke-width", "3");
