@@ -51,9 +51,16 @@
     fetchSystemInfo();
   }
 
+  // Hide modal without clearing form data (for dismiss / click-outside)
+  function hideBugReportModal() {
+    bugOverlay.classList.add("hidden");
+  }
+
   // Expose globally for Escape handler
-  window.closeBugReportModal = closeBugReportModal;
-  function closeBugReportModal() {
+  window.closeBugReportModal = hideBugReportModal;
+
+  // Full reset — only called after successful submission
+  function resetBugReportModal() {
     bugOverlay.classList.add("hidden");
     bugForm.reset();
     bugSelectedSeverity = "medium";
@@ -96,10 +103,10 @@
   // Open modal
   bugReportBtn.addEventListener("click", openBugReportModal);
 
-  // Close modal
-  bugCancel.addEventListener("click", closeBugReportModal);
+  // Close modal (preserve form data)
+  bugCancel.addEventListener("click", hideBugReportModal);
   bugOverlay.addEventListener("click", (e) => {
-    if (e.target === bugOverlay) closeBugReportModal();
+    if (e.target === bugOverlay) hideBugReportModal();
   });
 
   // Severity pills
@@ -221,7 +228,7 @@
         _lastBugSteps = bugSteps.value.trim();
         _lastBugSeverity = bugSelectedSeverity;
         _lastBugScreenshotPath = screenshotPath || "";
-        closeBugReportModal();
+        resetBugReportModal();
         // Show success modal with spawn option
         bugSuccessMsg.innerHTML = `Issue created: <a href="${escapeAttr(data.issueUrl)}" target="_blank">${escapeHtml(data.issueUrl)}</a>`;
         bugSuccessOverlay.classList.remove("hidden");
