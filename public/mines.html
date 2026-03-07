@@ -552,6 +552,7 @@ function init() {
   buildGrid();
   updateChipRack();
   updateBankrollDisplay();
+  _updateSetupPreview();
   updateUI();
 }
 
@@ -586,7 +587,25 @@ function selectMineCount(n) {
   document.querySelectorAll('.mine-count-btn').forEach(btn => {
     btn.classList.toggle('selected', parseInt(btn.dataset.count) === n);
   });
+  _updateSetupPreview();
   updateUI();
+}
+
+function _updateSetupPreview() {
+  // Show what the multiplier would be after 1, 2, 3 reveals
+  if (gameState !== 'setup') return;
+  const m1 = calculateMultiplier(TOTAL_TILES, mineCount, 1);
+  const m3 = calculateMultiplier(TOTAL_TILES, mineCount, 3);
+  const m5 = calculateMultiplier(TOTAL_TILES, mineCount, 5);
+  document.querySelector('#multiplier-display span').textContent = m1.toFixed(2) + 'x';
+  document.querySelector('#potential-display span').textContent =
+    '1st: ' + m1.toFixed(2) + 'x  ·  3rd: ' + m3.toFixed(2) + 'x  ·  5th: ' + m5.toFixed(2) + 'x';
+  // Color based on risk
+  const intensity = Math.min(1, mineCount / 15);
+  const r = Math.round(201 + intensity * 54);
+  const g = Math.round(168 - intensity * 100);
+  const b = Math.round(76 - intensity * 40);
+  document.querySelector('#multiplier-display span').style.color = `rgb(${r},${g},${b})`;
 }
 
 // ─── Chip / Bet system ────────────────────────────────────────────────
