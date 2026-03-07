@@ -793,16 +793,23 @@ function cashOut() {
 
   gameState = 'result-win';
 
-  // Fade unrevealed tiles
-  document.querySelectorAll('.tile').forEach((t, i) => {
-    if (!revealedTiles.has(i)) {
+  // Reveal all mine positions and fade safe unrevealed tiles
+  const tiles = document.querySelectorAll('.tile');
+  tiles.forEach((t, i) => {
+    if (revealedTiles.has(i)) return;
+    if (minePositions.has(i)) {
+      setTimeout(() => {
+        t.classList.add('revealed', 'mine-reveal');
+        t.textContent = '\uD83D\uDCA3';
+      }, 200 + Math.random() * 400);
+    } else {
       t.classList.add('cashout-fade');
     }
   });
 
   setTimeout(() => {
     showResult('win', payout);
-  }, 400);
+  }, 800);
 
   updateUI();
 }
