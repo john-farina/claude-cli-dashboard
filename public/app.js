@@ -4714,7 +4714,7 @@ function _showArcadeAlert(agentName, label) {
   _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
   const alert = document.createElement("div");
   alert.className = "arcade-agent-alert";
-  alert.innerHTML = `<span class="arcade-alert-pulse"></span><strong>${agentName}</strong> ${label} <button class="arcade-alert-go">Go to agent</button>`;
+  alert.innerHTML = `<span class="arcade-alert-pulse"></span><strong>${agentName.toUpperCase()}</strong> ${label.toUpperCase()} <button class="arcade-alert-go">GO TO AGENT</button>`;
   alert.querySelector(".arcade-alert-go").addEventListener("click", () => {
     _closeArcade();
     const agent = typeof agents !== "undefined" ? agents.get(agentName) : null;
