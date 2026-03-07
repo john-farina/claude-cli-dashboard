@@ -28,9 +28,11 @@ const updateMod = require("./lib/update");
 const { createScrollback, getScrollback, appendScrollback, clearScrollback } = require("./lib/scrollback");
 const terminalCards = require("./lib/terminal-cards");
 const shellPtyMod = require("./lib/shell-pty");
+const diffService = require("./lib/diff-service");
 const fileTracker = require("./lib/file-tracker");
 const activityEvents = require("./lib/activity-events");
 const bankroll = require("./lib/bankroll");
+const prDashboard = require("./lib/pr-dashboard");
 
 // Destructure security
 const {
@@ -1670,6 +1672,34 @@ app.get("/api/sessions/:name/diff", async (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// --- Diff Service (stat + full) ---
+
+app.get("/api/sessions/:name/diff-stat", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta()[name];
+  if (!meta) return res.status(404).json({ error: "not found" });
+  const workdir = meta.workdir || DEFAULT_WORKDIR;
+  const git = getGitInfo(workdir);
+  res.json(diffService.getDiffStat(workdir, git?.branch) || { files: [], raw: "" });
+});
+
+app.get("/api/sessions/:name/full-diff", (req, res) => {
+  const { name } = req.params;
+  const { file } = req.query;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta()[name];
+  if (!meta) return res.status(404).json({ error: "not found" });
+  const workdir = meta.workdir || DEFAULT_WORKDIR;
+  const git = getGitInfo(workdir);
+  const diff = diffService.getFullDiff(workdir, git?.branch, file || null);
+  res.json({ diff: diff || "" });
+});
+
+app.get("/api/editor-config", (req, res) => {
+  res.json({ editor: userConfig.editor || "vscode" });
 });
 
 // --- PR URL lookup ---
