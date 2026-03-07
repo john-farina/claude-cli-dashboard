@@ -1803,6 +1803,115 @@ app.delete("/api/sessions/:name/chain", (req, res) => {
   res.json({ success: true });
 });
 
+// --- Workflow Batch Launch ---
+
+app.post("/api/workflow/launch", async (req, res) => {
+  const { nodes, connections } = req.body;
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return res.status(400).json({ error: "No nodes provided" });
+  }
+
+  const created = [];
+  try {
+    for (const node of nodes) {
+      if (!node.prompt) continue;
+
+      // Generate name if not provided
+      let name = node.name || ("workflow-" + Date.now().toString(36).slice(-4));
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        name = name.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+      }
+
+      // Deduplicate name
+      let finalName = name;
+      const currentSessions = listTmuxSessions();
+      if (currentSessions.includes(`${PREFIX}${finalName}`)) {
+        let i = 1;
+        while (currentSessions.includes(`${PREFIX}${finalName}-${i}`)) i++;
+        finalName = `${finalName}-${i}`;
+      }
+
+      const workdir = node.workdir || DEFAULT_WORKDIR;
+      createSession(finalName, workdir, node.prompt);
+
+      if (userConfig.autoRenameAgents) {
+        const meta = loadSessionsMeta();
+        if (meta[finalName]) {
+          meta[finalName].autoRename = true;
+          saveSessionsMeta(meta);
+        }
+      }
+
+      created.push({ id: node.id, name: finalName, workdir: workdir });
+      invalidateTmuxSessionsCache();
+    }
+
+    // Wire chains from connections
+    if (Array.isArray(connections)) {
+      for (const conn of connections) {
+        // Resolve node IDs to agent names
+        const fromCreated = created.find(c => c.id === conn.from);
+        const toCreated = created.find(c => c.id === conn.to);
+
+        // For existing agents, the ID is "existing-<name>"
+        const fromName = fromCreated ? fromCreated.name : (conn.from.startsWith("existing-") ? conn.from.slice(9) : conn.from);
+        const toName = toCreated ? toCreated.name : (conn.to.startsWith("existing-") ? conn.to.slice(9) : conn.to);
+
+        const meta = loadSessionsMeta();
+        if (meta[fromName]) {
+          const existingChain = meta[fromName].chain || [];
+          const targets = Array.isArray(existingChain) ? [...existingChain] : existingChain.next ? [existingChain] : [];
+          const validConditions = ["always", "when-idle", "branch-has-changes"];
+          targets.push({
+            next: toName,
+            prompt: conn.prompt || "",
+            condition: validConditions.includes(conn.condition) ? conn.condition : "always",
+          });
+          meta[fromName].chain = targets;
+          saveSessionsMeta(meta);
+        }
+      }
+    }
+
+    // Push initial output for each created agent
+    for (const c of created) {
+      const sessionName = `${PREFIX}${c.name}`;
+      const pushInitialOutput = () => {
+        try {
+          ensureTmuxServer();
+          const output = capturePane(sessionName);
+          if (!output) return;
+          const prev = prevOutputs.get(sessionName) || "";
+          if (output === prev) return;
+          const pushStatus = detectStatus(output, prev);
+          const filteredOutput = stripCeoPreamble(output);
+          const pushPromptType = pushStatus === "waiting" ? detectPromptType(filteredOutput) : null;
+          const pushPromptOptions = pushPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
+          const message = JSON.stringify({
+            type: "output",
+            session: c.name,
+            lines: filterOutputForDisplay(output.split("\n")),
+            status: pushStatus,
+            promptType: pushPromptType,
+            promptOptions: pushPromptOptions,
+          });
+          prevOutputs.set(sessionName, output);
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) client.send(message);
+          });
+        } catch (e) { /* ignore push errors */ }
+      };
+      for (const ms of [500, 1000, 2000, 3000, 5000]) {
+        setTimeout(pushInitialOutput, ms);
+      }
+    }
+
+    res.json({ success: true, created });
+  } catch (e) {
+    res.status(500).json({ error: e.message, created });
+  }
+});
+
 // --- .claude File Browser API ---
 
 app.get("/api/claude-files", (req, res) => {

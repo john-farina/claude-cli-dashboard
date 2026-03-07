@@ -4415,7 +4415,7 @@ function _toggleHelpOverlay() {
             ${K("S", "Settings")}
             ${K("B", "Bookmarks")}
             ${K("D", "Todos")}
-            ${K("G", "Dependency Graph")}
+            ${K("G", "Workflow Canvas")}
             ${K("L", "Activity Timeline")}
             ${K("O", "Operations")}
             ${K("C", "CEO Prompt")}
@@ -5101,8 +5101,8 @@ startTodoRefsPolling();
 if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
 if (typeof CommandPalette !== "undefined" && typeof DependencyGraph !== "undefined") {
   CommandPalette.registerAction({
-    id: "dep-graph", category: "Views", label: "Dependency Graph",
-    keywords: "graph dependencies files overlap agents",
+    id: "dep-graph", category: "Views", label: "Workflow Canvas",
+    keywords: "graph dependencies files overlap agents workflow canvas pipeline",
     icon: "\u25C9", hint: "G",
     handler: function() { DependencyGraph.toggle(); },
   });

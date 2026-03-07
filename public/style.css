@@ -6498,27 +6498,26 @@ header .btn-primary kbd {
 .output-search-highlight { background: rgba(255, 200, 50, 0.3); border-radius: 2px; }
 .output-search-highlight.current { background: rgba(255, 200, 50, 0.7); color: #000; }
 
-/* --- Dependency Graph Panel --- */
-.dep-graph-panel {
+/* --- Workflow Canvas (replaces Dependency Graph Panel) --- */
+.workflow-canvas {
   position: fixed; top: 56px; right: 0; bottom: 48px;
-  width: 360px; max-width: 90vw; z-index: 800;
+  width: 600px; max-width: 90vw; z-index: 800;
   background: var(--surface); border-left: 1px solid var(--border, #333);
   transform: translateX(100%); transition: transform 0.2s ease;
   display: flex; flex-direction: column;
 }
-.dep-graph-panel.visible { transform: translateX(0); }
-.dep-graph-header {
-  padding: 12px 16px; font-size: 14px; font-weight: 600;
+.workflow-canvas.visible { transform: translateX(0); }
+.workflow-header {
+  padding: 10px 16px; font-size: 14px; font-weight: 600;
   border-bottom: 1px solid var(--border, #333);
-  display: flex; align-items: center; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
 .dep-graph-close {
   background: none; border: none; color: var(--text-dim); font-size: 20px;
   cursor: pointer; padding: 0 4px; line-height: 1;
 }
 .dep-graph-close:hover { color: var(--text); }
-.dep-graph-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.dep-graph-svg { flex: 1; width: 100%; min-height: 200px; }
+.workflow-svg { flex: 1; width: 100%; min-height: 200px; cursor: default; }
 .dep-graph-legend {
   padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 12px;
   font-size: 11px; color: var(--text-dim); border-top: 1px solid var(--border, #333);
@@ -6537,10 +6536,56 @@ header .btn-primary kbd {
 .dep-graph-edit-toggle.active {
   background: rgba(201,168,76,0.15); border-color: var(--accent); color: var(--accent);
 }
-.dep-graph-svg circle[data-agent] { cursor: pointer; }
-.dep-graph-svg.edit-mode circle[data-agent] { cursor: grab; }
-.dep-graph-svg.dragging circle[data-agent] { cursor: crosshair; }
-.dep-graph-svg.dragging { cursor: crosshair; }
+/* Workflow node styles */
+.workflow-node rect { cursor: move; transition: stroke 0.15s; }
+.workflow-node.selected rect { stroke: var(--accent); stroke-width: 2; }
+.workflow-node.new rect { stroke-dasharray: 6,3; }
+.workflow-node.new.configured rect { stroke-dasharray: none; }
+.port { fill: var(--surface); stroke: var(--accent); stroke-width: 2; cursor: crosshair; opacity: 0; transition: opacity 0.15s; }
+.workflow-node:hover .port { opacity: 1; }
+.port:hover { fill: var(--accent); }
+.workflow-connection { fill: none; stroke: #c9a84c; stroke-width: 2; }
+.workflow-temp-line { fill: none; stroke: #c9a84c; stroke-width: 2; stroke-dasharray: 6,4; opacity: 0.6; }
+
+/* Node config panel */
+.workflow-config {
+  padding: 12px 16px; border-top: 1px solid var(--border, #333);
+  display: flex; flex-direction: column; gap: 8px; max-height: 200px; overflow-y: auto;
+}
+.workflow-config-title { font-size: 13px; font-weight: 600; color: var(--accent); }
+.workflow-config input, .workflow-config textarea, .workflow-config select {
+  background: var(--bg); color: var(--text); border: 1px solid var(--border, #333);
+  border-radius: 6px; padding: 8px; font-size: 12px; font-family: inherit;
+}
+.workflow-config textarea { resize: none; min-height: 60px; }
+.workflow-config-actions { display: flex; gap: 8px; }
+.workflow-btn-primary {
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  background: rgba(201,168,76,0.2); border: 1px solid var(--accent); color: var(--accent);
+}
+.workflow-btn-primary:hover { background: rgba(201,168,76,0.3); }
+.workflow-btn-danger {
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  background: rgba(239,68,68,0.15); border: 1px solid #ef4444; color: #ef4444;
+}
+.workflow-btn-danger:hover { background: rgba(239,68,68,0.25); }
+.workflow-btn-secondary {
+  padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border, #333); color: var(--text-dim);
+}
+.workflow-btn-secondary:hover { background: rgba(255,255,255,0.1); }
+/* Launch button */
+.workflow-launch {
+  padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: linear-gradient(180deg, #d4af37, #b8962e); color: #1a1a1a; border: none;
+}
+.workflow-launch:hover { filter: brightness(1.1); }
+.workflow-launch:disabled { opacity: 0.4; cursor: default; filter: none; }
+.workflow-add-btn {
+  padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer;
+  background: rgba(255,255,255,0.06); border: 1px solid var(--border, #333); color: var(--text);
+}
+.workflow-add-btn:hover { background: rgba(255,255,255,0.1); }
 
 /* Chain form */
 .chain-form {
