@@ -3563,9 +3563,14 @@ function _executeChain(fromAgent, chain, workdir, branch) {
     }
 
     // Variable substitution in prompt
-    let finalPrompt = prompt
+    let finalPrompt = (prompt || "").trim()
       .replace(/\{branch\}/g, branch || "main")
       .replace(/\{workdir\}/g, workdir || "");
+
+    // Default prompt if none was configured
+    if (!finalPrompt) {
+      finalPrompt = `Agent "${fromAgent}" has finished its work. You are next in the chain. Continue the workflow.`;
+    }
 
     // Send to existing agent
     const session = PREFIX + next;
@@ -3651,17 +3656,18 @@ async function broadcastOutputs() {
           pendingRenames.push({ name, output });
         }
 
+        // (commit detection now handled by bankroll.detectWork above)
+
+        const liveCwd = await getEffectiveCwdAsync(session, output);
+
         // Chain execution: when agent transitions from working to idle, fire chain
         if (prevStatus === "working" && status === "idle") {
           const agentMeta = meta[name];
           if (agentMeta?.chain) {
-            setTimeout(() => _executeChain(name, agentMeta.chain, liveCwd || agentMeta.workdir, git?.branch), 2000);
+            const chainCwd = liveCwd || agentMeta.workdir;
+            setTimeout(() => _executeChain(name, agentMeta.chain, chainCwd, git?.branch), 2000);
           }
         }
-
-        // (commit detection now handled by bankroll.detectWork above)
-
-        const liveCwd = await getEffectiveCwdAsync(session, output);
         const git = await getCachedGitInfo(liveCwd);
 
         // Capture diff stat when agent finishes working
