@@ -206,6 +206,7 @@ function ensureDocsDir() {
 
 // --- Token usage tracking ---
 const _tokenUsageCache = new Map();
+const _dailyByDayCache = new Map(); // sid -> { size, byDay } for parseTokenUsageByDay caching
 let _tokenUsageTotals = {};
 
 function loadTokenUsage() {
@@ -331,10 +332,9 @@ function syncTokenUsage() {
   const meta = loadSessionsMeta();
   const saved = loadTokenUsage();
   saved.agents = saved.agents || {};
-  saved.daily = saved.daily || {};
   let changed = false;
-  const d = new Date();
-  const todayKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  // --- Per-agent cumulative totals (incremental, session-aware) ---
   for (const [name, info] of Object.entries(meta)) {
     if (info.type === "terminal") continue;
     const sessionId = info.resumeSessionId;
@@ -349,23 +349,13 @@ function syncTokenUsage() {
       || prevSU.input !== usage.input || prevSU.output !== usage.output
       || prevSU.cacheCreation !== usage.cacheCreation || prevSU.cacheRead !== usage.cacheRead;
     if (sessionChanged) {
-      if (sameSession) {
-        // Incremental delta for ongoing sessions
-        const su = prevSU || { input: prev.input || 0, output: prev.output || 0, cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0 };
+      if (sameSession && prevSU) {
         const delta = {
-          input: usage.input - su.input,
-          output: usage.output - su.output,
-          cacheCreation: usage.cacheCreation - su.cacheCreation,
-          cacheRead: usage.cacheRead - su.cacheRead,
+          input: Math.max(0, usage.input - prevSU.input),
+          output: Math.max(0, usage.output - prevSU.output),
+          cacheCreation: Math.max(0, usage.cacheCreation - prevSU.cacheCreation),
+          cacheRead: Math.max(0, usage.cacheRead - prevSU.cacheRead),
         };
-        if (delta.input > 0 || delta.output > 0 || delta.cacheCreation > 0 || delta.cacheRead > 0) {
-          const day = saved.daily[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-          day.input += delta.input;
-          day.output += delta.output;
-          day.cacheCreation += delta.cacheCreation;
-          day.cacheRead += delta.cacheRead;
-          saved.daily[todayKey] = day;
-        }
         saved.agents[name] = {
           input: (prev.input || 0) + delta.input,
           output: (prev.output || 0) + delta.output,
@@ -375,23 +365,11 @@ function syncTokenUsage() {
           _sessionUsage: { ...usage },
         };
       } else {
-        // New session — carry forward cumulative total + backfill daily from JSONL
+        // New session or missing baseline — set baseline, don't guess deltas
         const prevTotal = prev ? {
           input: prev.input || 0, output: prev.output || 0,
           cacheCreation: prev.cacheCreation || 0, cacheRead: prev.cacheRead || 0,
         } : { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-        const filePath = findJsonlFileForSession(sessionId);
-        if (filePath) {
-          const byDay = parseTokenUsageByDay(filePath);
-          for (const [dayKey, dayUsage] of Object.entries(byDay)) {
-            const existing = saved.daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-            existing.input += dayUsage.input;
-            existing.output += dayUsage.output;
-            existing.cacheCreation += dayUsage.cacheCreation;
-            existing.cacheRead += dayUsage.cacheRead;
-            saved.daily[dayKey] = existing;
-          }
-        }
         saved.agents[name] = {
           input: prevTotal.input + usage.input,
           output: prevTotal.output + usage.output,
@@ -404,6 +382,58 @@ function syncTokenUsage() {
       changed = true;
     }
   }
+
+  // --- Daily buckets: rebuild from JSONL ground truth (cached by file size) ---
+  const daily = {};
+  const seen = new Set();
+  let dailyChanged = false;
+  for (const [name, info] of Object.entries(meta)) {
+    if (info.type === "terminal") continue;
+    const sid = info.resumeSessionId;
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    const filePath = findJsonlFileForSession(sid);
+    if (!filePath) continue;
+    // Use size-based cache to avoid re-parsing unchanged files
+    let stat;
+    try { stat = fs.statSync(filePath); } catch { continue; }
+    const cacheEntry = _dailyByDayCache.get(sid);
+    let byDay;
+    if (cacheEntry && cacheEntry.size === stat.size) {
+      byDay = cacheEntry.byDay;
+    } else {
+      byDay = parseTokenUsageByDay(filePath);
+      _dailyByDayCache.set(sid, { size: stat.size, byDay });
+      dailyChanged = true;
+    }
+    for (const [dayKey, dayUsage] of Object.entries(byDay)) {
+      const existing = daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+      existing.input += dayUsage.input;
+      existing.output += dayUsage.output;
+      existing.cacheCreation += dayUsage.cacheCreation;
+      existing.cacheRead += dayUsage.cacheRead;
+      daily[dayKey] = existing;
+    }
+  }
+  // Merge: JSONL ground truth overwrites, keep historical days from killed agents
+  const mergedDaily = { ...(saved.daily || {}) };
+  for (const [dayKey, dayUsage] of Object.entries(daily)) {
+    mergedDaily[dayKey] = { ...dayUsage };
+  }
+  // Apply reset offsets (subtract tokens cleared by user)
+  const offsets = saved.dailyOffset || {};
+  for (const [dayKey, offset] of Object.entries(offsets)) {
+    const day = mergedDaily[dayKey];
+    if (day) {
+      day.input = Math.max(0, day.input - offset.input);
+      day.output = Math.max(0, day.output - offset.output);
+      day.cacheCreation = Math.max(0, day.cacheCreation - offset.cacheCreation);
+      day.cacheRead = Math.max(0, day.cacheRead - offset.cacheRead);
+    }
+  }
+  if (dailyChanged) changed = true;
+  saved.daily = mergedDaily;
+
   if (changed) {
     saveTokenUsage(saved);
   }
@@ -2430,6 +2460,69 @@ app.get("/api/system-info", (req, res) => {
 });
 
 app.get("/api/token-usage", (req, res) => { res.json(_tokenUsageTotals); });
+
+function _broadcastTokens(saved) {
+  const message = JSON.stringify({ type: "token-usage", usage: saved });
+  wss.clients.forEach((client) => { if (client.readyState === 1) client.send(message); });
+}
+
+// Rebuild today's usage from JSONL source files (ground truth)
+function _rebuildTodayFromJsonl() {
+  const meta = loadSessionsMeta();
+  const d = new Date();
+  const todayKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const today = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  const seen = new Set();
+  for (const info of Object.values(meta)) {
+    if (info.type === "terminal") continue;
+    const sid = info.resumeSessionId;
+    if (!sid || seen.has(sid)) continue;
+    seen.add(sid);
+    const filePath = findJsonlFileForSession(sid);
+    if (!filePath) continue;
+    const byDay = parseTokenUsageByDay(filePath);
+    const dayUsage = byDay[todayKey];
+    if (dayUsage) {
+      today.input += dayUsage.input;
+      today.output += dayUsage.output;
+      today.cacheCreation += dayUsage.cacheCreation;
+      today.cacheRead += dayUsage.cacheRead;
+    }
+  }
+  return { todayKey, today };
+}
+
+app.post("/api/token-usage/reset-today", (req, res) => {
+  // Snapshot current JSONL ground truth for today as an offset to subtract
+  const { todayKey, today } = _rebuildTodayFromJsonl();
+  const saved = loadTokenUsage();
+  saved.dailyOffset = saved.dailyOffset || {};
+  // Accumulate offsets (multiple resets stack)
+  const prev = saved.dailyOffset[todayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  saved.dailyOffset[todayKey] = {
+    input: prev.input + (today.input || 0),
+    output: prev.output + (today.output || 0),
+    cacheCreation: prev.cacheCreation + (today.cacheCreation || 0),
+    cacheRead: prev.cacheRead + (today.cacheRead || 0),
+  };
+  saveTokenUsage(saved);
+  // Force re-sync to apply offset
+  _dailyByDayCache.clear();
+  broadcastTokenUsage();
+  res.json({ ok: true });
+});
+
+app.post("/api/token-usage/restore-today", (req, res) => {
+  // Clear offset — daily goes back to JSONL ground truth from midnight
+  const d = new Date();
+  const todayKey = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const saved = loadTokenUsage();
+  if (saved.dailyOffset) delete saved.dailyOffset[todayKey];
+  saveTokenUsage(saved);
+  _dailyByDayCache.clear();
+  broadcastTokenUsage();
+  res.json({ ok: true });
+});
 
 // --- Bug Report ---
 

@@ -1592,6 +1592,48 @@ document.getElementById("setting-clear-browser").addEventListener("click", () =>
   });
 }
 
+// --- Reset / Undo Today Tokens ---
+{
+  const resetBtn = document.getElementById("setting-reset-today-tokens");
+  const restoreBtn = document.getElementById("setting-restore-today-tokens");
+
+  resetBtn.addEventListener("click", async () => {
+    resetBtn.disabled = true;
+    resetBtn.textContent = "Resetting...";
+    try {
+      const resp = await fetch("/api/token-usage/reset-today", { method: "POST" });
+      if (resp.ok) {
+        resetBtn.textContent = "Done!";
+        setTimeout(() => location.reload(), 800);
+      } else {
+        resetBtn.textContent = "Error";
+        setTimeout(() => { resetBtn.textContent = "Reset"; resetBtn.disabled = false; }, 1500);
+      }
+    } catch {
+      resetBtn.textContent = "Error";
+      setTimeout(() => { resetBtn.textContent = "Reset"; resetBtn.disabled = false; }, 1500);
+    }
+  });
+
+  restoreBtn.addEventListener("click", async () => {
+    restoreBtn.disabled = true;
+    restoreBtn.textContent = "Rebuilding from JSONL...";
+    try {
+      const resp = await fetch("/api/token-usage/restore-today", { method: "POST" });
+      if (resp.ok) {
+        restoreBtn.textContent = "Restored!";
+        setTimeout(() => location.reload(), 800);
+      } else {
+        restoreBtn.textContent = "Error";
+        setTimeout(() => { restoreBtn.textContent = "Restore from midnight"; restoreBtn.disabled = false; }, 1500);
+      }
+    } catch {
+      restoreBtn.textContent = "Error";
+      setTimeout(() => { restoreBtn.textContent = "Restore from midnight"; restoreBtn.disabled = false; }, 1500);
+    }
+  });
+}
+
 // --- Agent Defaults config ---
 
 // Collapsible toggle
@@ -2029,6 +2071,17 @@ document.getElementById("version-toggle").addEventListener("click", () => {
   _versionSection.classList.toggle("open");
   body.classList.toggle("hidden");
 });
+
+// Config collapsible
+{
+  const configToggle = document.getElementById("config-toggle");
+  const configSection = configToggle.closest(".settings-collapse");
+  configToggle.addEventListener("click", () => {
+    const body = document.getElementById("config-collapse-body");
+    configSection.classList.toggle("open");
+    body.classList.toggle("hidden");
+  });
+}
 
 let _versionsLoaded = false;
 

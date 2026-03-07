@@ -1,6 +1,6 @@
 {
   "name": "claude-cli-dashboard",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Multi-agent management UI for Claude Code",
   "license": "MIT",
   "repository": {

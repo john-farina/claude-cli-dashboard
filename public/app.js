@@ -3908,10 +3908,8 @@ const TOKEN_PRICES = {
 let _tokenShowDollars = localStorage.getItem("ceo-token-show-dollars") === "true";
 
 function formatTokenCount(n) {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(n);
+  if (n >= 1_000_000) return (n / 1_000_000).toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  return n.toLocaleString("en-US");
 }
 
 function usageToDollars(u) {
@@ -3922,23 +3920,20 @@ function usageToDollars(u) {
 }
 
 function formatDollars(n) {
-  if (n >= 10000) return "$" + (n / 1000).toFixed(2) + "k";
-  if (n >= 1000) return "$" + (n / 1000).toFixed(3) + "k";
-  if (n >= 100) return "$" + n.toFixed(2);
-  if (n >= 10) return "$" + n.toFixed(3);
-  if (n >= 1) return "$" + n.toFixed(4);
+  if (n >= 100) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (n >= 10) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+  if (n >= 1) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   return "$" + n.toFixed(4);
 }
 
 function formatDollarsCompact(n) {
-  if (n >= 10000) return "$" + (n / 1000).toFixed(1) + "k";
-  if (n >= 1000) return "$" + (n / 1000).toFixed(2) + "k";
-  if (n >= 100) return "$" + n.toFixed(2);
+  if (n >= 100) return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return "$" + n.toFixed(2);
 }
 
 function sumUsage(u) {
-  return (u.input || 0) + (u.output || 0) + (u.cacheCreation || 0) + (u.cacheRead || 0);
+  // Only count input + output tokens — cache reads/writes are context caching, not real usage
+  return (u.input || 0) + (u.output || 0);
 }
 
 function formatUsageValue(u) {
@@ -4030,9 +4025,9 @@ function rollTokenValue(el, newText) {
 }
 
 function usageTooltip(label, u) {
-  const tokens = `Input: ${formatTokenCount(u.input || 0)} | Output: ${formatTokenCount(u.output || 0)} | Cache write: ${formatTokenCount(u.cacheCreation || 0)} | Cache read: ${formatTokenCount(u.cacheRead || 0)}`;
+  const tokens = `In: ${formatTokenCount(u.input || 0)} | Out: ${formatTokenCount(u.output || 0)} | Cache write: ${formatTokenCount(u.cacheCreation || 0)} | Cache read: ${formatTokenCount(u.cacheRead || 0)}`;
   const dollars = formatDollars(usageToDollars(u));
-  return `${label} — ${tokens} (${dollars})`;
+  return `${label} — ${tokens}\nCost: ${dollars}`;
 }
 
 function updateTokenUsageDisplay(msg) {

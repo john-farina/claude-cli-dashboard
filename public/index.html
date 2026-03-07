@@ -693,6 +693,25 @@
           <div id="version-list" class="version-list"><span class="settings-hint">Loading versions...</span></div>
         </div>
       </div>
+
+      <div class="settings-section settings-collapse">
+        <button type="button" class="settings-collapse-toggle" id="config-toggle">
+          <span class="settings-collapse-arrow">&#x25B6;</span>
+          <span class="settings-section-title" style="margin:0">Config</span>
+        </button>
+        <div id="config-collapse-body" class="settings-collapse-body hidden">
+          <div class="settings-row">
+            <div class="settings-row-info">
+              <span class="settings-label">Today's Tokens</span>
+              <span class="settings-desc">Clear today's token count and restart the day from now.</span>
+            </div>
+            <button id="setting-reset-today-tokens" class="btn-settings-action">Reset</button>
+          </div>
+          <div style="padding:0 12px 8px">
+            <button id="setting-restore-today-tokens" style="background:none;border:none;color:#d44;text-decoration:underline;cursor:pointer;font-size:12px;padding:0">Restore from midnight</button>
+          </div>
+        </div>
+      </div>
     </div>
   </aside>
 
