@@ -176,6 +176,14 @@ body {
   opacity: 1;
   transform: translate(0, 0) rotate(0deg) scale(1);
 }
+.card-wrapper.peel-ready {
+  animation: peelGlow 1s ease infinite;
+  cursor: pointer;
+}
+@keyframes peelGlow {
+  0%, 100% { filter: drop-shadow(0 0 6px rgba(201,168,76,0.4)); }
+  50% { filter: drop-shadow(0 0 14px rgba(201,168,76,0.8)); }
+}
 
 .card-inner {
   width: 100%;
@@ -893,6 +901,11 @@ function renderActionButtons() {
         container.appendChild(mkBtn('Rebet', rebet, true));
       }
     }
+  } else if (gameState === 'peeling') {
+    const label = _peelPhase === 'initial'
+      ? ['Peel Player', 'Peel Banker', 'Peel Player', 'Peel Banker'][_peelIndex] || 'Peel'
+      : 'Peel ' + (_peelQueue[_peelIndex]?.side === 'player' ? 'Player' : 'Banker') + ' 3rd';
+    container.appendChild(mkBtn(label, () => { peelNext(); renderActionButtons(); }));
   } else if (gameState === 'result') {
     if (lastBets) {
       const rebetTotal = lastBets.player.amount + lastBets.banker.amount + lastBets.tie.amount;
@@ -998,7 +1011,7 @@ function deal() {
   renderChipRack();
   renderActionButtons();
 
-  // Deal 4 cards with stagger: P1, B1, P2, B2
+  // Deal 4 cards face-down with stagger: P1, B1, P2, B2
   playerCards.push(drawCard());
   bankerCards.push(drawCard());
   playerCards.push(drawCard());
@@ -1009,29 +1022,83 @@ function deal() {
   pc.innerHTML = '';
   bc.innerHTML = '';
 
+  // All dealt face-down
   const sequence = [
-    { card: playerCards[0], target: pc },
-    { card: bankerCards[0], target: bc },
-    { card: playerCards[1], target: pc },
-    { card: bankerCards[1], target: bc },
+    { card: playerCards[0], target: pc, side: 'player', idx: 0 },
+    { card: bankerCards[0], target: bc, side: 'banker', idx: 0 },
+    { card: playerCards[1], target: pc, side: 'player', idx: 1 },
+    { card: bankerCards[1], target: bc, side: 'banker', idx: 1 },
   ];
 
+  _peelQueue = [];
   sequence.forEach((item, i) => {
-    const el = createCardElement(item.card, false);
+    const el = createCardElement(item.card, true); // face-down
     item.target.appendChild(el);
     el._animateIn(i * 200);
+    _peelQueue.push({ el, side: item.side, idx: item.idx });
   });
 
-  // Show totals after animation
-  setTimeout(() => {
-    updateTotal('player-total', playerCards);
-    updateTotal('banker-total', bankerCards);
-  }, 800);
+  _peelIndex = 0;
+  _peelPhase = 'initial';
+  gameState = 'peeling';
 
-  // After initial deal, apply third card rules
+  // After deal animation, show peel prompt
   setTimeout(() => {
-    applyThirdCardRules();
-  }, 1200);
+    renderActionButtons();
+    _highlightNextPeel();
+  }, 1000);
+}
+
+// --- Peel (squeeze) system ---
+let _peelQueue = [];
+let _peelIndex = 0;
+
+function _highlightNextPeel() {
+  _peelQueue.forEach((item, i) => {
+    item.el.classList.toggle('peel-ready', i === _peelIndex);
+    // Click card to peel
+    if (i === _peelIndex) {
+      item.el.onclick = () => { peelNext(); renderActionButtons(); };
+    } else {
+      item.el.onclick = null;
+    }
+  });
+}
+
+let _peelPhase = 'initial'; // 'initial' or 'third'
+
+function peelNext() {
+  if (_peelIndex >= _peelQueue.length) return;
+  const item = _peelQueue[_peelIndex];
+  const inner = item.el.querySelector('.card-inner');
+  if (inner) inner.classList.add('flipped');
+  item.el.classList.remove('peel-ready');
+
+  _peelIndex++;
+
+  // Update totals for revealed cards
+  setTimeout(() => {
+    updateTotal('player-total', playerCards.slice(0, playerCards.length - (_peelQueue.filter((q, i) => i >= _peelIndex && q.side === 'player').length)));
+    updateTotal('banker-total', bankerCards.slice(0, bankerCards.length - (_peelQueue.filter((q, i) => i >= _peelIndex && q.side === 'banker').length)));
+  }, 300);
+
+  if (_peelIndex < _peelQueue.length) {
+    _highlightNextPeel();
+  } else if (_peelPhase === 'initial') {
+    // All initial cards revealed — apply third card rules
+    setTimeout(() => {
+      updateTotal('player-total', playerCards);
+      updateTotal('banker-total', bankerCards);
+      applyThirdCardRules();
+    }, 500);
+  } else {
+    // Third card phase done — settle
+    setTimeout(() => {
+      updateTotal('player-total', playerCards);
+      updateTotal('banker-total', bankerCards);
+      settle();
+    }, 500);
+  }
 }
 
 function applyThirdCardRules() {
@@ -1041,47 +1108,49 @@ function applyThirdCardRules() {
 
   // Check for naturals
   if (isNatural(playerCards) || isNatural(bankerCards)) {
-    settle();
+    const natSide = isNatural(playerCards) ? 'PLAYER' : 'BANKER';
+    showResult('Natural ' + (isNatural(playerCards) ? pVal : bVal) + '!', 'natural');
+    setTimeout(() => { clearResult(); settle(); }, 800);
     return;
   }
 
-  // Player third card
+  // Build third card peel queue
+  _peelQueue = [];
+  _peelIndex = 0;
+  _peelPhase = 'third';
+
   let playerThirdCard = null;
   if (playerDrawsThird(pVal)) {
     playerThirdCard = drawCard();
     playerCards.push(playerThirdCard);
-
-    // Animate player third card
-    const el = createCardElement(playerThirdCard, false);
+    const el = createCardElement(playerThirdCard, true); // face-down
     document.getElementById('player-cards').appendChild(el);
     el._animateIn(0);
-
-    setTimeout(() => {
-      updateTotal('player-total', playerCards);
-    }, 400);
+    _peelQueue.push({ el, side: 'player', idx: 2 });
   }
 
-  // Banker third card (with delay after player's)
-  const bankerDelay = playerThirdCard ? 800 : 0;
-  setTimeout(() => {
-    const bValNow = handValue(bankerCards);
-    if (bankerDrawsThird(bValNow, playerThirdCard)) {
-      const bankerThird = drawCard();
-      bankerCards.push(bankerThird);
+  const bValNow = handValue(bankerCards);
+  if (bankerDrawsThird(bValNow, playerThirdCard)) {
+    const bankerThird = drawCard();
+    bankerCards.push(bankerThird);
+    const el = createCardElement(bankerThird, true); // face-down
+    document.getElementById('banker-cards').appendChild(el);
+    el._animateIn(_peelQueue.length > 0 ? 400 : 0);
+    _peelQueue.push({ el, side: 'banker', idx: 2 });
+  }
 
-      const el = createCardElement(bankerThird, false);
-      document.getElementById('banker-cards').appendChild(el);
-      el._animateIn(0);
-
-      setTimeout(() => {
-        updateTotal('banker-total', bankerCards);
-        setTimeout(settle, 400);
-      }, 400);
-    } else {
-      settle();
-    }
-  }, bankerDelay);
+  if (_peelQueue.length > 0) {
+    gameState = 'peeling';
+    setTimeout(() => {
+      renderActionButtons();
+      _highlightNextPeel();
+    }, 600);
+  } else {
+    // No third cards — go straight to settlement
+    settle();
+  }
 }
+
 
 // ==================== SETTLEMENT ====================
 function settle() {
