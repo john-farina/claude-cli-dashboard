@@ -4708,10 +4708,8 @@ function _showPauseLayer() {
 // Alert banner when agent finishes working during gameplay
 function _showArcadeAlert(agentName, label) {
   if (!_arcadeModal) return;
-  // If arcade is hidden, pop it open so the user sees the alert
-  if (_arcadeOverlay?.classList.contains("hidden")) {
-    _arcadeOverlay.classList.remove("hidden");
-  }
+  // Only show alert if the arcade is currently visible (user is actively gaming)
+  if (_arcadeOverlay?.classList.contains("hidden")) return;
   // Remove previous alert if any
   _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
   const alert = document.createElement("div");
