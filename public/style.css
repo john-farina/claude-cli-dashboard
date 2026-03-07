@@ -725,6 +725,49 @@ header h1 {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  position: relative;
+}
+
+/* Reusable instant tooltip — positioned above target element */
+.instant-tooltip {
+  position: fixed;
+  background: var(--card-bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  z-index: 10000;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  max-width: 320px;
+}
+/* Backwards compat alias */
+.name-tooltip { /* replaced by .instant-tooltip */ }
+
+.status-badge.renaming {
+  background: rgba(168, 130, 255, 0.15);
+  color: #b494ff;
+  animation: pulse 1.5s ease-in-out infinite;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 5px;
+}
+
+.rename-spin {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid rgba(168, 130, 255, 0.3);
+  border-top-color: #b494ff;
+  border-radius: 50%;
+  animation: renameSpin 0.7s linear infinite;
+}
+
+@keyframes renameSpin {
+  to { transform: rotate(360deg); }
 }
 
 .status-badge {
@@ -782,7 +825,7 @@ header h1 {
   padding: 4px 7px;
   border-radius: 6px;
   line-height: 1;
-  transition: all 0.15s;
+  transition: all 0.2s ease;
 }
 
 .favorite-btn:hover { color: var(--orange); background: rgba(217, 119, 87, 0.1); }
@@ -792,12 +835,63 @@ header h1 {
 .kill-btn.armed {
   color: #fff;
   background: var(--red);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
   padding: 4px 12px;
   border-radius: 6px;
+  animation: armed-pulse 0.3s ease;
 }
-.kill-btn.armed:hover { background: #e04040; }
+.kill-btn.armed:hover { background: #c9302c; }
+/* Shared fire base — both holding and stable states */
+.kill-btn.fire-holding,
+.kill-btn.fire-mode {
+  color: #fff;
+  background: linear-gradient(135deg, #e85d04, #dc2f02);
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  border-radius: 8px;
+  transition: padding 0.4s ease, margin-left 0.4s ease, font-size 0.4s ease;
+}
+/* While holding — grows via padding/margin and shakes */
+.kill-btn.fire-holding {
+  font-size: 11px;
+  padding: 6px 18px;
+  margin-left: 6px;
+  animation: fire-shake 0.08s linear infinite;
+  box-shadow: 0 0 12px rgba(232, 93, 4, 0.5), 0 0 24px rgba(220, 47, 2, 0.3);
+}
+/* Stable state after releasing — ready to click */
+.kill-btn.fire-mode {
+  font-size: 12px;
+  padding: 6px 18px;
+  margin-left: 6px;
+  box-shadow: 0 0 14px rgba(232, 93, 4, 0.5), 0 0 28px rgba(220, 47, 2, 0.25);
+  animation: fire-idle-glow 1.5s ease-in-out infinite;
+  cursor: pointer;
+}
+.kill-btn.fire-mode:hover {
+  background: linear-gradient(135deg, #dc2f02, #9d0208);
+  box-shadow: 0 0 18px rgba(232, 93, 4, 0.6), 0 0 36px rgba(220, 47, 2, 0.35);
+}
+@keyframes fire-shake {
+  0% { transform: translateX(-2px) rotate(-1deg); }
+  25% { transform: translateX(2px) rotate(1deg); }
+  50% { transform: translateX(-1px) rotate(-0.5deg); }
+  75% { transform: translateX(1px) rotate(0.5deg); }
+  100% { transform: translateX(-2px) rotate(-1deg); }
+}
+@keyframes fire-idle-glow {
+  0%, 100% { box-shadow: 0 0 14px rgba(232, 93, 4, 0.5), 0 0 28px rgba(220, 47, 2, 0.25); }
+  50% { box-shadow: 0 0 20px rgba(232, 93, 4, 0.7), 0 0 40px rgba(220, 47, 2, 0.4); }
+}
+@keyframes armed-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  50% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
 .minimize-btn:hover { color: var(--accent); background: var(--accent-subtle); }
 
 /* Favorited card — accent left border + subtle glow */
@@ -1083,6 +1177,31 @@ header h1 {
   transition: opacity 0.4s ease;
   white-space: nowrap;
   font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: flex-start;
+  justify-content: center;
+  height: 1.2em;
+  line-height: 1.2em;
+  overflow: hidden;
+}
+/* Each character slot */
+.troll {
+  display: inline-block;
+  height: 1.2em;
+  overflow: hidden;
+  position: relative;
+}
+/* The digit strip — a vertical column of characters that slides */
+.troll-strip {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.troll-strip span {
+  display: block;
+  height: 1.2em;
+  line-height: 1.2em;
+  text-align: center;
 }
 
 
@@ -1816,6 +1935,91 @@ header h1 {
   margin-top: 8px;
 }
 
+/* Worktree cleanup modal */
+.worktree-cleanup-modal { max-width: 480px; }
+.worktree-cleanup-modal h2 { font-size: 18px; }
+.worktree-cleanup-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 8px 0;
+  line-height: 1.5;
+}
+.worktree-cleanup-path {
+  display: block;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  color: var(--accent);
+  word-break: break-all;
+  margin: 12px 0;
+}
+.btn-danger {
+  background: var(--red) !important;
+  box-shadow: 0 2px 8px rgba(217, 83, 79, 0.25) !important;
+}
+.btn-danger:hover {
+  background: #c9302c !important;
+  box-shadow: 0 4px 14px rgba(217, 83, 79, 0.35) !important;
+}
+
+/* Fire agent modal */
+.fire-modal { max-width: 480px; }
+.fire-modal h2 {
+  font-size: 18px;
+  color: #e85d04;
+}
+.fire-desc {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 8px 0 16px;
+  line-height: 1.5;
+}
+.fire-desc code {
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--accent);
+}
+.fire-label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: block;
+}
+.fire-optional {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.fire-reason {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  resize: vertical;
+  margin-bottom: 16px;
+}
+.fire-reason:focus {
+  outline: none;
+  border-color: #e85d04;
+  box-shadow: 0 0 0 2px rgba(232, 93, 4, 0.15);
+}
+.btn-fire {
+  background: linear-gradient(135deg, #e85d04, #dc2f02) !important;
+  box-shadow: 0 2px 8px rgba(232, 93, 4, 0.25) !important;
+}
+.btn-fire:hover {
+  background: linear-gradient(135deg, #dc2f02, #9d0208) !important;
+  box-shadow: 0 4px 14px rgba(232, 93, 4, 0.35) !important;
+}
+
 /* Update error modal */
 .update-error-modal {
   max-width: 520px;
@@ -1932,9 +2136,9 @@ header h1 {
    CODE DIFF VIEWER
    ═══════════════════════════════════════════════════ */
 .diff-modal {
-  width: 90vw;
-  max-width: 1200px;
-  max-height: 90vh;
+  width: 94vw;
+  max-width: 1400px;
+  max-height: 92vh;
   display: flex;
   flex-direction: column;
   color: var(--text);
@@ -1987,6 +2191,58 @@ header h1 {
 }
 
 /* Toggle tab group */
+.diff-context-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  padding-left: 8px;
+}
+.diff-context-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-weight: 500;
+  white-space: nowrap;
+  padding-right: 2px;
+}
+.diff-ctx-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 5px 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.diff-ctx-btn:hover {
+  color: var(--text);
+}
+.diff-ctx-btn.active {
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 600;
+}
+.diff-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  display: none;
+  flex-shrink: 0;
+  animation: diff-live-pulse 2s ease-in-out infinite;
+}
+.diff-live-dot.active {
+  display: block;
+}
+@keyframes diff-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 .diff-tab-group {
   display: flex;
   background: var(--input-bg);
@@ -2041,12 +2297,14 @@ header h1 {
   border-color: transparent;
 }
 
-/* Content area */
+/* Content area — GPU-composited scroll layer */
 .diff-content {
   flex: 1;
   overflow: auto;
   min-height: 0;
   padding: 0;
+  will-change: scroll-position;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* State screens (empty, loading, error) */
@@ -2115,204 +2373,327 @@ header h1 {
   to { transform: rotate(360deg); }
 }
 
-/* ── diff2html dark theme overrides ── */
+/* ── diff2html dark-theme overrides (VSCode-inspired) ── */
 
-/* Hide the built-in "Viewed" checkbox — not useful here */
+/* ---- Hide UI chrome we don't need ---- */
 .diff-modal .d2h-file-collapse,
 .diff-modal .d2h-file-switch {
-  display: none;
+  display: none !important;
 }
 
-/* File list summary */
+/* ---- File list (top summary bar) ---- */
 .diff-modal .d2h-file-list-wrapper {
-  background: transparent;
+  background: var(--input-bg);
   border: none;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   margin-bottom: 0;
-  padding: 12px 24px;
+  padding: 8px 16px;
+  display: block !important;
+  max-height: none !important;
+  overflow: visible !important;
 }
-.diff-modal .d2h-file-list-title {
+.diff-modal .d2h-file-list-wrapper .d2h-file-list-title {
   display: none;
 }
-.diff-modal .d2h-file-list-line {
-  padding: 3px 0;
-}
-.diff-modal .d2h-file-list-wrapper .d2h-file-list-line a {
-  color: var(--text);
-  font-size: 12px;
-  font-family: var(--font-mono);
-}
-.diff-modal .d2h-file-list-wrapper .d2h-file-list-line a:hover {
-  color: var(--accent);
-}
-.diff-modal .d2h-file-list-wrapper .d2h-file-stats {
-  font-size: 11px;
-}
-
-/* Wrapper & diff blocks */
-.diff-modal .d2h-wrapper {
-  background: transparent;
+.diff-modal .d2h-file-list-wrapper ol {
+  list-style: none;
+  margin: 0;
   padding: 0;
 }
+.diff-modal .d2h-file-list-line {
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.diff-modal .d2h-file-list-line:hover {
+  background: var(--accent-subtle);
+}
+.diff-modal .d2h-file-list-line a {
+  color: var(--text) !important;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  text-decoration: none !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.diff-modal .d2h-file-list-line a:hover {
+  color: var(--accent) !important;
+}
+/* +/- stat bars */
+.diff-modal .d2h-file-list-line .d2h-file-stats {
+  font-size: 0;
+  display: inline-flex;
+  gap: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.diff-modal .d2h-file-list-line .d2h-lines-added,
+.diff-modal .d2h-file-list-line .d2h-lines-deleted {
+  font-size: 11px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.diff-modal .d2h-file-list-line .d2h-lines-added {
+  color: var(--green);
+}
+.diff-modal .d2h-file-list-line .d2h-lines-deleted {
+  color: var(--red);
+}
+
+/* ---- Main wrapper ---- */
+.diff-modal .d2h-wrapper {
+  background: var(--bg);
+  padding: 0;
+}
+
+/* ---- Per-file blocks (content-visibility for scroll perf) ---- */
 .diff-modal .d2h-file-wrapper {
   border: none;
   border-bottom: 1px solid var(--border);
   border-radius: 0;
   margin-bottom: 0;
+  background: var(--bg);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 500px;
 }
 .diff-modal .d2h-file-wrapper:last-child {
   border-bottom: none;
 }
+
+/* ---- File header (sticky) ---- */
 .diff-modal .d2h-file-header {
   background: var(--surface);
   border: none;
   border-bottom: 1px solid var(--border);
   color: var(--text);
-  padding: 10px 24px;
+  padding: 8px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 .diff-modal .d2h-file-name-wrapper {
-  font-size: 13px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .diff-modal .d2h-file-name {
   color: var(--text);
   font-family: var(--font-mono);
+  font-weight: 500;
 }
+/* Change tag — subtle pill, theme-aware */
 .diff-modal .d2h-tag {
-  background: var(--accent-subtle);
-  color: var(--accent);
   border: none;
   border-radius: 4px;
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.3px;
-  padding: 2px 6px;
+  padding: 1px 6px;
+  line-height: 16px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+.diff-modal .d2h-tag.d2h-changed,
+.diff-modal .d2h-tag.d2h-changed-tag {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.diff-modal .d2h-tag.d2h-added,
+.diff-modal .d2h-tag.d2h-added-tag {
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+}
+.diff-modal .d2h-tag.d2h-deleted,
+.diff-modal .d2h-tag.d2h-deleted-tag {
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+.diff-modal .d2h-tag.d2h-renamed,
+.diff-modal .d2h-tag.d2h-renamed-tag {
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+  color: var(--blue);
+}
+/* File-level +/- stats in the header */
+.diff-modal .d2h-file-stats-wrapper {
+  margin-left: auto;
+}
+.diff-modal .d2h-file-header .d2h-lines-added {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+}
+.diff-modal .d2h-file-header .d2h-lines-deleted {
+  color: var(--red);
+  font-size: 11px;
+  font-weight: 600;
 }
 
-/* Table layout — override diff2html's absolute-positioning scheme with
-   normal table-cell flow so line numbers scroll with the content */
+/* ---- Diff table — fill entire width ---- */
 .diff-modal .d2h-file-diff {
   overflow-x: auto;
   overflow-y: hidden;
+  border-color: var(--border);
+  background: var(--bg);
 }
 .diff-modal .d2h-diff-table {
   border-color: var(--border);
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 20px;
+  width: 100%;
+  background: var(--bg);
+}
+.diff-modal .d2h-diff-tbody {
+  background: var(--bg);
 }
 .diff-modal .d2h-diff-tbody tr {
   border-color: var(--border);
+  background: var(--bg);
 }
 
-/* Line numbers — override position:absolute to normal table-cell flow */
+/* ---- Line numbers ---- */
 .diff-modal .d2h-code-linenumber {
   position: static !important;
   display: table-cell !important;
   width: auto !important;
   min-width: 3em;
-  padding: 0 0.6em !important;
-  background: var(--surface);
+  padding: 0 8px !important;
+  background: var(--input-bg);
   color: var(--text-dim);
   border-color: var(--border);
   border-right: 1px solid var(--border);
   text-align: right;
   vertical-align: top;
   white-space: nowrap;
-  direction: ltr;
+  user-select: none;
+  opacity: 0.6;
 }
 .diff-modal .d2h-code-linenumber::after {
   border-color: var(--border);
 }
-
-/* Side-by-side line numbers — same table-cell fix */
 .diff-modal .d2h-code-side-linenumber {
   position: static !important;
   display: table-cell !important;
   width: auto !important;
   min-width: 2.5em;
-  padding: 0 0.5em !important;
-  background: var(--surface);
+  padding: 0 6px !important;
+  background: var(--input-bg);
   color: var(--text-dim);
   border-color: var(--border);
   border-right: 1px solid var(--border);
   text-align: right;
   vertical-align: top;
   white-space: nowrap;
-  direction: ltr;
+  user-select: none;
+  opacity: 0.6;
 }
 .diff-modal .d2h-code-side-linenumber::after {
   border-color: var(--border);
 }
 
-/* Code lines — remove the large padding that compensated for absolute line numbers */
+/* ---- Code lines — fill full row width ---- */
 .diff-modal .d2h-code-line,
 .diff-modal .d2h-code-side-line {
   display: table-cell !important;
-  background: var(--terminal-bg);
+  background: var(--bg);
   color: var(--text);
-  padding: 0 12px !important;
+  padding: 0 16px !important;
   width: 100%;
 }
+.diff-modal .d2h-code-line-ctn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre;
+}
 
-/* Deletions */
+/* ---- Deletions (red) ---- */
 .diff-modal .d2h-del {
-  background: color-mix(in srgb, var(--red) 10%, transparent);
-  border-color: color-mix(in srgb, var(--red) 20%, transparent);
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
+  border-color: transparent;
 }
 .diff-modal .d2h-del .d2h-code-line,
 .diff-modal .d2h-del .d2h-code-side-line {
-  background: transparent;
+  background: color-mix(in srgb, var(--red) 8%, var(--bg));
 }
 .diff-modal .d2h-del .d2h-code-line-ctn del {
-  background: color-mix(in srgb, var(--red) 25%, transparent);
+  background: color-mix(in srgb, var(--red) 22%, transparent);
   text-decoration: none;
+  border-radius: 2px;
 }
 .diff-modal .d2h-del .d2h-code-linenumber,
 .diff-modal .d2h-del .d2h-code-side-linenumber {
-  background: color-mix(in srgb, var(--red) 12%, transparent);
-  border-color: color-mix(in srgb, var(--red) 20%, transparent);
+  background: color-mix(in srgb, var(--red) 10%, var(--input-bg));
+  border-color: color-mix(in srgb, var(--red) 15%, var(--border));
+  opacity: 0.8;
 }
 
-/* Insertions */
+/* ---- Insertions (green) ---- */
 .diff-modal .d2h-ins {
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-  border-color: color-mix(in srgb, var(--green) 20%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, var(--bg));
+  border-color: transparent;
 }
 .diff-modal .d2h-ins .d2h-code-line,
 .diff-modal .d2h-ins .d2h-code-side-line {
-  background: transparent;
+  background: color-mix(in srgb, var(--green) 8%, var(--bg));
 }
 .diff-modal .d2h-ins .d2h-code-line-ctn ins {
-  background: color-mix(in srgb, var(--green) 25%, transparent);
+  background: color-mix(in srgb, var(--green) 22%, transparent);
   text-decoration: none;
+  border-radius: 2px;
 }
 .diff-modal .d2h-ins .d2h-code-linenumber,
 .diff-modal .d2h-ins .d2h-code-side-linenumber {
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  border-color: color-mix(in srgb, var(--green) 20%, transparent);
+  background: color-mix(in srgb, var(--green) 10%, var(--input-bg));
+  border-color: color-mix(in srgb, var(--green) 15%, var(--border));
+  opacity: 0.8;
 }
 
-/* Hunk info row (@@ ... @@) */
+/* ---- Hunk info (@@ ... @@) ---- */
 .diff-modal .d2h-info {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
   color: var(--text-dim);
   border-color: var(--border);
   font-style: normal;
+  font-size: 12px;
+}
+.diff-modal .d2h-info .d2h-code-line,
+.diff-modal .d2h-info .d2h-code-side-line {
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+}
+.diff-modal .d2h-info .d2h-code-line-ctn {
+  color: var(--text-dim);
+}
+.diff-modal .d2h-info .d2h-code-linenumber,
+.diff-modal .d2h-info .d2h-code-side-linenumber {
+  background: color-mix(in srgb, var(--accent) 5%, var(--input-bg));
 }
 
-/* Empty placeholders (side-by-side) */
+/* ---- Empty placeholders (side-by-side) ---- */
 .diff-modal .d2h-emptyplaceholder {
   background: var(--input-bg);
   border-color: var(--border);
 }
-
-/* Side-by-side layout */
-.diff-modal .d2h-file-diff {
-  border-color: var(--border);
-}
 .diff-modal .d2h-file-side-diff {
   border-color: var(--border);
+  background: var(--bg);
+}
+
+/* ---- Syntax highlighting (highlight.js) ---- */
+.diff-modal .hljs {
+  background: transparent !important;
+  padding: 0 !important;
+  color: var(--text);
+}
+.diff-modal .d2h-del .hljs,
+.diff-modal .d2h-ins .hljs,
+.diff-modal .d2h-info .hljs {
+  background: transparent !important;
 }
 
 /* Scrollbar */
@@ -2582,6 +2963,26 @@ header h1 {
 }
 
 /* Screenshot upload zone */
+.bug-screenshot-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.bug-screenshot-row.hidden { display: none; }
+.bug-screenshot-capture-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 8px 14px;
+  font-size: 13px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.bug-screenshot-capture-btn.hidden { display: none; }
+.bug-screenshot-capture-btn svg {
+  flex-shrink: 0;
+}
 .bug-screenshot-zone {
   border: 1px dashed var(--border);
   border-radius: 8px;
@@ -2593,6 +2994,7 @@ header h1 {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 1;
 }
 .bug-screenshot-zone:hover,
 .bug-screenshot-zone.dragover {
@@ -4006,12 +4408,10 @@ header h1 {
 }
 .btn-settings-action.armed {
   background: #e04040;
-  animation: pulse-red 0.4s ease;
-}
-@keyframes pulse-red {
-  0% { transform: scale(1); }
-  50% { transform: scale(1.08); }
-  100% { transform: scale(1); }
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  font-weight: 700;
+  animation: armed-pulse 0.3s ease;
 }
 .btn-settings-action.installed,
 .btn-settings-action.btn-authorized {
@@ -4488,6 +4888,36 @@ header h1 {
   color: var(--text-dim);
 }
 
+/* "New" badge system for settings */
+.settings-new-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.dock-item { position: relative; }
+
+.settings-new-pill {
+  display: inline;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 5px;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #000;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
 /* Tailscale details */
 .tailscale-details {
   margin-top: 12px;
@@ -4847,14 +5277,17 @@ header .btn-primary kbd {
 .todo-delete-btn.armed {
   color: #fff;
   background: var(--red);
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 6px;
+  animation: armed-pulse 0.3s ease;
 }
 
 .todo-delete-btn.armed:hover {
-  background: #e04040;
+  background: #c9302c;
 }
 
 /* --- Color picker dropdown --- */
@@ -5522,6 +5955,9 @@ header .btn-primary kbd {
     min-width: 36px;
     min-height: 36px;
   }
+  .diff-context-group {
+    display: none;
+  }
 
   /* Bug report modal — mobile */
   .bug-report-modal {
@@ -5540,6 +5976,13 @@ header .btn-primary kbd {
   }
   .bug-screenshot-remove-btn {
     min-width: 36px;
+    min-height: 36px;
+  }
+  .bug-screenshot-row {
+    flex-direction: column;
+  }
+  .bug-screenshot-capture-btn {
+    justify-content: center;
     min-height: 36px;
   }
 }
@@ -5738,4 +6181,147 @@ header .btn-primary kbd {
 .agent-terminal-container .xterm-viewport {
   overflow-y: auto !important;
   overscroll-behavior: contain;
+}
+
+/* ═══ Milestone Confetti ═══ */
+/* Milestone toast */
+.milestone-toast {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.7);
+  background: rgba(0,0,0,0.85);
+  border: 1px solid var(--accent);
+  border-radius: 16px;
+  padding: 28px 48px;
+  text-align: center;
+  z-index: 100001;
+  opacity: 0;
+  animation: milestoneIn 0.5s ease forwards;
+  pointer-events: none;
+}
+.milestone-toast .milestone-period {
+  font-size: 18px;
+  font-weight: 700;
+  color: #ffd93d;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 6px;
+  text-shadow: 0 0 12px rgba(255, 217, 61, 0.4);
+}
+.milestone-toast .milestone-emoji { font-size: 48px; margin-bottom: 8px; }
+.milestone-toast .milestone-label { font-size: 13px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px; }
+.milestone-toast .milestone-value { font-size: 32px; font-weight: 700; color: var(--accent); margin-top: 4px; font-family: var(--font-mono); }
+@keyframes milestoneIn {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes milestoneOut {
+  0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.1); }
+}
+
+/* Confetti picker modal */
+.confetti-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.confetti-picker-modal {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 680px;
+  width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.confetti-picker-modal h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: var(--text);
+}
+.confetti-picker-modal .picker-subtitle {
+  color: var(--text-dim);
+  font-size: 13px;
+  margin-bottom: 20px;
+}
+.confetti-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.confetti-picker-card {
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  text-align: center;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+  overflow: hidden;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.confetti-picker-card:hover {
+  border-color: var(--accent);
+  background: rgba(255,255,255,0.03);
+}
+.confetti-picker-card.selected {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb, 100,200,255), 0.1);
+}
+.confetti-picker-card .picker-preview {
+  font-size: 36px;
+  line-height: 1;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.confetti-picker-card .picker-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.confetti-picker-card .picker-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.confetti-picker-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.confetti-picker-actions button {
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.confetti-picker-actions .btn-preview {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.confetti-picker-actions .btn-preview:hover { border-color: var(--accent); }
+.confetti-picker-actions .btn-save {
+  background: var(--accent);
+  color: #000;
+}
+.confetti-picker-actions .btn-cancel {
+  background: transparent;
+  color: var(--text-dim);
 }

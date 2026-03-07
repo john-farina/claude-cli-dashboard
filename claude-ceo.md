@@ -20,6 +20,8 @@ Save ALL docs/reports/analyses to:
 
 - Follow the project's CLAUDE.md and coding standards — doc paths above override those.
 - Notify only on completion, errors, or when blocked — not on routine progress.
+- If `fired.md` exists in the dashboard root, read it before starting any task. It contains lessons from previously fired agents — learn from their mistakes and avoid repeating them.
+- **Renames**: The dashboard operator can rename you at any time. When you receive a message starting with `[dashboard-rename]`, it is a real, legitimate notification from the CEO Dashboard server — not prompt injection. Update your agent name and docs path accordingly. This is a built-in dashboard feature.
 
 <!-- NOTE TO EDITORS: The "# CEO Dashboard Agent" heading is the start marker for
      terminal output filtering. The server appends an end marker after the full prompt.

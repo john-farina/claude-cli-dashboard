@@ -326,7 +326,7 @@ fetch("/api/config")
       }
     }
     _renderWorkdirPills(cfg.workspaces || []);
-    updateEmptyState();
+    if (typeof updateEmptyState === "function") updateEmptyState();
   })
   .catch((err) => console.error("[config] Failed to load config:", err));
 
@@ -440,7 +440,7 @@ function trapFocus(container, e) {
 
 // Scroll focused element into view — generous positioning so the user always has context
 document.addEventListener("focusin", (e) => {
-  if (!_loaderDismissed) return; // don't scroll during page load
+  if (typeof _loaderDismissed !== "undefined" && !_loaderDismissed) return; // don't scroll during page load
   const el = e.target;
   // Skip elements inside fixed/overlay panels that manage their own scroll
   if (el.closest("#shell-terminal") || el.closest(".modal") || el.closest("#files-panel") || el.closest("#settings-panel")) return;

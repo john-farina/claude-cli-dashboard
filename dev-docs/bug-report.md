@@ -17,10 +17,13 @@ Header button (keyboard shortcut `!`) that lets users file GitHub issues directl
 |--------|------|---------|
 | `GET` | `/api/system-info` | Dashboard version, Node, OS, agent count, configured bug report repo |
 | `POST` | `/api/bug-report` | Create GitHub issue via `gh` CLI (title, description, severity, systemInfo) |
+| `POST` | `/api/screenshot` | Run macOS `screencapture -i` (interactive area selection), save to uploads dir |
+| `GET` | `/api/screenshot-preview?path=` | Serve a captured screenshot image (path must be within uploads dir) |
 
 ## Screenshot Support
 
 - Drag-and-drop or click-to-upload in the modal
+- "Capture Screen" button: hides modal, activates macOS `screencapture -i`, shows preview on completion
 - Screenshot is saved locally and its path is included in the issue body
 - Preview with remove button before submission
 

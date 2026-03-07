@@ -25,12 +25,18 @@
   const bugSuccessClose = document.getElementById("bug-success-close");
   const bugSuccessSpawn = document.getElementById("bug-success-spawn");
 
+  const bugScreenshotCapture = document.getElementById("bug-screenshot-capture");
+
   let bugSelectedSeverity = "medium";
   let bugScreenshotFile = null;
+  let bugScreenshotServerPath = null;
   let bugSystemInfo = null;
   let _lastIssueUrl = "";
   let _lastBugTitle = "";
   let _lastBugDesc = "";
+  let _lastBugSteps = "";
+  let _lastBugSeverity = "";
+  let _lastBugScreenshotPath = "";
 
   function setSysinfoState(state) {
     bugSysinfoLoading.classList.toggle("hidden", state !== "loading");
@@ -52,6 +58,7 @@
     bugForm.reset();
     bugSelectedSeverity = "medium";
     bugScreenshotFile = null;
+    bugScreenshotServerPath = null;
     bugScreenshotPreview.classList.add("hidden");
     bugScreenshotPlaceholder.style.display = "";
     bugSystemInfo = null;
@@ -125,13 +132,43 @@
   bugScreenshotRemove.addEventListener("click", (e) => {
     e.stopPropagation();
     bugScreenshotFile = null;
+    bugScreenshotServerPath = null;
     bugScreenshotPreview.classList.add("hidden");
     bugScreenshotPlaceholder.style.display = "";
     bugScreenshotInput.value = "";
   });
 
+  // Capture screenshot via macOS screencapture
+  bugScreenshotCapture.addEventListener("click", async () => {
+    // Hide the modal so user can capture the screen (use classList not inline style)
+    bugOverlay.classList.add("hidden");
+    bugScreenshotCapture.disabled = true;
+    bugScreenshotCapture.textContent = "Capturing...";
+
+    try {
+      const res = await fetch("/api/screenshot", { method: "POST" });
+      const data = await res.json();
+      if (data.ok && data.path) {
+        // Show the captured screenshot in the preview
+        bugScreenshotServerPath = data.path;
+        bugScreenshotFile = null; // server already has the file
+        bugScreenshotImg.src = `/api/screenshot-preview?path=${encodeURIComponent(data.path)}&t=${Date.now()}`;
+        bugScreenshotPreview.classList.remove("hidden");
+        bugScreenshotPlaceholder.style.display = "none";
+      }
+    } catch {
+      // User cancelled or error — do nothing
+    } finally {
+      // Show the modal again
+      bugOverlay.classList.remove("hidden");
+      bugScreenshotCapture.disabled = false;
+      bugScreenshotCapture.innerHTML = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="10" rx="1"/><circle cx="8" cy="8.5" r="2.5"/><path d="M5 3L6 1h4l1 2"/></svg> Capture Screen`;
+    }
+  });
+
   function handleScreenshot(file) {
     bugScreenshotFile = file;
+    bugScreenshotServerPath = null;
     const reader = new FileReader();
     reader.onload = () => {
       bugScreenshotImg.src = reader.result;
@@ -151,9 +188,9 @@
     bugSubmit.textContent = "Submitting...";
 
     try {
-      // Upload screenshot first if present
-      let screenshotPath = null;
-      if (bugScreenshotFile) {
+      // Upload screenshot first if present (client-side file)
+      let screenshotPath = bugScreenshotServerPath || null;
+      if (!screenshotPath && bugScreenshotFile) {
         const formData = new FormData();
         formData.append("file", bugScreenshotFile);
         const upRes = await fetch("/api/upload", { method: "POST", body: formData });
@@ -181,6 +218,9 @@
         _lastIssueUrl = data.issueUrl;
         _lastBugTitle = title;
         _lastBugDesc = bugDesc.value.trim();
+        _lastBugSteps = bugSteps.value.trim();
+        _lastBugSeverity = bugSelectedSeverity;
+        _lastBugScreenshotPath = screenshotPath || "";
         closeBugReportModal();
         // Show success modal with spawn option
         bugSuccessMsg.innerHTML = `Issue created: <a href="${escapeAttr(data.issueUrl)}" target="_blank">${escapeHtml(data.issueUrl)}</a>`;
@@ -206,8 +246,44 @@
 
   bugSuccessSpawn.addEventListener("click", async () => {
     bugSuccessOverlay.classList.add("hidden");
-    // Create a new agent with the bug details as its prompt
-    const prompt = `Fix this bug and create a PR:\n\nTitle: ${_lastBugTitle}\n${_lastBugDesc ? `Description: ${_lastBugDesc}\n` : ""}Issue: ${_lastIssueUrl}\n\nPlease investigate, fix the bug, and create a PR that references the issue.`;
+    // Build comprehensive bug-fix agent prompt
+    let prompt = `You are a bug-fix agent. Your job is to investigate and fix the following bug, then ensure the codebase passes a security review, and finally create a PR or file a detailed issue.
+
+## Bug Report
+
+**Title:** ${_lastBugTitle}
+${_lastBugDesc ? `**Description:** ${_lastBugDesc}\n` : ""}${_lastBugSteps ? `**Steps to Reproduce:** ${_lastBugSteps}\n` : ""}**Severity:** ${_lastBugSeverity || "medium"}
+**Issue:** ${_lastIssueUrl}
+${_lastBugScreenshotPath ? `**Screenshot:** ${_lastBugScreenshotPath}\n` : ""}
+
+## Your Workflow
+
+### Step 1: Investigate & Fix the Bug
+- Read the relevant code and understand the root cause
+- Implement a fix
+- Test the fix if possible (run existing tests, verify the fix addresses the issue)
+- **If you need more information from the user, ask them directly** — don't guess
+
+### Step 2: Security Check
+- Once the bug is fixed, run a security review of the entire codebase
+- Check for OWASP Top 10 vulnerabilities: command injection, XSS, SQL injection, path traversal, etc.
+- Pay special attention to user input handling, shell commands, file path validation, and HTML rendering
+- If you find security issues, fix them before proceeding
+
+### Step 3: Create a PR or File an Issue
+- **If the bug is fixed and security checks pass:**
+  - Create a feature branch, commit your changes, and open a PR against \`main\` that references the issue (${_lastIssueUrl})
+  - PR title should be concise and describe the fix
+  - PR body should include a summary of the bug, the fix, and any security improvements made
+- **If you cannot fix the bug or resolve security issues:**
+  - File a detailed GitHub issue with your findings: what you tried, what failed, relevant code locations, and suggested approaches for someone else to try
+  - Reference the original issue (${_lastIssueUrl})
+
+## Important
+- Always ask the user if you need clarification — don't make assumptions about ambiguous behavior
+- Keep changes minimal and focused on the bug fix + any security issues found
+- Do not refactor unrelated code`;
+
     try {
       const res = await fetch("/api/sessions", {
         method: "POST",
@@ -1005,14 +1081,35 @@ const _diffClose = document.getElementById("diff-close");
 const _diffRefresh = document.getElementById("diff-refresh");
 const _diffRetry = document.getElementById("diff-retry");
 const _diffTabGroup = document.getElementById("diff-tab-group");
+const _diffCtxGroup = document.getElementById("diff-context-group");
+const _diffLiveDot = document.getElementById("diff-live-dot");
 
 let _diffCurrentAgent = null;
 let _diffSideBySide = false;
-let _diffCachedStaged = "";
-let _diffCachedUnstaged = "";
+let _diffContextLines = 3;
+let _diffPollTimer = null;
+let _diffLastRaw = "";
+// Two pre-built DOM containers — one for each view. Tab switch just swaps display.
+let _diffDomUnified = null;
+let _diffDomSplit = null;
+
+const _DIFF_STATE_KEY = "ceo-diff-state";
+const _DIFF_POLL_INTERVAL = 3000;
+
+function _diffSaveState() {
+  if (_diffCurrentAgent && !_diffOverlay.classList.contains("hidden")) {
+    localStorage.setItem(_DIFF_STATE_KEY, JSON.stringify({
+      agent: _diffCurrentAgent, sideBySide: _diffSideBySide, contextLines: _diffContextLines,
+    }));
+  } else {
+    localStorage.removeItem(_DIFF_STATE_KEY);
+  }
+}
 
 function _diffSetState(state) {
   _diffContent.innerHTML = "";
+  _diffDomUnified = null;
+  _diffDomSplit = null;
   _diffEmpty.classList.add("hidden");
   _diffLoading.classList.add("hidden");
   _diffError.classList.add("hidden");
@@ -1021,59 +1118,165 @@ function _diffSetState(state) {
   else if (state === "error") _diffError.classList.remove("hidden");
 }
 
+function _diffBuildDom(combined, outputFormat) {
+  const html = Diff2Html.html(combined, {
+    drawFileList: true,
+    fileListToggle: false,
+    matching: "lines",
+    outputFormat,
+    colorScheme: "dark",
+    renderNothingWhenEmpty: false,
+  });
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  // Ensure file list is visible
+  const fileList = container.querySelector(".d2h-file-list-wrapper");
+  if (fileList) {
+    fileList.style.display = "block";
+    fileList.style.maxHeight = "none";
+    fileList.style.overflow = "visible";
+  }
+  return container;
+}
+
+function _diffHighlightContainer(container) {
+  if (typeof hljs === "undefined") return;
+  // Highlight visible blocks now, lazy-highlight the rest via IntersectionObserver
+  const blocks = container.querySelectorAll(".d2h-code-line-ctn");
+  if (blocks.length <= 200) {
+    blocks.forEach(el => hljs.highlightElement(el));
+  } else {
+    // Only highlight once attached to DOM via IntersectionObserver
+    const obs = new IntersectionObserver((entries, observer) => {
+      const batch = [];
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        batch.push(entry.target);
+        observer.unobserve(entry.target);
+      }
+      if (batch.length > 0) {
+        requestAnimationFrame(() => batch.forEach(el => hljs.highlightElement(el)));
+      }
+    }, { root: _diffContent, rootMargin: "600px 0px" });
+    blocks.forEach(el => obs.observe(el));
+    // Store observer on container so we can disconnect later
+    container._hlObs = obs;
+  }
+}
+
+function _diffShowView() {
+  const active = _diffSideBySide ? _diffDomSplit : _diffDomUnified;
+  const inactive = _diffSideBySide ? _diffDomUnified : _diffDomSplit;
+  if (!active) return;
+  active.style.display = "";
+  if (inactive) inactive.style.display = "none";
+}
+
+async function _diffFetchAndRender(isPolling) {
+  const agentName = _diffCurrentAgent;
+  if (!agentName) return;
+  const ctxParam = _diffContextLines === "all" ? 99999 : _diffContextLines;
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/diff?context=${ctxParam}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to fetch diff");
+    if (agentName !== _diffCurrentAgent) return; // agent changed while fetching
+
+    _diffWorkdir.textContent = shortPath(data.workdir);
+
+    let combined = "";
+    if (data.unstaged) combined += data.unstaged;
+    if (data.staged) combined += (combined ? "\n" : "") + data.staged;
+
+    // Skip re-render if content unchanged (live poll optimization)
+    if (isPolling && combined === _diffLastRaw) return;
+    _diffLastRaw = combined;
+
+    if (!combined) { _diffSetState("empty"); return; }
+
+    // Clear loading state
+    _diffEmpty.classList.add("hidden");
+    _diffLoading.classList.add("hidden");
+    _diffError.classList.add("hidden");
+
+    // Save scroll position before re-render
+    const prevScroll = _diffContent.scrollTop;
+
+    _diffContent.innerHTML = "";
+    if (_diffDomUnified && _diffDomUnified._hlObs) _diffDomUnified._hlObs.disconnect();
+    if (_diffDomSplit && _diffDomSplit._hlObs) _diffDomSplit._hlObs.disconnect();
+
+    // Build both views upfront
+    _diffDomUnified = _diffBuildDom(combined, "line-by-line");
+    _diffDomSplit = _diffBuildDom(combined, "side-by-side");
+
+    // Append both, hide the inactive one
+    _diffDomUnified.style.display = _diffSideBySide ? "none" : "";
+    _diffDomSplit.style.display = _diffSideBySide ? "" : "none";
+    _diffContent.appendChild(_diffDomUnified);
+    _diffContent.appendChild(_diffDomSplit);
+
+    // Highlight the active view now, defer the other
+    _diffHighlightContainer(_diffSideBySide ? _diffDomSplit : _diffDomUnified);
+    requestAnimationFrame(() => {
+      _diffHighlightContainer(_diffSideBySide ? _diffDomUnified : _diffDomSplit);
+    });
+
+    // Restore scroll position on live updates
+    if (isPolling) _diffContent.scrollTop = prevScroll;
+
+  } catch (e) {
+    if (!isPolling) {
+      _diffErrorMsg.textContent = e.message;
+      _diffSetState("error");
+    }
+  }
+}
+
+function _diffStartPolling() {
+  _diffStopPolling();
+  _diffLiveDot.classList.add("active");
+  _diffPollTimer = setInterval(() => _diffFetchAndRender(true), _DIFF_POLL_INTERVAL);
+}
+
+function _diffStopPolling() {
+  if (_diffPollTimer) { clearInterval(_diffPollTimer); _diffPollTimer = null; }
+  _diffLiveDot.classList.remove("active");
+}
+
 async function openDiffModal(agentName) {
   _diffCurrentAgent = agentName;
+  _diffLastRaw = "";
   _diffOverlay.classList.remove("hidden");
   _diffAgentName.textContent = agentName;
   _diffWorkdir.textContent = "";
   _diffSetState("loading");
 
-  try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/diff`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to fetch diff");
-
-    _diffWorkdir.textContent = shortPath(data.workdir);
-
-    if (!data.hasDiff) {
-      _diffCachedStaged = "";
-      _diffCachedUnstaged = "";
-      _diffSetState("empty");
-      return;
-    }
-
-    _diffCachedStaged = data.staged || "";
-    _diffCachedUnstaged = data.unstaged || "";
-    _diffSetState("content");
-    renderDiff(_diffCachedStaged, _diffCachedUnstaged);
-  } catch (e) {
-    _diffErrorMsg.textContent = e.message;
-    _diffSetState("error");
-  }
-}
-
-function renderDiff(staged, unstaged) {
-  let combined = "";
-  if (unstaged) combined += unstaged;
-  if (staged) combined += (combined ? "\n" : "") + staged;
-  if (!combined) { _diffSetState("empty"); return; }
-
-  const outputFormat = _diffSideBySide ? "side-by-side" : "line-by-line";
-  const html = Diff2Html.html(combined, {
-    drawFileList: true,
-    matching: "lines",
-    outputFormat,
-    colorScheme: "dark",
+  // Sync tab UI
+  _diffTabGroup.querySelectorAll(".diff-tab").forEach(t => {
+    t.classList.toggle("active", t.dataset.view === (_diffSideBySide ? "side-by-side" : "unified"));
   });
-  _diffContent.innerHTML = html;
+  _diffCtxGroup.querySelectorAll(".diff-ctx-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.ctx === String(_diffContextLines));
+  });
+  _diffSaveState();
+
+  await _diffFetchAndRender(false);
+  _diffStartPolling();
 }
 
 function closeDiffModal() {
+  _diffStopPolling();
   _diffOverlay.classList.add("hidden");
+  // Disconnect any highlight observers
+  if (_diffDomUnified && _diffDomUnified._hlObs) _diffDomUnified._hlObs.disconnect();
+  if (_diffDomSplit && _diffDomSplit._hlObs) _diffDomSplit._hlObs.disconnect();
   _diffContent.innerHTML = "";
-  _diffCachedStaged = "";
-  _diffCachedUnstaged = "";
+  _diffDomUnified = null;
+  _diffDomSplit = null;
+  _diffLastRaw = "";
   _diffCurrentAgent = null;
+  _diffSaveState();
 }
 
 _diffClose.addEventListener("click", closeDiffModal);
@@ -1083,7 +1286,7 @@ _diffOverlay.addEventListener("click", (e) => {
 });
 
 _diffRefresh.addEventListener("click", () => {
-  if (_diffCurrentAgent) openDiffModal(_diffCurrentAgent);
+  if (_diffCurrentAgent) { _diffLastRaw = ""; openDiffModal(_diffCurrentAgent); }
 });
 
 _diffRetry.addEventListener("click", () => {
@@ -1096,10 +1299,42 @@ _diffTabGroup.addEventListener("click", (e) => {
   _diffTabGroup.querySelectorAll(".diff-tab").forEach(t => t.classList.remove("active"));
   tab.classList.add("active");
   _diffSideBySide = tab.dataset.view === "side-by-side";
-  if (_diffCachedStaged || _diffCachedUnstaged) {
-    renderDiff(_diffCachedStaged, _diffCachedUnstaged);
+  _diffSaveState();
+  _diffShowView();
+});
+
+_diffCtxGroup.addEventListener("click", (e) => {
+  const btn = e.target.closest(".diff-ctx-btn");
+  if (!btn || btn.classList.contains("active")) return;
+  _diffCtxGroup.querySelectorAll(".diff-ctx-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
+  _diffContextLines = btn.dataset.ctx === "all" ? "all" : parseInt(btn.dataset.ctx, 10);
+  _diffLastRaw = ""; // force re-render
+  _diffSaveState();
+  if (_diffCurrentAgent) {
+    _diffSetState("loading");
+    _diffFetchAndRender(false);
   }
 });
+
+// Restore diff modal on page load
+(function _diffRestoreState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(_DIFF_STATE_KEY));
+    if (saved && saved.agent) {
+      _diffSideBySide = !!saved.sideBySide;
+      if (saved.contextLines) _diffContextLines = saved.contextLines;
+      const tryOpen = () => {
+        if (typeof agents !== "undefined" && agents.has(saved.agent)) {
+          openDiffModal(saved.agent);
+        } else {
+          localStorage.removeItem(_DIFF_STATE_KEY);
+        }
+      };
+      setTimeout(tryOpen, 1500);
+    }
+  } catch {}
+})();
 
 // --- Settings Panel ---
 
@@ -1152,6 +1387,9 @@ async function loadSettings() {
 
     // Auto-Start
     settingAutostart.checked = data.autoStart;
+    _settingAutoRename.checked = data.autoRenameAgents;
+    _autoRenameNewOnlyRow.style.display = data.autoRenameAgents ? "" : "none";
+    _settingAutoRenameNewOnly.checked = data.autoRenameNewOnly !== false;
 
     // Dock App
     const rebuildHint = document.getElementById("customize-rebuild-hint");
@@ -1371,6 +1609,9 @@ document.getElementById("agent-defaults-toggle").addEventListener("click", () =>
   body.classList.toggle("hidden");
 });
 
+const _settingAutoRename = document.getElementById("setting-auto-rename");
+const _settingAutoRenameNewOnly = document.getElementById("setting-auto-rename-new-only");
+const _autoRenameNewOnlyRow = document.getElementById("auto-rename-new-only-row");
 const _settingTitle = document.getElementById("setting-title");
 const _settingDefaultName = document.getElementById("setting-default-agent-name");
 const _settingPrefix = document.getElementById("setting-agent-prefix");
@@ -1380,6 +1621,9 @@ const _settingInstallAlias = document.getElementById("setting-install-alias");
 
 function _loadAgentDefaults() {
   fetch("/api/config").then(r => r.json()).then(cfg => {
+    _settingAutoRename.checked = !!cfg.autoRenameAgents;
+    _autoRenameNewOnlyRow.style.display = cfg.autoRenameAgents ? "" : "none";
+    _settingAutoRenameNewOnly.checked = cfg.autoRenameNewOnly !== false; // default true
     _settingTitle.value = cfg.title || "CEO Dashboard";
     _defaultAgentName = cfg.defaultAgentName || "agent";
     _settingDefaultName.value = cfg.defaultAgentName || "agent";
@@ -1412,6 +1656,40 @@ function _saveAgentDefault(key, value) {
   }, 400);
 }
 
+_settingAutoRename.addEventListener("change", async () => {
+  const enabled = _settingAutoRename.checked;
+  _autoRenameNewOnlyRow.style.display = enabled ? "" : "none";
+  try {
+    const res = await fetch("/api/settings/auto-rename-agents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!res.ok) {
+      _settingAutoRename.checked = !enabled;
+      _autoRenameNewOnlyRow.style.display = !enabled ? "" : "none";
+    }
+  } catch {
+    _settingAutoRename.checked = !enabled;
+    _autoRenameNewOnlyRow.style.display = !enabled ? "" : "none";
+  }
+});
+
+_settingAutoRenameNewOnly.addEventListener("change", async () => {
+  const newOnly = _settingAutoRenameNewOnly.checked;
+  try {
+    const res = await fetch("/api/settings/auto-rename-new-only", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: newOnly }),
+    });
+    if (!res.ok) {
+      _settingAutoRenameNewOnly.checked = !newOnly;
+    }
+  } catch {
+    _settingAutoRenameNewOnly.checked = !newOnly;
+  }
+});
 _settingTitle.addEventListener("input", () => {
   const v = _settingTitle.value.trim() || "CEO Dashboard";
   TAB_TITLE_DEFAULT = v;
@@ -1850,5 +2128,145 @@ loadSettings = async function() {
   _loadAgentDefaults();
   _loadWorkspaceConfig();
   return _origLoadSettings();
+};
+
+// --- "New" settings badge system ---
+// Add setting IDs here when shipping new features. Remove them after a few versions.
+// ═══════════════════════════════════════════════════
+// NEW SETTINGS BADGE SYSTEM
+//
+// To mark a setting as "New":
+//   1. Add its data-setting-id to _NEW_SETTINGS below
+//   2. Ensure the HTML row has data-setting-id="your-id"
+//   3. That's it — dot on settings button, pill on section toggle,
+//      and pill on the individual row all appear automatically.
+//   4. Pills disappear after the user opens the section and views them.
+//   5. Remove from _NEW_SETTINGS after a few versions.
+// ═══════════════════════════════════════════════════
+
+const _NEW_SETTINGS = ["auto-rename-agents", "milestone-celebration"];
+const _SEEN_KEY = "ceo-seen-settings";
+
+function _getSeenSettings() {
+  try { return JSON.parse(localStorage.getItem(_SEEN_KEY)) || []; } catch { return []; }
+}
+
+function _markSeen(ids) {
+  const seen = new Set(_getSeenSettings());
+  for (const id of ids) seen.add(id);
+  localStorage.setItem(_SEEN_KEY, JSON.stringify([...seen]));
+  _updateSettingsNewDot();
+}
+
+function _getUnseenSettings() {
+  const seen = new Set(_getSeenSettings());
+  return _NEW_SETTINGS.filter(id => !seen.has(id));
+}
+
+function _updateSettingsNewDot() {
+  const dot = document.getElementById("settings-new-dot");
+  if (!dot) return;
+  dot.style.display = _getUnseenSettings().length > 0 ? "" : "none";
+}
+
+function _createNewPill() {
+  const pill = document.createElement("span");
+  pill.className = "settings-new-pill";
+  pill.dataset.auto = "1";
+  pill.textContent = "New";
+  return pill;
+}
+
+function _renderNewPills() {
+  settingsPanel.querySelectorAll(".settings-new-pill[data-auto]").forEach(el => el.remove());
+
+  const unseen = new Set(_getUnseenSettings());
+  if (unseen.size === 0) return;
+
+  // Pills on individual setting rows (next to label)
+  settingsPanel.querySelectorAll("[data-setting-id]").forEach(row => {
+    if (!unseen.has(row.dataset.settingId)) return;
+    const label = row.querySelector(".settings-label");
+    if (label && !label.querySelector(".settings-new-pill")) {
+      label.appendChild(document.createTextNode(" "));
+      label.appendChild(_createNewPill());
+    }
+  });
+
+  // Pills on parent collapsible section toggles
+  const sections = new Set();
+  settingsPanel.querySelectorAll("[data-setting-id]").forEach(row => {
+    if (!unseen.has(row.dataset.settingId)) return;
+    const collapse = row.closest(".settings-collapse");
+    if (collapse) sections.add(collapse);
+  });
+  for (const section of sections) {
+    const toggle = section.querySelector(".settings-collapse-toggle");
+    if (toggle && !toggle.querySelector(".settings-new-pill")) {
+      toggle.appendChild(_createNewPill());
+    }
+  }
+}
+
+function _hookCollapsibleSeen() {
+  settingsPanel.querySelectorAll(".settings-collapse-toggle").forEach(toggle => {
+    if (toggle._newSettingHooked) return;
+    toggle._newSettingHooked = true;
+    toggle.addEventListener("click", () => {
+      const section = toggle.closest(".settings-collapse");
+      if (!section) return;
+      setTimeout(() => {
+        const body = section.querySelector(".settings-collapse-body");
+        if (!body || body.classList.contains("hidden")) return;
+        // Remove pill from the section toggle immediately — user expanded it
+        toggle.querySelectorAll(".settings-new-pill[data-auto]").forEach(el => el.remove());
+        // Keep individual row pills visible so user can see WHICH settings are new.
+        // Fade them out after 3s, then mark as seen.
+        const rowPills = body.querySelectorAll(".settings-new-pill[data-auto]");
+        if (rowPills.length === 0) return;
+        setTimeout(() => {
+          const ids = [];
+          body.querySelectorAll("[data-setting-id]").forEach(row => ids.push(row.dataset.settingId));
+          rowPills.forEach(pill => {
+            pill.style.transition = "opacity 0.4s ease";
+            pill.style.opacity = "0";
+            setTimeout(() => pill.remove(), 400);
+          });
+          if (ids.length > 0) _markSeen(ids);
+        }, 3000);
+      }, 50);
+    });
+  });
+}
+
+function _markVisibleNewSeen() {
+  const ids = [];
+  settingsPanel.querySelectorAll("[data-setting-id]").forEach(row => {
+    const body = row.closest(".settings-collapse-body");
+    if (!body || !body.classList.contains("hidden")) {
+      ids.push(row.dataset.settingId);
+    }
+  });
+  if (ids.length > 0) _markSeen(ids);
+}
+
+(function _initNewSettingsDot() {
+  const btn = document.getElementById("settings-btn");
+  if (!btn) return;
+  const dot = document.createElement("span");
+  dot.id = "settings-new-dot";
+  dot.className = "settings-new-dot";
+  dot.style.display = "none";
+  btn.appendChild(dot);
+  _updateSettingsNewDot();
+})();
+
+const _origLoadSettings2 = loadSettings;
+loadSettings = async function() {
+  const result = _origLoadSettings2();
+  _renderNewPills();
+  _hookCollapsibleSeen();
+  setTimeout(_markVisibleNewSeen, 800);
+  return result;
 };
 
