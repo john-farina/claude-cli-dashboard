@@ -441,6 +441,8 @@ body {
 .chip-100 { background: #212121; }
 .chip-500 { background: #6a1b9a; }
 .chip-1000 { background: #c9a84c; color: #1a1a1a; }
+.chip-5000 { background: #b71c1c; }
+.chip-10000 { background: #e65100; color: #fff; }
 
 #bet-buttons {
   display: flex;
@@ -607,9 +609,9 @@ body {
 const SUITS = ['hearts','diamonds','clubs','spades'];
 const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
 const SUIT_SYMBOLS = { hearts:'\u2665', diamonds:'\u2666', clubs:'\u2663', spades:'\u2660' };
-const CHIP_DENOMS = [25, 100, 500, 1000];
-const CHIP_CLASSES = { 25:'chip-25', 100:'chip-100', 500:'chip-500', 1000:'chip-1000' };
-const CHIP_LABELS = { 25:'$25', 100:'$100', 500:'$500', 1000:'$1K' };
+const CHIP_DENOMS = [25, 100, 500, 1000, 5000, 10000];
+const CHIP_CLASSES = { 25:'chip-25', 100:'chip-100', 500:'chip-500', 1000:'chip-1000', 5000:'chip-5000', 10000:'chip-10000' };
+const CHIP_LABELS = { 25:'$25', 100:'$100', 500:'$500', 1000:'$1K', 5000:'$5K', 10000:'$10K' };
 const RESHUFFLE_THRESHOLD = 52;
 
 // ==================== STATE ====================
