@@ -3469,6 +3469,12 @@ function updateStatus(agent, status, promptType) {
   }
 
   agent.status = status;
+
+  // Alert in game arcade when agent needs attention
+  if (isNeedy && !wasNeedy && _arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
+    _showArcadeAlert(name, status);
+  }
+
   const badge = agent.card.querySelector(".status-badge");
   const labels = { working: "working", waiting: "needs input", asking: "has question", idle: "" };
 
@@ -4694,6 +4700,29 @@ function _showPauseLayer() {
     _pauseLayer = null;
     _arcadeShowPicker();
   });
+}
+
+// Alert banner when agent needs attention during gameplay
+function _showArcadeAlert(agentName, status) {
+  if (!_arcadeModal) return;
+  // Remove previous alert if any
+  _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
+  const label = status === "waiting" ? "needs input" : "has a question";
+  const alert = document.createElement("div");
+  alert.className = "arcade-agent-alert";
+  alert.innerHTML = `<span class="arcade-alert-pulse"></span><strong>${agentName}</strong> ${label} <button class="arcade-alert-go">Go to agent</button>`;
+  alert.querySelector(".arcade-alert-go").addEventListener("click", () => {
+    _closeArcade();
+    const agent = typeof agents !== "undefined" ? agents.get(agentName) : null;
+    if (agent?.card) {
+      agent.card.scrollIntoView({ behavior: "smooth", block: "center" });
+      const inp = agent.card.querySelector(".card-input textarea");
+      if (inp) inp.focus();
+    }
+  });
+  _arcadeModal.appendChild(alert);
+  // Auto-dismiss after 10s
+  setTimeout(() => { if (alert.parentNode) alert.remove(); }, 10000);
 }
 
 document.getElementById("game-btn")?.addEventListener("click", _openArcade);

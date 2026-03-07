@@ -6614,7 +6614,31 @@ header .btn-primary kbd {
 .game-quit-btn:hover { background: rgba(255,255,255,0.12); }
 .game-pause-layer {
   position: absolute; inset: 0; z-index: 10;
-  background: rgba(10, 10, 26, 0.92); backdrop-filter: blur(8px);
+  background: rgba(10, 10, 26, 0.92);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; border-radius: 12px;
 }
+/* Arcade agent alert */
+.arcade-agent-alert {
+  position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%);
+  z-index: 20; background: rgba(233, 69, 96, 0.95); color: #fff;
+  padding: 10px 18px; border-radius: 10px; font-size: 13px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
+  animation: arcadeAlertSlide 0.3s ease;
+}
+@keyframes arcadeAlertSlide {
+  from { opacity: 0; transform: translateX(-50%) translateY(20px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.arcade-alert-pulse {
+  width: 8px; height: 8px; border-radius: 50%; background: #fff;
+  animation: arcadePulse 1s ease infinite;
+}
+@keyframes arcadePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.arcade-alert-go {
+  background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3);
+  color: #fff; padding: 4px 12px; border-radius: 6px; font-size: 12px;
+  cursor: pointer; font-weight: 600;
+}
+.arcade-alert-go:hover { background: rgba(255,255,255,0.3); }
