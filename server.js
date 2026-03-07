@@ -1762,6 +1762,36 @@ app.get("/api/sessions/:name/search", (req, res) => {
   }
 });
 
+// --- Agent Chain API ---
+
+app.post("/api/sessions/:name/chain", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const { next, prompt, condition } = req.body || {};
+  if (!next || !prompt) return res.status(400).json({ error: "next and prompt required" });
+  const validConditions = ["always", "when-idle", "branch-has-changes"];
+  const meta = loadSessionsMeta();
+  if (!meta[name]) return res.status(404).json({ error: "agent not found" });
+  meta[name].chain = {
+    next: next,
+    prompt: prompt,
+    condition: validConditions.includes(condition) ? condition : "always",
+  };
+  saveSessionsMeta(meta);
+  res.json({ success: true });
+});
+
+app.delete("/api/sessions/:name/chain", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta();
+  if (meta[name]) {
+    delete meta[name].chain;
+    saveSessionsMeta(meta);
+  }
+  res.json({ success: true });
+});
+
 // --- .claude File Browser API ---
 
 app.get("/api/claude-files", (req, res) => {
@@ -3347,6 +3377,51 @@ async function tryAutoRename(name, output) {
   }
 }
 
+// --- Agent Chain Execution ---
+const _chainExecuted = new Set(); // track chains already fired to prevent re-trigger
+
+function _executeChain(fromAgent, chain, workdir, branch) {
+  const { next, prompt, condition } = chain;
+  const chainKey = `${fromAgent}->${next}`;
+
+  // Prevent duplicate execution within same idle cycle
+  if (_chainExecuted.has(chainKey)) return;
+  _chainExecuted.add(chainKey);
+  setTimeout(() => _chainExecuted.delete(chainKey), 30000); // allow re-trigger after 30s
+
+  // Check condition
+  if (condition === "branch-has-changes") {
+    try {
+      const stat = diffService.getDiffStat(workdir, branch);
+      if (!stat || stat.files.length === 0) {
+        console.log(`[chain] ${fromAgent} → ${next}: skipped (no changes)`);
+        return;
+      }
+    } catch {
+      console.log(`[chain] ${fromAgent} → ${next}: skipped (diff check failed)`);
+      return;
+    }
+  }
+
+  // Variable substitution in prompt
+  let finalPrompt = prompt
+    .replace(/\{branch\}/g, branch || "main")
+    .replace(/\{workdir\}/g, workdir || "");
+
+  // Send to existing agent
+  const session = PREFIX + next;
+  const sessions = listTmuxSessions();
+  if (sessions.includes(session)) {
+    console.log(`[chain] ${fromAgent} → ${next}: sending prompt`);
+    sendKeys(session, finalPrompt);
+    scheduleForceUpdate();
+    // Broadcast chain-fired event
+    _broadcastWs({ type: "chain-fired", from: fromAgent, to: next, prompt: finalPrompt });
+  } else {
+    console.log(`[chain] ${fromAgent} → ${next}: agent not found, skipping`);
+  }
+}
+
 async function broadcastOutputs() {
   if (wss.clients.size === 0) return;
   if (_broadcastRunning) return;
@@ -3414,6 +3489,14 @@ async function broadcastOutputs() {
         // Trigger on any transition to idle (working→idle, waiting→idle, asking→idle)
         if (status === "idle" && prevStatus && prevStatus !== "idle") {
           pendingRenames.push({ name, output });
+        }
+
+        // Chain execution: when agent transitions from working to idle, fire chain
+        if (prevStatus === "working" && status === "idle") {
+          const agentMeta = meta[name];
+          if (agentMeta?.chain) {
+            setTimeout(() => _executeChain(name, agentMeta.chain, liveCwd || agentMeta.workdir, git?.branch), 2000);
+          }
         }
 
         // Bankroll: detect commits in output
@@ -3549,6 +3632,7 @@ wss.on("connection", (ws) => {
           favorite: meta[name]?.favorite || false,
           minimized: meta[name]?.minimized || false,
           type: meta[name]?.type || "agent",
+          chain: meta[name]?.chain || null,
         });
       }
       if (ws.readyState === 1) {
@@ -3579,6 +3663,7 @@ wss.on("connection", (ws) => {
             favorite: fallbackMeta[name]?.favorite || false,
             minimized: fallbackMeta[name]?.minimized || false,
             type: fallbackMeta[name]?.type || "agent",
+            chain: fallbackMeta[name]?.chain || null,
           };
         });
         if (ws.readyState === 1) {

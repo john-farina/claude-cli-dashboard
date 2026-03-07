@@ -202,6 +202,26 @@
             <div class="drop-hint">Drop images or videos here</div>
           </div>
         </label>
+        <details class="chain-config" id="chain-config">
+          <summary>Chain after completion</summary>
+          <div class="chain-fields">
+            <label>Then send to agent:
+              <select class="chain-next-select" id="chain-next-select">
+                <option value="">None</option>
+              </select>
+            </label>
+            <label>With prompt:
+              <textarea class="chain-prompt" id="chain-prompt" placeholder="Review changes on {branch}..." rows="2"></textarea>
+            </label>
+            <label>Condition:
+              <select class="chain-condition" id="chain-condition">
+                <option value="always">Always</option>
+                <option value="when-idle">When idle</option>
+                <option value="branch-has-changes">When branch has changes</option>
+              </select>
+            </label>
+          </div>
+        </details>
         <div class="modal-actions">
           <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
           <button type="submit" class="btn-primary">Create</button>

@@ -914,7 +914,11 @@ function connect() {
         if (s.type !== "terminal") {
           addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
           const a = agents.get(s.name);
-          if (a) a.autoRename = s.autoRename || false;
+          if (a) {
+            a.autoRename = s.autoRename || false;
+            a.chain = s.chain || null;
+            _updateChainIndicator(s.name, s.chain);
+          }
         }
       }
       for (const s of msg.sessions) {
@@ -1072,6 +1076,17 @@ function connect() {
       // else: initiating client already renamed locally — nothing to do
     }
 
+    // Chain fired notification
+    if (msg.type === "chain-fired") {
+      console.log(`[chain] ${msg.from} → ${msg.to}`);
+      // Flash the target card briefly
+      const targetAgent = agents.get(msg.to);
+      if (targetAgent?.card) {
+        targetAgent.card.classList.add("chain-target-flash");
+        setTimeout(() => targetAgent.card.classList.remove("chain-target-flash"), 2000);
+      }
+    }
+
     // Live input sync from another client
     if (msg.type === "input-sync") {
       const agent = agents.get(msg.session);
@@ -1125,6 +1140,59 @@ function requestRefresh(session) {
 function scheduleRefresh(session) {
   for (const ms of [500, 1000, 2000, 3000, 5000]) {
     PollingManager.registerTimeout(`refresh-${session}-${ms}`, () => requestRefresh(session), ms, session);
+  }
+}
+
+// --- Chain Indicator ---
+
+function _updateChainIndicator(agentName, chain) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  let indicator = agent.card.querySelector(".chain-indicator");
+  if (!chain) {
+    if (indicator) indicator.remove();
+    return;
+  }
+  if (!indicator) {
+    indicator = document.createElement("span");
+    indicator.className = "chain-indicator";
+    const header = agent.card.querySelector(".card-header-left");
+    if (header) header.appendChild(indicator);
+  }
+  indicator.innerHTML = `<span class="chain-arrow">\u2192</span> ${escapeHtml(chain.next)}`;
+  indicator.title = `Chain: ${chain.condition}\nPrompt: ${chain.prompt}`;
+}
+
+async function _openChainDialog(agentName) {
+  const agent = agents.get(agentName);
+  const existing = agent?.chain;
+  const nextAgent = prompt("Chain to agent (name):", existing?.next || "");
+  if (nextAgent === null) return; // cancelled
+  if (!nextAgent) {
+    // Remove chain
+    try {
+      await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, { method: "DELETE" });
+      if (agent) agent.chain = null;
+      _updateChainIndicator(agentName, null);
+    } catch {}
+    return;
+  }
+  const chainPrompt = prompt("Prompt to send (use {branch} and {workdir} as variables):", existing?.prompt || "");
+  if (!chainPrompt) return;
+  const condition = prompt("Condition (always, when-idle, branch-has-changes):", existing?.condition || "always") || "always";
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ next: nextAgent, prompt: chainPrompt, condition }),
+    });
+    if (res.ok) {
+      const chain = { next: nextAgent, prompt: chainPrompt, condition };
+      if (agent) agent.chain = chain;
+      _updateChainIndicator(agentName, chain);
+    }
+  } catch (err) {
+    console.error("[chain] Failed to set chain:", err);
   }
 }
 
@@ -1211,6 +1279,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
               <button class="more-menu-item" data-action="save-memory">Save Memory</button>
               <button class="more-menu-item" data-action="update-memory">Update Memory</button>
               <button class="more-menu-item more-menu-danger" data-action="clear-memory">Clear Memory</button>
+              <button class="more-menu-item" data-action="set-chain">Set Chain</button>
               <button class="more-menu-item" data-action="dismiss-status" style="display:none;">Dismiss Status</button>
               <button class="more-menu-item" data-action="restart">Restart Claude</button>
             </div>
@@ -1989,6 +2058,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       try {
         await fetch(`/api/sessions/${name}/memory`, { method: "DELETE" });
       } catch {}
+    }
+
+    if (action === "set-chain") {
+      _openChainDialog(name);
+      return;
     }
 
     if (action === "dismiss-status") {

@@ -586,10 +586,35 @@ async function fetchAndRenderTemplates() {
   }
 }
 
+function populateChainAgentDropdown() {
+  const select = document.getElementById("chain-next-select");
+  if (!select) return;
+  // Keep the "None" option, clear the rest
+  select.innerHTML = '<option value="">None</option>';
+  if (typeof agents !== "undefined") {
+    for (const [agentName] of agents) {
+      const opt = document.createElement("option");
+      opt.value = agentName;
+      opt.textContent = agentName;
+      select.appendChild(opt);
+    }
+  }
+}
+
 newAgentBtn.addEventListener("click", () => {
   modalOverlay.classList.remove("hidden");
   fetchClaudeSessions();
   fetchAndRenderTemplates();
+  populateChainAgentDropdown();
+  // Reset chain fields
+  const chainConfig = document.getElementById("chain-config");
+  if (chainConfig) chainConfig.removeAttribute("open");
+  const chainPrompt = document.getElementById("chain-prompt");
+  if (chainPrompt) chainPrompt.value = "";
+  const chainNext = document.getElementById("chain-next-select");
+  if (chainNext) chainNext.value = "";
+  const chainCondition = document.getElementById("chain-condition");
+  if (chainCondition) chainCondition.value = "always";
   const nameInput = document.getElementById("agent-name");
   if (!nameInput.value) nameInput.value = _defaultAgentName;
   nameInput.focus();
@@ -819,6 +844,21 @@ newAgentForm.addEventListener("submit", async (e) => {
 
     if (res.ok) {
       const data = await res.json();
+      // Set chain if configured
+      const chainNext = document.getElementById("chain-next-select")?.value;
+      const chainPrompt = document.getElementById("chain-prompt")?.value?.trim();
+      if (chainNext && chainPrompt) {
+        const chainCondition = document.getElementById("chain-condition")?.value || "always";
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(data.name)}/chain`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ next: chainNext, prompt: chainPrompt, condition: chainCondition }),
+          });
+        } catch (err) {
+          console.error("[chain] Failed to set chain:", err);
+        }
+      }
       addAgentCard(data.name, data.workdir, data.branch, data.isWorktree, false);
       closeNewAgentModal();
       newAgentForm.reset();
