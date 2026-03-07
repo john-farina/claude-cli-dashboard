@@ -1093,6 +1093,15 @@ let _diffLastRaw = "";
 let _diffDomUnified = null;
 let _diffDomSplit = null;
 
+// Code review state
+const _diffReviewPending = new Map();   // agentName → Map<key, comment>
+const _diffReviewSubmitted = new Map(); // agentName → Map<key, comment>
+let _diffReviewComments = new Map();    // active session pending
+let _diffSubmittedComments = new Map(); // active session submitted
+const _diffReviewFooter = document.getElementById("diff-review-footer");
+const _diffReviewCount = document.getElementById("diff-review-count");
+const _diffReviewSubmit = document.getElementById("diff-review-submit");
+
 const _DIFF_STATE_KEY = "ceo-diff-state";
 const _DIFF_POLL_INTERVAL = 3000;
 
@@ -1117,6 +1126,325 @@ function _diffSetState(state) {
   else if (state === "empty") _diffEmpty.classList.remove("hidden");
   else if (state === "error") _diffError.classList.remove("hidden");
 }
+
+// ── Code Review helpers ──────────────────────────────────────
+
+function _diffReviewKey(filePath, lineNumber, side) {
+  return `${filePath}::${side}::${lineNumber}`;
+}
+
+function _diffReviewGetLineInfo(tr) {
+  const wrapper = tr.closest(".d2h-file-wrapper");
+  if (!wrapper) return null;
+  const nameEl = wrapper.querySelector(".d2h-file-name");
+  if (!nameEl) return null;
+  const filePath = nameEl.textContent.trim();
+
+  // Determine side
+  const side = tr.classList.contains("d2h-del") ? "old" : "new";
+
+  // Line number — unified vs split
+  let lineNumber = null;
+  const sideLineNum = tr.querySelector(".d2h-code-side-linenumber");
+  const uniLineNum = tr.querySelector(".d2h-code-linenumber");
+  if (sideLineNum) {
+    lineNumber = sideLineNum.textContent.trim();
+  } else if (uniLineNum) {
+    // Unified: has two numbers, pick based on side
+    const raw = uniLineNum.textContent.trim();
+    // d2h renders line numbers with inner spans or plain text
+    const nums = raw.split(/\s+/).filter(Boolean);
+    if (side === "old" && nums.length >= 1) lineNumber = nums[0];
+    else if (nums.length >= 2) lineNumber = nums[1];
+    else lineNumber = nums[0];
+  }
+  if (!lineNumber || lineNumber === "…") return null;
+
+  const codeEl = tr.querySelector(".d2h-code-line-ctn");
+  const codeSnippet = codeEl ? codeEl.textContent : "";
+
+  return { filePath, lineNumber, side, codeSnippet };
+}
+
+function _diffReviewInjectGutterButtons(container) {
+  const rows = container.querySelectorAll("tr");
+  for (const tr of rows) {
+    if (tr.classList.contains("d2h-info")) continue;
+    // Find line number cells
+    const cells = tr.querySelectorAll(".d2h-code-linenumber, .d2h-code-side-linenumber");
+    for (const td of cells) {
+      if (td.querySelector(".diff-review-add-btn")) continue;
+      const btn = document.createElement("span");
+      btn.className = "diff-review-add-btn";
+      btn.textContent = "+";
+      td.appendChild(btn);
+    }
+  }
+}
+
+function _diffReviewFindRow(container, filePath, lineNumber, side) {
+  const wrappers = container.querySelectorAll(".d2h-file-wrapper");
+  for (const wrapper of wrappers) {
+    const nameEl = wrapper.querySelector(".d2h-file-name");
+    if (!nameEl || nameEl.textContent.trim() !== filePath) continue;
+    const rows = wrapper.querySelectorAll("tr");
+    for (const tr of rows) {
+      if (tr.classList.contains("d2h-info")) continue;
+      const info = _diffReviewGetLineInfo(tr);
+      if (!info) continue;
+      if (info.lineNumber === lineNumber && info.side === side) return tr;
+    }
+  }
+  return null;
+}
+
+function _diffReviewInsertCommentRow(targetTr, commentKey, text, isSubmitted) {
+  // Determine colspan from target row
+  const cols = targetTr.querySelectorAll("td").length || 3;
+  const tr = document.createElement("tr");
+  tr.className = "diff-review-comment-row";
+  tr.dataset.reviewKey = commentKey;
+  if (isSubmitted) tr.classList.add("submitted");
+  const td = document.createElement("td");
+  td.colSpan = cols;
+
+  if (text === null) {
+    // Editable textarea
+    td.innerHTML = `<div class="diff-review-comment-box">
+      <textarea data-key="${escapeHtml(commentKey)}" placeholder="Add review comment…"></textarea>
+      <div class="diff-review-comment-actions">
+        <button class="diff-review-save-btn" data-key="${escapeHtml(commentKey)}">Save</button>
+        <button class="diff-review-cancel-btn" data-key="${escapeHtml(commentKey)}">Cancel</button>
+      </div>
+    </div>`;
+  } else {
+    // Saved comment display
+    td.innerHTML = `<div class="diff-review-saved-comment">
+      <span class="diff-review-saved-text">${escapeHtml(text)}</span>
+      <span class="diff-review-saved-actions">
+        <button class="diff-review-edit-btn" data-key="${escapeHtml(commentKey)}" title="Edit">&#9998;</button>
+        <button class="diff-review-delete-btn" data-key="${escapeHtml(commentKey)}" title="Delete">&times;</button>
+      </span>
+    </div>`;
+  }
+
+  tr.appendChild(td);
+  targetTr.insertAdjacentElement("afterend", tr);
+  return tr;
+}
+
+function _diffReviewRemoveCommentRows(key) {
+  // Remove from both DOM trees
+  for (const container of [_diffDomUnified, _diffDomSplit]) {
+    if (!container) continue;
+    const existing = container.querySelectorAll(`.diff-review-comment-row[data-review-key="${CSS.escape(key)}"]`);
+    existing.forEach(r => r.remove());
+  }
+}
+
+function _diffReviewInjectComments(container) {
+  // Inject pending editable comments
+  for (const [key, comment] of _diffReviewComments) {
+    const tr = _diffReviewFindRow(container, comment.filePath, comment.lineNumber, comment.side);
+    if (tr) _diffReviewInsertCommentRow(tr, key, comment.text, false);
+  }
+  // Inject submitted dimmed comments
+  for (const [key, comment] of _diffSubmittedComments) {
+    // Don't inject if a pending comment exists for this key (user is editing a replacement)
+    if (_diffReviewComments.has(key)) continue;
+    const tr = _diffReviewFindRow(container, comment.filePath, comment.lineNumber, comment.side);
+    if (tr) _diffReviewInsertCommentRow(tr, key, comment.text, true);
+  }
+}
+
+function _diffReviewUpdateFooter() {
+  const count = _diffReviewComments.size;
+  if (count > 0) {
+    _diffReviewFooter.classList.remove("hidden");
+    _diffReviewCount.innerHTML = `<b style="color:var(--accent)">${count}</b> comment${count !== 1 ? "s" : ""}`;
+  } else {
+    _diffReviewFooter.classList.add("hidden");
+  }
+}
+
+// Delegated click handler for all review interactions
+_diffContent.addEventListener("click", (e) => {
+  const target = e.target;
+
+  // "+" gutter button
+  if (target.closest(".diff-review-add-btn")) {
+    const tr = target.closest("tr");
+    if (!tr) return;
+    const info = _diffReviewGetLineInfo(tr);
+    if (!info) return;
+    const key = _diffReviewKey(info.filePath, info.lineNumber, info.side);
+
+    // Remove any submitted version for this key
+    _diffSubmittedComments.delete(key);
+    _diffReviewRemoveCommentRows(key);
+
+    // Insert blank comment row in BOTH trees
+    for (const container of [_diffDomUnified, _diffDomSplit]) {
+      if (!container) continue;
+      const targetRow = _diffReviewFindRow(container, info.filePath, info.lineNumber, info.side);
+      if (targetRow) _diffReviewInsertCommentRow(targetRow, key, null, false);
+    }
+    // Focus textarea in active view
+    const active = _diffSideBySide ? _diffDomSplit : _diffDomUnified;
+    if (active) {
+      const ta = active.querySelector(`.diff-review-comment-row[data-review-key="${CSS.escape(key)}"] textarea`);
+      if (ta) ta.focus();
+    }
+    return;
+  }
+
+  // Save button
+  if (target.closest(".diff-review-save-btn")) {
+    const btn = target.closest(".diff-review-save-btn");
+    const key = btn.dataset.key;
+    const row = btn.closest(".diff-review-comment-row");
+    const textarea = row ? row.querySelector("textarea") : null;
+    const text = textarea ? textarea.value.trim() : "";
+    if (!text) return;
+
+    // Parse key: "filePath::side::lineNumber" — use lastIndexOf to handle :: in paths
+    const lastSep = key.lastIndexOf("::");
+    const lineNumber = key.substring(lastSep + 2);
+    const rest = key.substring(0, lastSep);
+    const secondSep = rest.lastIndexOf("::");
+    const side = rest.substring(secondSep + 2);
+    const filePath = rest.substring(0, secondSep);
+
+    const codeRow = _diffReviewFindRow(_diffSideBySide ? _diffDomSplit : _diffDomUnified, filePath, lineNumber, side);
+    const codeSnippet = codeRow ? (codeRow.querySelector(".d2h-code-line-ctn")?.textContent || "") : "";
+
+    _diffReviewComments.set(key, { filePath, lineNumber, side, text, codeSnippet });
+
+    // Replace textarea with saved display in BOTH trees
+    _diffReviewRemoveCommentRows(key);
+    for (const container of [_diffDomUnified, _diffDomSplit]) {
+      if (!container) continue;
+      const targetRow = _diffReviewFindRow(container, filePath, lineNumber, side);
+      if (targetRow) _diffReviewInsertCommentRow(targetRow, key, text, false);
+    }
+    _diffReviewUpdateFooter();
+    return;
+  }
+
+  // Cancel button
+  if (target.closest(".diff-review-cancel-btn")) {
+    const btn = target.closest(".diff-review-cancel-btn");
+    const key = btn.dataset.key;
+    _diffReviewRemoveCommentRows(key);
+
+    // If there's a saved comment in the map, re-insert it
+    if (_diffReviewComments.has(key)) {
+      const comment = _diffReviewComments.get(key);
+      for (const container of [_diffDomUnified, _diffDomSplit]) {
+        if (!container) continue;
+        const targetRow = _diffReviewFindRow(container, comment.filePath, comment.lineNumber, comment.side);
+        if (targetRow) _diffReviewInsertCommentRow(targetRow, key, comment.text, false);
+      }
+    }
+    return;
+  }
+
+  // Edit button
+  if (target.closest(".diff-review-edit-btn")) {
+    const btn = target.closest(".diff-review-edit-btn");
+    const key = btn.dataset.key;
+    const comment = _diffReviewComments.get(key);
+    if (!comment) return;
+    const existingText = comment.text;
+
+    _diffReviewRemoveCommentRows(key);
+    for (const container of [_diffDomUnified, _diffDomSplit]) {
+      if (!container) continue;
+      const targetRow = _diffReviewFindRow(container, comment.filePath, comment.lineNumber, comment.side);
+      if (targetRow) {
+        const insertedRow = _diffReviewInsertCommentRow(targetRow, key, null, false);
+        const ta = insertedRow.querySelector("textarea");
+        if (ta) ta.value = existingText;
+      }
+    }
+    // Focus textarea in active view
+    const active = _diffSideBySide ? _diffDomSplit : _diffDomUnified;
+    if (active) {
+      const ta = active.querySelector(`.diff-review-comment-row[data-review-key="${CSS.escape(key)}"] textarea`);
+      if (ta) ta.focus();
+    }
+    return;
+  }
+
+  // Delete button
+  if (target.closest(".diff-review-delete-btn")) {
+    const btn = target.closest(".diff-review-delete-btn");
+    const key = btn.dataset.key;
+    _diffReviewComments.delete(key);
+    _diffReviewRemoveCommentRows(key);
+    _diffReviewUpdateFooter();
+    return;
+  }
+});
+
+// Keyboard shortcuts for comment textareas (Ctrl+Enter to save, Escape to cancel)
+_diffContent.addEventListener("keydown", (e) => {
+  const textarea = e.target.closest(".diff-review-comment-box textarea");
+  if (!textarea) return;
+  if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+    e.preventDefault();
+    const saveBtn = textarea.closest(".diff-review-comment-box").querySelector(".diff-review-save-btn");
+    if (saveBtn) saveBtn.click();
+  } else if (e.key === "Escape") {
+    e.preventDefault();
+    const cancelBtn = textarea.closest(".diff-review-comment-box").querySelector(".diff-review-cancel-btn");
+    if (cancelBtn) cancelBtn.click();
+  }
+});
+
+// Submit review
+_diffReviewSubmit.addEventListener("click", () => {
+  if (_diffReviewComments.size === 0) return;
+
+  // Sort comments by file path, then line number
+  const sorted = [..._diffReviewComments.entries()].sort((a, b) => {
+    const ca = a[1], cb = b[1];
+    if (ca.filePath !== cb.filePath) return ca.filePath.localeCompare(cb.filePath);
+    return parseInt(ca.lineNumber, 10) - parseInt(cb.lineNumber, 10);
+  });
+
+  // Build markdown message
+  const lines = [`## Code Review (${sorted.length} comment${sorted.length !== 1 ? "s" : ""})\n`];
+  for (const [, comment] of sorted) {
+    lines.push(`### ${comment.filePath}:${comment.lineNumber}`);
+    if (comment.codeSnippet.trim()) {
+      lines.push("```");
+      lines.push(comment.codeSnippet);
+      lines.push("```");
+    }
+    lines.push(comment.text);
+    lines.push("\n---\n");
+  }
+  const markdownMessage = lines.join("\n").replace(/\n---\n$/, "");
+
+  // Send to agent
+  sendInput(_diffCurrentAgent, markdownMessage);
+
+  // Move pending → submitted
+  for (const [key, comment] of _diffReviewComments) {
+    _diffSubmittedComments.set(key, comment);
+  }
+  // Persist to per-agent maps
+  if (_diffCurrentAgent) {
+    _diffReviewSubmitted.set(_diffCurrentAgent, new Map(_diffSubmittedComments));
+    _diffReviewPending.delete(_diffCurrentAgent);
+  }
+  _diffReviewComments.clear();
+  _diffReviewUpdateFooter();
+  closeDiffModal();
+});
+
+// ── End Code Review helpers ──────────────────────────────────
 
 function _diffBuildDom(combined, outputFormat) {
   const html = Diff2Html.html(combined, {
@@ -1202,6 +1530,15 @@ async function _diffFetchAndRender(isPolling) {
     // Save scroll position before re-render
     const prevScroll = _diffContent.scrollTop;
 
+    // Capture open textarea content before rebuild
+    const _openTextareas = new Map();
+    for (const container of [_diffDomUnified, _diffDomSplit]) {
+      if (!container) continue;
+      for (const ta of container.querySelectorAll(".diff-review-comment-row textarea")) {
+        if (ta.value.trim()) _openTextareas.set(ta.dataset.key, ta.value);
+      }
+    }
+
     _diffContent.innerHTML = "";
     if (_diffDomUnified && _diffDomUnified._hlObs) _diffDomUnified._hlObs.disconnect();
     if (_diffDomSplit && _diffDomSplit._hlObs) _diffDomSplit._hlObs.disconnect();
@@ -1209,6 +1546,20 @@ async function _diffFetchAndRender(isPolling) {
     // Build both views upfront
     _diffDomUnified = _diffBuildDom(combined, "line-by-line");
     _diffDomSplit = _diffBuildDom(combined, "side-by-side");
+
+    // Inject review gutter buttons and comments into both trees
+    _diffReviewInjectGutterButtons(_diffDomUnified);
+    _diffReviewInjectGutterButtons(_diffDomSplit);
+    _diffReviewInjectComments(_diffDomUnified);
+    _diffReviewInjectComments(_diffDomSplit);
+
+    // Restore open textarea content
+    for (const container of [_diffDomUnified, _diffDomSplit]) {
+      for (const [key, val] of _openTextareas) {
+        const ta = container.querySelector(`.diff-review-comment-row[data-review-key="${CSS.escape(key)}"] textarea`);
+        if (ta) ta.value = val;
+      }
+    }
 
     // Append both, hide the inactive one
     _diffDomUnified.style.display = _diffSideBySide ? "none" : "";
@@ -1252,6 +1603,11 @@ async function openDiffModal(agentName) {
   _diffWorkdir.textContent = "";
   _diffSetState("loading");
 
+  // Load per-agent review state
+  _diffReviewComments = _diffReviewPending.get(agentName) || new Map();
+  _diffSubmittedComments = _diffReviewSubmitted.get(agentName) || new Map();
+  _diffReviewUpdateFooter();
+
   // Sync tab UI
   _diffTabGroup.querySelectorAll(".diff-tab").forEach(t => {
     t.classList.toggle("active", t.dataset.view === (_diffSideBySide ? "side-by-side" : "unified"));
@@ -1267,6 +1623,19 @@ async function openDiffModal(agentName) {
 
 function closeDiffModal() {
   _diffStopPolling();
+  // Save per-agent review state before clearing
+  if (_diffCurrentAgent) {
+    if (_diffReviewComments.size > 0) {
+      _diffReviewPending.set(_diffCurrentAgent, new Map(_diffReviewComments));
+    } else {
+      _diffReviewPending.delete(_diffCurrentAgent);
+    }
+    if (_diffSubmittedComments.size > 0) {
+      _diffReviewSubmitted.set(_diffCurrentAgent, new Map(_diffSubmittedComments));
+    } else {
+      _diffReviewSubmitted.delete(_diffCurrentAgent);
+    }
+  }
   _diffOverlay.classList.add("hidden");
   // Disconnect any highlight observers
   if (_diffDomUnified && _diffDomUnified._hlObs) _diffDomUnified._hlObs.disconnect();
