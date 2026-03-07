@@ -29,6 +29,7 @@ const { createScrollback, getScrollback, appendScrollback, clearScrollback } = r
 const terminalCards = require("./lib/terminal-cards");
 const shellPtyMod = require("./lib/shell-pty");
 const fileTracker = require("./lib/file-tracker");
+const activityEvents = require("./lib/activity-events");
 
 // Destructure security
 const {
@@ -1741,6 +1742,7 @@ app.put("/api/agent-docs/:name/:doc", (req, res) => {
   const filePath = path.join(agentDir, `${req.params.doc}.md`);
   try {
     fs.writeFileSync(filePath, req.body.content || "", "utf8");
+    activityEvents.addEvent({ type: "doc-save", agent: req.params.name, detail: req.params.doc });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1792,6 +1794,12 @@ app.get("/api/agent-files/:name", (req, res) => {
   const { name } = req.params;
   if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
   res.json(fileTracker.getAgentFiles(name));
+});
+
+app.get("/api/activity", (req, res) => {
+  const since = req.query.since ? parseInt(req.query.since) : 0;
+  const agent = req.query.agent || null;
+  res.json(activityEvents.getEvents(since, agent));
 });
 
 app.get("/api/ceo-md", (req, res) => {
@@ -3197,11 +3205,28 @@ async function broadcastOutputs() {
         const promptType = status === "waiting" ? detectPromptType(filteredOutput) : null;
         const promptOptions = promptType === "question" ? parsePromptOptions(filteredOutput) : null;
         prevOutputs.set(session, output);
+        const prevFileCount = fileTracker.getAgentFiles(name).length;
         fileTracker.updateAgentFiles(name, output);
+        const newFiles = fileTracker.getAgentFiles(name);
+        if (newFiles.length > prevFileCount) {
+          const added = newFiles.slice(prevFileCount);
+          for (const f of added.slice(0, 3)) {
+            activityEvents.addEvent({ type: "file-edit", agent: name, detail: f.split("/").pop() });
+          }
+        }
 
         // Track status transitions for auto-rename
         const prevStatus = prevStatuses.get(session);
         prevStatuses.set(session, status);
+
+        // Track status changes for activity timeline
+        if (prevStatus && prevStatus !== status) {
+          activityEvents.addEvent({
+            type: "status-change",
+            agent: name,
+            detail: prevStatus + " \u2192 " + status,
+          });
+        }
         // Trigger on any transition to idle (working→idle, waiting→idle, asking→idle)
         if (status === "idle" && prevStatus && prevStatus !== "idle") {
           pendingRenames.push({ name, output });

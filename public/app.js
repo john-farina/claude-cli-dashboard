@@ -4246,6 +4246,7 @@ function _toggleHelpOverlay() {
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">S</kbd><span>Settings</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">B</kbd><span>Bookmarks</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">D</kbd><span>Todos</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">L</kbd><span>Activity Timeline</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">C</kbd><span>CEO Prompt</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">R</kbd><span>Restart</span>
             <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">!</kbd><span>Bug Report</span>
@@ -4404,6 +4405,12 @@ document.addEventListener("keydown", (e) => {
       showAgentsView();
       return;
     }
+    // Activity timeline panel
+    if (typeof ActivityTimeline !== "undefined" && ActivityTimeline.isOpen()) {
+      e.preventDefault();
+      ActivityTimeline.close();
+      return;
+    }
     // Dependency graph panel
     if (typeof DependencyGraph !== "undefined" && DependencyGraph.isOpen()) {
       e.preventDefault();
@@ -4494,6 +4501,11 @@ document.addEventListener("keydown", (e) => {
     if (typeof DependencyGraph !== "undefined") DependencyGraph.toggle();
     return;
   }
+  if (key === "l" && !inInput) {
+    e.preventDefault();
+    if (typeof ActivityTimeline !== "undefined") ActivityTimeline.toggle();
+    return;
+  }
 
   // Remaining hotkeys — skip if typing in any input
   if (inInput) return;
@@ -4568,6 +4580,14 @@ if (typeof CommandPalette !== "undefined" && typeof DependencyGraph !== "undefin
     keywords: "graph dependencies files overlap agents",
     icon: "\u25C9", hint: "G",
     handler: function() { DependencyGraph.toggle(); },
+  });
+}
+if (typeof CommandPalette !== "undefined" && typeof ActivityTimeline !== "undefined") {
+  CommandPalette.registerAction({
+    id: "activity-timeline", category: "Views", label: "Activity Timeline",
+    keywords: "timeline activity events log history",
+    icon: "\u23F1", hint: "L",
+    handler: function() { ActivityTimeline.toggle(); },
   });
 }
 if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
