@@ -4477,9 +4477,9 @@ startTodoRefsPolling();
 if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
 if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
   CommandPalette.registerAction({
-    id: "split-view", category: "Views", label: "Split View",
-    keywords: "split side by side compare two agents",
-    icon: "&#9646;",
+    id: "split-view", category: "Views", label: "Focus View",
+    keywords: "split side by side compare focus agents",
+    icon: "\u25A8",
     handler: () => SplitView.promptAndOpen(),
   });
 }

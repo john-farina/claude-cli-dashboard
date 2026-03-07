@@ -6367,48 +6367,52 @@ header .btn-primary kbd {
 }
 .command-palette-empty { padding: 20px; text-align: center; color: var(--text-dim); }
 
-/* --- Split View --- */
-.split-view-overlay {
-  position: fixed; inset: 0; z-index: 9000;
-  background: var(--bg); display: flex; flex-direction: row;
+/* --- Focus View (replaces grid with 1-4 agent layout) --- */
+.focus-view-container {
+  display: grid; gap: 4px; padding: 8px;
+  height: calc(100vh - 60px - 48px); /* header + shell bar */
+  min-height: 400px;
 }
-.split-view-overlay.hidden { display: none; }
-.split-view-pane {
-  flex: 1; display: flex; flex-direction: column; min-width: 0;
+.focus-view-count-1 { grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.focus-view-count-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+.focus-view-count-3 { grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; }
+.focus-view-count-4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.focus-view-pane {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  border: 1px solid var(--border, #333); border-radius: 8px; overflow: hidden;
+  background: var(--surface);
 }
-.split-view-divider {
-  width: 6px; cursor: col-resize; background: var(--border, #333);
-  flex-shrink: 0; transition: background 0.15s;
-}
-.split-view-divider:hover { background: var(--accent); }
-.split-view-header {
-  padding: 10px 16px; font-size: 14px; font-weight: 600;
+.focus-view-header {
+  padding: 8px 14px; font-size: 13px; font-weight: 600;
   background: var(--surface); border-bottom: 1px solid var(--border, #333);
   display: flex; align-items: center; gap: 8px; flex-shrink: 0;
 }
-.split-view-header .split-view-close {
+.focus-view-close {
   margin-left: auto; background: none; border: none; color: var(--text-dim);
-  font-size: 20px; cursor: pointer; padding: 0 4px; line-height: 1;
+  font-size: 18px; cursor: pointer; padding: 0 4px; line-height: 1;
 }
-.split-view-header .split-view-close:hover { color: var(--text); }
-.split-view-terminal {
-  flex: 1; overflow-y: auto; padding: 12px 16px;
+.focus-view-close:hover { color: var(--text); }
+.focus-view-terminal {
+  flex: 1; overflow-y: auto; padding: 10px 14px;
   font-family: var(--font-mono, monospace); font-size: 13px;
   line-height: 1.5; background: var(--terminal-bg, #0e0e0d);
-  white-space: pre-wrap; word-wrap: break-word;
+  white-space: pre-wrap; word-wrap: break-word; min-height: 0;
 }
-.split-view-input-wrap {
-  padding: 8px 12px; border-top: 1px solid var(--border, #333);
+.focus-view-input-wrap {
+  padding: 6px 10px; border-top: 1px solid var(--border, #333);
   background: var(--surface); flex-shrink: 0;
 }
-.split-view-input-wrap textarea {
+.focus-view-input-wrap textarea {
   width: 100%; resize: none; background: var(--bg); color: var(--text);
-  border: 1px solid var(--border, #333); border-radius: 8px;
-  padding: 10px 12px; font-family: var(--font-mono, monospace); font-size: 13px;
+  border: 1px solid var(--border, #333); border-radius: 6px;
+  padding: 8px 10px; font-family: var(--font-mono, monospace); font-size: 13px;
   outline: none;
 }
-.split-view-input-wrap textarea:focus {
-  border-color: var(--accent);
+.focus-view-input-wrap textarea:focus { border-color: var(--accent); }
+@media (max-width: 900px) {
+  .focus-view-count-2, .focus-view-count-3 { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+  .focus-view-count-3 { grid-template-rows: 1fr 1fr 1fr; }
+  .focus-view-count-4 { grid-template-columns: 1fr; grid-template-rows: repeat(4, 1fr); }
 }
 
 /* --- Agent Template Cards --- */
