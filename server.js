@@ -250,6 +250,21 @@ function snapshotKilledAgentTokens(name) {
     const filePath = findJsonlFileForSession(sid);
     if (!filePath) return;
     const byDay = parseTokenUsageByDay(filePath);
+    // Also include subagent token usage in the snapshot
+    const subFiles = findSubagentFiles(sid);
+    for (const subFile of subFiles) {
+      try {
+        const subByDay = parseTokenUsageByDay(subFile);
+        for (const [dayKey, dayUsage] of Object.entries(subByDay)) {
+          const existing = byDay[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+          existing.input += dayUsage.input;
+          existing.output += dayUsage.output;
+          existing.cacheCreation += dayUsage.cacheCreation;
+          existing.cacheRead += dayUsage.cacheRead;
+          byDay[dayKey] = existing;
+        }
+      } catch {}
+    }
     if (Object.keys(byDay).length === 0) return;
     const tokenData = loadTokenUsage();
     tokenData.killedDaily = tokenData.killedDaily || {};
@@ -280,6 +295,26 @@ function findJsonlFileForSession(sessionId) {
     }
   } catch {}
   return null;
+}
+
+function findSubagentFiles(sessionId) {
+  if (!sessionId) return [];
+  const files = [];
+  try {
+    const projectDirs = fs.readdirSync(CLAUDE_DIR);
+    for (const dir of projectDirs) {
+      const subagentDir = path.join(CLAUDE_DIR, dir, sessionId, "subagents");
+      try {
+        const entries = fs.readdirSync(subagentDir);
+        for (const entry of entries) {
+          if (entry.endsWith(".jsonl")) {
+            files.push(path.join(subagentDir, entry));
+          }
+        }
+      } catch {} // subagent dir doesn't exist — fine
+    }
+  } catch {}
+  return files;
 }
 
 function parseTokenUsageFromBytes(buf, byteLength) {
@@ -443,6 +478,30 @@ function syncTokenUsage() {
       existing.cacheCreation += dayUsage.cacheCreation;
       existing.cacheRead += dayUsage.cacheRead;
       daily[dayKey] = existing;
+    }
+    // Also aggregate subagent JSONL files
+    const subFiles = findSubagentFiles(sid);
+    for (const subFile of subFiles) {
+      let subStat;
+      try { subStat = fs.statSync(subFile); } catch { continue; }
+      const subCacheKey = "sub:" + subFile;
+      const subCacheEntry = _dailyByDayCache.get(subCacheKey);
+      let subByDay;
+      if (subCacheEntry && subCacheEntry.size === subStat.size) {
+        subByDay = subCacheEntry.byDay;
+      } else {
+        subByDay = parseTokenUsageByDay(subFile);
+        _dailyByDayCache.set(subCacheKey, { size: subStat.size, byDay: subByDay });
+        dailyChanged = true;
+      }
+      for (const [dayKey, dayUsage] of Object.entries(subByDay)) {
+        const existing = daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        existing.input += dayUsage.input;
+        existing.output += dayUsage.output;
+        existing.cacheCreation += dayUsage.cacheCreation;
+        existing.cacheRead += dayUsage.cacheRead;
+        daily[dayKey] = existing;
+      }
     }
   }
   // Merge daily: killedDaily (snapshotted at kill time) + live agents' JSONL ground truth
