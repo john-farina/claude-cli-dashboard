@@ -6555,23 +6555,54 @@ header .btn-primary kbd {
 .activity-timeline-detail { flex: 1; color: var(--text-dim); font-family: var(--font-mono, monospace); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .activity-timeline-time { color: var(--text-dim); font-size: 10px; font-family: var(--font-mono, monospace); white-space: nowrap; }
 
-/* --- Game Modal --- */
+/* --- Games Arcade --- */
 .game-modal {
   background: #0a0a1a; border-radius: 12px; overflow: hidden;
   width: 90vw; max-width: 1000px; height: 85vh;
   display: flex; flex-direction: column;
   box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+  margin: auto;
 }
 .game-modal-header {
   padding: 10px 16px; display: flex; align-items: center; justify-content: space-between;
   background: #0f0f2a; border-bottom: 1px solid #1a1a3a;
-  font-size: 14px; font-weight: 600; color: #eee;
+  font-size: 14px; font-weight: 600; color: #eee; flex-shrink: 0;
 }
 .game-modal-close {
   background: none; border: none; color: #888; font-size: 20px;
   cursor: pointer; padding: 0 4px; line-height: 1;
 }
 .game-modal-close:hover { color: #eee; }
-.game-iframe {
-  flex: 1; border: none; width: 100%; background: #0a0a1a;
+.game-iframe { flex: 1; border: none; width: 100%; background: #0a0a1a; }
+.game-picker {
+  display: flex; flex-wrap: wrap; gap: 16px; padding: 24px;
+  justify-content: center;
 }
+.game-app {
+  width: 120px; text-align: center; cursor: pointer; padding: 16px 8px;
+  border-radius: 12px; transition: background 0.15s, transform 0.15s;
+}
+.game-app:hover { background: rgba(255,255,255,0.06); transform: scale(1.05); }
+.game-app-icon {
+  width: 56px; height: 56px; border-radius: 14px; margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.game-app-name { font-size: 13px; font-weight: 600; color: #eee; }
+.game-app-sub { font-size: 10px; color: #666; margin-top: 2px; }
+.game-resume-screen {
+  padding: 40px 24px; text-align: center;
+}
+.game-resume-btn, .game-quit-btn {
+  display: block; width: 200px; margin: 8px auto; padding: 12px;
+  border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+  border: none; transition: background 0.15s;
+}
+.game-resume-btn {
+  background: #e94560; color: #fff;
+}
+.game-resume-btn:hover { background: #d63550; }
+.game-quit-btn {
+  background: rgba(255,255,255,0.08); color: #aaa; border: 1px solid #333;
+}
+.game-quit-btn:hover { background: rgba(255,255,255,0.12); }

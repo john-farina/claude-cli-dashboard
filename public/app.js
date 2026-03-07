@@ -4352,9 +4352,9 @@ document.addEventListener("keydown", (e) => {
       closeDiffModal();
       return;
     }
-    if (_gameOverlay && !_gameOverlay.classList.contains("hidden")) {
+    if (_arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
       e.preventDefault();
-      _gameOverlay.classList.add("hidden");
+      _closeArcade();
       return;
     }
     if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
@@ -4575,32 +4575,132 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// --- Game Overlay ---
-let _gameOverlay = null;
-document.getElementById("game-btn")?.addEventListener("click", () => {
-  if (!_gameOverlay) {
-    _gameOverlay = document.createElement("div");
-    _gameOverlay.id = "game-overlay";
-    _gameOverlay.className = "command-palette-overlay";
-    _gameOverlay.innerHTML = `
-      <div class="game-modal">
-        <div class="game-modal-header">
-          <span>Block Drop — ULTRA CHAOS</span>
-          <button class="game-modal-close">&times;</button>
-        </div>
-        <iframe src="game.html" class="game-iframe"></iframe>
-      </div>
-    `;
-    document.body.appendChild(_gameOverlay);
-    _gameOverlay.querySelector(".game-modal-close").addEventListener("click", () => {
-      _gameOverlay.classList.add("hidden");
-    });
-    _gameOverlay.addEventListener("mousedown", (e) => {
-      if (e.target === _gameOverlay) _gameOverlay.classList.add("hidden");
+// --- Games Arcade ---
+// To add a game: put the HTML file in public/, add an entry here
+const _games = [
+  { id: "block-drop", name: "Block Drop", subtitle: "ULTRA CHAOS", src: "game.html", icon: "\uD83C\uDFAE", color: "#e94560" },
+];
+let _arcadeOverlay = null;
+let _arcadeModal = null;
+let _activeGame = null; // { id, game, iframe }
+let _arcadeView = "picker"; // "picker" | "playing" | "paused"
+
+function _openArcade() {
+  if (!_arcadeOverlay) {
+    _arcadeOverlay = document.createElement("div");
+    _arcadeOverlay.id = "arcade-overlay";
+    _arcadeOverlay.className = "command-palette-overlay";
+    _arcadeModal = document.createElement("div");
+    _arcadeModal.className = "game-modal";
+    _arcadeOverlay.appendChild(_arcadeModal);
+    document.body.appendChild(_arcadeOverlay);
+    _arcadeOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _arcadeOverlay) _closeArcade();
     });
   }
-  _gameOverlay.classList.remove("hidden");
-});
+  _arcadeOverlay.classList.remove("hidden");
+  if (_activeGame) {
+    _arcadeShowPaused();
+  } else {
+    _arcadeShowPicker();
+  }
+}
+
+function _closeArcade() {
+  if (_activeGame && _arcadeView === "playing") {
+    // Pause game by simulating P keypress in iframe
+    try { _activeGame.iframe.contentWindow?.postMessage("ceo-pause", "*"); } catch {}
+    _arcadeView = "paused";
+  }
+  _arcadeOverlay?.classList.add("hidden");
+}
+
+function _arcadeShowPicker() {
+  _arcadeView = "picker";
+  _arcadeModal.style.height = "auto";
+  _arcadeModal.style.maxHeight = "85vh";
+  _arcadeModal.innerHTML = `
+    <div class="game-modal-header">
+      <span>Arcade</span>
+      <button class="game-modal-close">&times;</button>
+    </div>
+    <div class="game-picker">${_games.map(g => `
+      <div class="game-app" data-game="${g.id}">
+        <div class="game-app-icon" style="background:${g.color}">${g.icon}</div>
+        <div class="game-app-name">${g.name}</div>
+        <div class="game-app-sub">${g.subtitle}</div>
+      </div>
+    `).join("")}</div>
+  `;
+  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+  _arcadeModal.querySelectorAll(".game-app").forEach(el => {
+    el.addEventListener("click", () => {
+      const game = _games.find(g => g.id === el.dataset.game);
+      if (game) _arcadeLaunch(game);
+    });
+  });
+}
+
+function _arcadeLaunch(game) {
+  _arcadeView = "playing";
+  _arcadeModal.style.height = "";
+  _arcadeModal.style.maxHeight = "";
+  _arcadeModal.innerHTML = `
+    <div class="game-modal-header">
+      <span>${game.name} — ${game.subtitle}</span>
+      <button class="game-modal-close" title="Pause & minimize">&times;</button>
+    </div>
+    <iframe src="${game.src}" class="game-iframe"></iframe>
+  `;
+  const iframe = _arcadeModal.querySelector("iframe");
+  _activeGame = { id: game.id, game, iframe };
+  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+}
+
+function _arcadeShowPaused() {
+  _arcadeView = "paused";
+  const g = _activeGame.game;
+  _arcadeModal.style.height = "auto";
+  _arcadeModal.style.maxHeight = "85vh";
+  // Keep iframe alive but detach from view
+  const iframe = _activeGame.iframe;
+  if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
+  _arcadeModal.innerHTML = `
+    <div class="game-modal-header">
+      <span>${g.name} — PAUSED</span>
+      <button class="game-modal-close">&times;</button>
+    </div>
+    <div class="game-resume-screen">
+      <div class="game-app-icon" style="background:${g.color};width:64px;height:64px;font-size:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">${g.icon}</div>
+      <button class="game-resume-btn">Resume Game</button>
+      <button class="game-quit-btn">Quit to Arcade</button>
+    </div>
+  `;
+  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+  _arcadeModal.querySelector(".game-resume-btn").addEventListener("click", () => {
+    // Re-attach the existing iframe (game state preserved)
+    _arcadeView = "playing";
+    _arcadeModal.style.height = "";
+    _arcadeModal.style.maxHeight = "";
+    _arcadeModal.innerHTML = `
+      <div class="game-modal-header">
+        <span>${g.name} — ${g.subtitle}</span>
+        <button class="game-modal-close" title="Pause & minimize">&times;</button>
+      </div>
+    `;
+    _arcadeModal.appendChild(iframe);
+    _activeGame.iframe = iframe;
+    _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+    // Unpause
+    try { iframe.contentWindow?.postMessage("ceo-resume", "*"); } catch {}
+  });
+  _arcadeModal.querySelector(".game-quit-btn").addEventListener("click", () => {
+    _activeGame = null;
+    _arcadeShowPicker();
+  });
+}
+
+document.getElementById("game-btn")?.addEventListener("click", _openArcade);
 
 // --- Init ---
 
