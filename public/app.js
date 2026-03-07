@@ -4583,7 +4583,7 @@ const _games = [
 let _arcadeOverlay = null;
 let _arcadeModal = null;
 let _activeGame = null; // { id, game, iframe }
-let _arcadeView = "picker"; // "picker" | "playing" | "paused"
+let _pauseLayer = null; // overlay that sits on top of iframe when paused
 
 function _openArcade() {
   if (!_arcadeOverlay) {
@@ -4600,23 +4600,26 @@ function _openArcade() {
   }
   _arcadeOverlay.classList.remove("hidden");
   if (_activeGame) {
-    _arcadeShowPaused();
+    // Show the modal with iframe + pause layer on top
+    _arcadeModal.style.height = "";
+    _arcadeModal.style.maxHeight = "";
+    _showPauseLayer();
   } else {
     _arcadeShowPicker();
   }
 }
 
 function _closeArcade() {
-  if (_activeGame && _arcadeView === "playing") {
-    // Pause game by simulating P keypress in iframe
+  if (_activeGame) {
     try { _activeGame.iframe.contentWindow?.postMessage("ceo-pause", "*"); } catch {}
-    _arcadeView = "paused";
   }
   _arcadeOverlay?.classList.add("hidden");
 }
 
 function _arcadeShowPicker() {
-  _arcadeView = "picker";
+  // Destroy any active game
+  _activeGame = null;
+  if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
   _arcadeModal.style.height = "auto";
   _arcadeModal.style.maxHeight = "85vh";
   _arcadeModal.innerHTML = `
@@ -4642,7 +4645,6 @@ function _arcadeShowPicker() {
 }
 
 function _arcadeLaunch(game) {
-  _arcadeView = "playing";
   _arcadeModal.style.height = "";
   _arcadeModal.style.maxHeight = "";
   _arcadeModal.innerHTML = `
@@ -4654,48 +4656,38 @@ function _arcadeLaunch(game) {
   `;
   const iframe = _arcadeModal.querySelector("iframe");
   _activeGame = { id: game.id, game, iframe };
+  if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
   _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
 }
 
-function _arcadeShowPaused() {
-  _arcadeView = "paused";
+function _showPauseLayer() {
+  if (!_activeGame) return;
   const g = _activeGame.game;
-  _arcadeModal.style.height = "auto";
-  _arcadeModal.style.maxHeight = "85vh";
-  // Keep iframe alive but detach from view
-  const iframe = _activeGame.iframe;
-  if (iframe && iframe.parentNode) iframe.parentNode.removeChild(iframe);
-  _arcadeModal.innerHTML = `
-    <div class="game-modal-header">
-      <span>${g.name} — PAUSED</span>
-      <button class="game-modal-close">&times;</button>
-    </div>
-    <div class="game-resume-screen">
-      <div class="game-app-icon" style="background:${g.color};width:64px;height:64px;font-size:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">${g.icon}</div>
-      <button class="game-resume-btn">Resume Game</button>
-      <button class="game-quit-btn">Quit to Arcade</button>
-    </div>
+  // Create/update pause layer that sits ON TOP of the iframe
+  if (!_pauseLayer) {
+    _pauseLayer = document.createElement("div");
+    _pauseLayer.className = "game-pause-layer";
+  }
+  _pauseLayer.innerHTML = `
+    <div class="game-app-icon" style="background:${g.color};width:64px;height:64px;font-size:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">${g.icon}</div>
+    <div style="font-size:24px;font-weight:700;margin-bottom:4px;color:#eee">PAUSED</div>
+    <div style="font-size:12px;color:#666;margin-bottom:20px">${g.name} — ${g.subtitle}</div>
+    <button class="game-resume-btn">Resume Game</button>
+    <button class="game-quit-btn">Quit to Arcade</button>
   `;
-  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
-  _arcadeModal.querySelector(".game-resume-btn").addEventListener("click", () => {
-    // Re-attach the existing iframe (game state preserved)
-    _arcadeView = "playing";
-    _arcadeModal.style.height = "";
-    _arcadeModal.style.maxHeight = "";
-    _arcadeModal.innerHTML = `
-      <div class="game-modal-header">
-        <span>${g.name} — ${g.subtitle}</span>
-        <button class="game-modal-close" title="Pause & minimize">&times;</button>
-      </div>
-    `;
-    _arcadeModal.appendChild(iframe);
-    _activeGame.iframe = iframe;
-    _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
-    // Unpause
-    try { iframe.contentWindow?.postMessage("ceo-resume", "*"); } catch {}
+  _arcadeModal.appendChild(_pauseLayer);
+  // Update header
+  const headerSpan = _arcadeModal.querySelector(".game-modal-header span");
+  if (headerSpan) headerSpan.textContent = g.name + " — PAUSED";
+  _pauseLayer.querySelector(".game-resume-btn").addEventListener("click", () => {
+    _pauseLayer.remove();
+    const headerSpan2 = _arcadeModal.querySelector(".game-modal-header span");
+    if (headerSpan2) headerSpan2.textContent = g.name + " — " + g.subtitle;
+    try { _activeGame.iframe.contentWindow?.postMessage("ceo-resume", "*"); } catch {}
   });
-  _arcadeModal.querySelector(".game-quit-btn").addEventListener("click", () => {
-    _activeGame = null;
+  _pauseLayer.querySelector(".game-quit-btn").addEventListener("click", () => {
+    _pauseLayer.remove();
+    _pauseLayer = null;
     _arcadeShowPicker();
   });
 }

@@ -6562,7 +6562,7 @@ header .btn-primary kbd {
   width: 90vw; max-width: 1000px; height: 85vh;
   display: flex; flex-direction: column;
   box-shadow: 0 16px 48px rgba(0,0,0,0.5);
-  margin: auto;
+  margin: auto; position: relative;
 }
 .game-modal-header {
   padding: 10px 16px; display: flex; align-items: center; justify-content: space-between;
@@ -6607,3 +6607,9 @@ header .btn-primary kbd {
   background: rgba(255,255,255,0.08); color: #aaa; border: 1px solid #333;
 }
 .game-quit-btn:hover { background: rgba(255,255,255,0.12); }
+.game-pause-layer {
+  position: absolute; inset: 0; z-index: 10;
+  background: rgba(10, 10, 26, 0.92); backdrop-filter: blur(8px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; border-radius: 12px;
+}
