@@ -537,6 +537,25 @@ let ws;
 let reconnectTimer;
 let _knownVersion = null; // tracks hot-reload version; if it changes on reconnect, reload
 let _reloadingPage = false; // set true when reload is triggered — suppresses hotkeys during transition
+let _pendingReload = false; // true if a reload was blocked by active game
+
+// Safe reload — blocks if a game is active, refunds wager, defers reload
+function _safeReload() {
+  if (_activeGame && _arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
+    // Game is active — save wager for refund and defer reload
+    const savedWager = localStorage.getItem("ceo-active-wager");
+    if (savedWager) {
+      // Wager will be refunded on next load
+      localStorage.setItem("ceo-refund-wager", savedWager);
+    }
+    _pendingReload = true;
+    // Show a non-blocking warning on the arcade
+    _showArcadeAlert("DASHBOARD", "update pending — finish your game");
+    return false; // don't reload yet
+  }
+  location.reload();
+  return true;
+}
 
 // Build reload-persist state (used by hot-reload, server-restart, and manual restart)
 // Merge live state with previously saved localStorage state —
@@ -718,7 +737,7 @@ function connect() {
       if (_knownVersion === null) {
         _knownVersion = data.version;
       } else if (data.version !== _knownVersion && !_updateErrorShowing) {
-        location.reload();
+        _safeReload();
       }
     }).catch(() => {});
     // Check for dashboard updates
@@ -5089,14 +5108,21 @@ function _handleBankrollEarn(msg) {
         const newTotal = current + msg.amount;
         earningsEl.dataset.total = newTotal;
         const label = _EARN_LABELS[msg.reason] || msg.reason;
-        // Show total + brief flash of what just earned
-        earningsEl.textContent = "$" + newTotal.toLocaleString();
         earningsEl.style.display = "";
-        // Briefly show the reason next to the amount
-        const reasonSpan = earningsEl.querySelector(".earn-reason") || document.createElement("span");
-        reasonSpan.className = "earn-reason";
-        reasonSpan.textContent = " +" + msg.amount + " " + label;
-        if (!reasonSpan.parentNode) earningsEl.appendChild(reasonSpan);
+        // Reason on left, total on right — reason fades out
+        let reasonSpan = earningsEl.querySelector(".earn-reason");
+        let totalSpan = earningsEl.querySelector(".earn-total");
+        if (!totalSpan) {
+          earningsEl.textContent = "";
+          reasonSpan = document.createElement("span");
+          reasonSpan.className = "earn-reason";
+          totalSpan = document.createElement("span");
+          totalSpan.className = "earn-total";
+          earningsEl.appendChild(reasonSpan);
+          earningsEl.appendChild(totalSpan);
+        }
+        totalSpan.textContent = "$" + newTotal.toLocaleString();
+        reasonSpan.textContent = "+" + msg.amount + " " + label + " ";
         reasonSpan.style.opacity = "1";
         clearTimeout(earningsEl._fadeTimer);
         earningsEl._fadeTimer = setTimeout(() => { reasonSpan.style.opacity = "0"; }, 2000);
