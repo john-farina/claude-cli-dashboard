@@ -127,12 +127,13 @@ body {
   perspective: 600px;
   display: inline-block;
   opacity: 0;
-  transform: translateY(-40px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transform: translate(300px, -200px) rotate(15deg) scale(0.7);
+  transition: opacity 0.4s cubic-bezier(0.2, 0.8, 0.3, 1),
+              transform 0.5s cubic-bezier(0.2, 0.8, 0.3, 1);
 }
 .card-wrapper.dealt {
   opacity: 1;
-  transform: translateY(0);
+  transform: translate(0, 0) rotate(0deg) scale(1);
 }
 
 .card-inner {
@@ -670,22 +671,24 @@ function createCardElement(card, faceDown) {
   inner.appendChild(face);
   wrapper.appendChild(inner);
 
-  // Animate in
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      wrapper.classList.add('dealt');
-    });
-  });
+  // Animate in with stagger (set data-deal-index on wrapper before appending for stagger)
+  wrapper._animateIn = function(delay) {
+    setTimeout(() => {
+      requestAnimationFrame(() => { wrapper.classList.add('dealt'); });
+    }, delay || 0);
+  };
 
   return wrapper;
 }
 
-function renderDealerCards() {
+function renderDealerCards(stagger) {
   const container = document.getElementById('dealer-cards');
   container.innerHTML = '';
   dealerCards.forEach((card, i) => {
     const faceDown = (i === 1 && !dealerHoleRevealed);
-    container.appendChild(createCardElement(card, faceDown));
+    const el = createCardElement(card, faceDown);
+    container.appendChild(el);
+    el._animateIn(stagger ? i * 200 : 0);
   });
 
   const totalEl = document.getElementById('dealer-total');
@@ -713,7 +716,11 @@ function renderPlayerHands() {
     const hand = playerHands[0];
     const row = document.createElement('div');
     row.className = 'cards-row';
-    hand.cards.forEach(c => row.appendChild(createCardElement(c, false)));
+    hand.cards.forEach((c, i) => {
+      const el = createCardElement(c, false);
+      row.appendChild(el);
+      el._animateIn(i * 200);
+    });
     container.appendChild(row);
     const v = handValue(hand.cards);
     let label = v.toString();
@@ -898,41 +905,79 @@ function deal() {
   activeHandIndex = 0;
   dealerCards = [];
 
-  // Deal cards
+  // Deal cards with staggered animation
   playerHands[0].cards.push(drawCard());
   dealerCards.push(drawCard());
   playerHands[0].cards.push(drawCard());
   dealerCards.push(drawCard());
 
-  renderDealerCards();
-  renderPlayerHands();
+  // Render with staggered deal animation
+  _renderInitialDeal();
 
-  // Check for insurance
-  if (dealerCards[0].rank === 'A') {
-    gameState = 'insurance';
-    document.getElementById('insurance-prompt').style.display = 'block';
+  // Delay game logic to let deal animation play out
+  setTimeout(() => {
+    // Check for insurance
+    if (dealerCards[0].rank === 'A') {
+      gameState = 'insurance';
+      document.getElementById('insurance-prompt').style.display = 'block';
+      renderActionButtons();
+      return;
+    }
+
+    // Check for dealer blackjack
+    if (isBlackjack(dealerCards)) {
+      dealerHoleRevealed = true;
+      renderDealerCards(false);
+      settleAllHands();
+      return;
+    }
+
+    // Check for player blackjack
+    if (isBlackjack(playerHands[0].cards)) {
+      dealerHoleRevealed = true;
+      renderDealerCards(false);
+      settleAllHands();
+      return;
+    }
+
+    gameState = 'playing';
     renderActionButtons();
-    return;
-  }
+  }, 1000); // wait for deal animation
+}
 
-  // Check for dealer blackjack
-  if (isBlackjack(dealerCards)) {
-    dealerHoleRevealed = true;
-    renderDealerCards();
-    settleAllHands();
-    return;
-  }
+// Render initial 4-card deal with realistic stagger: P1, D1, P2, D2
+function _renderInitialDeal() {
+  const dc = document.getElementById('dealer-cards');
+  const pc = document.getElementById('player-hands');
+  dc.innerHTML = '';
+  pc.innerHTML = '';
 
-  // Check for player blackjack
-  if (isBlackjack(playerHands[0].cards)) {
-    dealerHoleRevealed = true;
-    renderDealerCards();
-    settleAllHands();
-    return;
-  }
+  const playerRow = document.createElement('div');
+  playerRow.className = 'cards-row';
+  pc.appendChild(playerRow);
 
-  gameState = 'playing';
-  renderActionButtons();
+  // Card order: player[0], dealer[0], player[1], dealer[1]
+  const sequence = [
+    { card: playerHands[0].cards[0], target: playerRow, faceDown: false },
+    { card: dealerCards[0], target: dc, faceDown: false },
+    { card: playerHands[0].cards[1], target: playerRow, faceDown: false },
+    { card: dealerCards[1], target: dc, faceDown: true },
+  ];
+
+  sequence.forEach((item, i) => {
+    const el = createCardElement(item.card, item.faceDown);
+    item.target.appendChild(el);
+    el._animateIn(i * 200);
+  });
+
+  // Update totals after all cards visible
+  setTimeout(() => {
+    const dtEl = document.getElementById('dealer-total');
+    dtEl.textContent = handValue([dealerCards[0]]);
+    const ptEl = document.getElementById('player-total');
+    const v = handValue(playerHands[0].cards);
+    ptEl.textContent = isSoft(playerHands[0].cards) && v < 21 ? 'Soft ' + v : v;
+  }, 800);
 }
 
 function takeInsurance(yes) {
