@@ -2712,6 +2712,165 @@ header h1 {
   background: var(--scrollbar-hover);
 }
 
+/* ═══════════════════════════════════════════════════
+   DIFF CODE REVIEW
+   ═══════════════════════════════════════════════════ */
+
+/* Gutter "+" button — override d2h's position: static */
+.diff-modal .d2h-code-linenumber,
+.diff-modal .d2h-code-side-linenumber {
+  position: relative !important;
+}
+.diff-review-add-btn {
+  display: none;
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 18px;
+  text-align: center;
+  cursor: pointer;
+  z-index: 2;
+  border: none;
+  padding: 0;
+}
+tr:hover .diff-review-add-btn {
+  display: block;
+}
+tr.d2h-info .diff-review-add-btn {
+  display: none !important;
+}
+
+/* Comment row */
+.diff-review-comment-row td {
+  background: var(--surface) !important;
+  border-top: 2px solid var(--accent);
+  padding: 8px 16px !important;
+}
+
+/* Comment textarea */
+.diff-review-comment-box textarea {
+  width: 100%;
+  min-height: 60px;
+  resize: vertical;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 8px;
+  box-sizing: border-box;
+}
+.diff-review-comment-box textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.diff-review-comment-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.diff-review-comment-actions button {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: none;
+}
+.diff-review-save-btn {
+  background: var(--accent);
+  color: #fff;
+}
+.diff-review-save-btn:hover {
+  background: var(--accent-hover);
+}
+.diff-review-cancel-btn {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid transparent !important;
+}
+.diff-review-cancel-btn:hover {
+  border-color: var(--accent) !important;
+  color: var(--text);
+}
+
+/* Saved comment display */
+.diff-review-saved-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface-raised);
+  border-left: 2px solid var(--accent);
+  padding: 6px 12px;
+  border-radius: 4px;
+}
+.diff-review-saved-text {
+  flex: 1;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.diff-review-saved-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.diff-review-saved-actions button {
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 14px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+}
+.diff-review-edit-btn:hover { color: var(--text); }
+.diff-review-delete-btn:hover { color: var(--red); }
+
+/* Submitted (dimmed, read-only) */
+.diff-review-comment-row.submitted {
+  opacity: 0.5;
+}
+.diff-review-comment-row.submitted .diff-review-saved-actions {
+  display: none;
+}
+
+/* Review footer */
+.diff-review-footer {
+  flex-shrink: 0;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.diff-review-footer.hidden {
+  display: none;
+}
+.diff-review-count {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.diff-review-submit-btn {
+  padding: 8px 18px;
+  border-radius: 8px;
+}
+
 
 /* ═══════════════════════════════════════════════════
    SESSION PICKER
