@@ -349,51 +349,7 @@ function _reconnectIfStale() {
 // --- Pending send queue (survives reconnect) ---
 let _pendingSend = null; // { session, text, paths } — only latest message
 
-// --- Mobile detection ---
-function isMobile() { return window.innerWidth <= 600; }
-
-// --- Masonry grid layout ---
-// Cards have explicit heights; we translate that into grid-row spans
-// so tall cards on one side don't push down cards in other columns.
-const GRID_ROW_PX = 10; // matches grid-auto-rows in CSS
-const GRID_GAP_PX = 20; // visual gap between cards (achieved via margin-bottom + extra span)
-
-function getCardDefaultHeight() {
-  return isMobile() ? 350 : 500; // matches .agent-card CSS heights
-}
-
-function masonryLayout() {
-
-  const cards = grid.querySelectorAll(".agent-card");
-  const spanChanges = [];
-  for (const card of cards) {
-    // Desired height: inline style (from drag-resize / saved layout) or CSS default
-    const inlineH = card.style.height;
-    const cssH = (inlineH && inlineH.endsWith("px"))
-      ? parseFloat(inlineH)
-      : getCardDefaultHeight();
-    // During active resize, respect the user's drag height exactly; otherwise use scrollHeight if content overflows
-    const termOpen = card.querySelector(".agent-terminal-section")?.style.display !== "none";
-    const h = card.classList.contains("resizing-height") ? cssH : Math.max(cssH, card.scrollHeight);
-    const span = Math.ceil((h + GRID_GAP_PX) / GRID_ROW_PX);
-    const oldSpan = card.style.gridRow;
-    if (termOpen) console.log("[masonry]", card.querySelector(".agent-name")?.textContent, { cssH, scrollH: card.scrollHeight, h, span, inlineH });
-    card.style.gridRow = `span ${span}`;
-    if (oldSpan && oldSpan !== `span ${span}`) {
-      const name = card.querySelector(".agent-name")?.textContent || "?";
-      spanChanges.push(`${name}:${oldSpan}->${span}`);
-    }
-  }
-  if (spanChanges.length > 0) {
-    _focusLog("masonry-span", `span changes: ${spanChanges.join(", ")}`);
-  }
-  // Force browser to reflow grid after all spans are set
-  void grid.offsetHeight;
-  updateCardNumbers();
-}
-
-// Debounced version for frequent calls (resize, output updates)
-let _masonryTimer = null;
+// --- Masonry/layout functions moved to js/cards.js ---
 // --- Reusable instant tooltip system ---
 // Shows a tooltip above any element on hover. No delay, positioned above target.
 // Usage: showInstantTooltip(anchorEl, text)  /  hideInstantTooltip()
@@ -435,20 +391,6 @@ function _checkNameTruncation(card) {
   if (!el) return;
   el.classList.toggle("truncated", el.scrollWidth > el.clientWidth);
   attachInstantTooltip(el, () => el.scrollWidth > el.clientWidth ? el.textContent : null);
-}
-
-function scheduleMasonry() {
-  if (_masonryTimer) return;
-  _masonryTimer = requestAnimationFrame(() => {
-    _masonryTimer = null;
-    masonryLayout();
-    // After layout completes, scroll any terminals still in force-scroll mode
-    for (const agent of agents.values()) {
-      if (agent.terminal && agent.terminal._forceScrollUntil && Date.now() < agent.terminal._forceScrollUntil) {
-        scrollTerminalToBottom(agent.terminal);
-      }
-    }
-  });
 }
 
 // Recalc on window resize
@@ -525,6 +467,7 @@ popoutChannel.onmessage = (event) => {
   }
   if (msg.type === "kill-agent") {
     poppedOutAgents.delete(msg.agent);
+    PollingManager.clearByOwner(msg.agent);
     const agent = agents.get(msg.agent);
     if (agent) {
       agent.card.remove();
@@ -537,69 +480,7 @@ popoutChannel.onmessage = (event) => {
   }
 };
 
-// --- Card Layout Persistence ---
-// Mobile and desktop use separate layout keys so resizing on one doesn't affect the other.
-// Minimized state is shared (always applies).
-
-const LAYOUT_KEY_DESKTOP = "ceo-card-layouts";
-const LAYOUT_KEY_MOBILE = "ceo-card-layouts-mobile";
-
-function getLayoutKey() {
-  return isMobile() ? LAYOUT_KEY_MOBILE : LAYOUT_KEY_DESKTOP;
-}
-
-function loadLayouts() {
-  try { return JSON.parse(localStorage.getItem(getLayoutKey())) || {}; } catch { return {}; }
-}
-
-function saveLayout(name, data) {
-  const layouts = loadLayouts();
-  layouts[name] = { ...layouts[name], ...data };
-  localStorage.setItem(getLayoutKey(), JSON.stringify(layouts));
-}
-
-// --- Card order persistence ---
-const CARD_ORDER_KEY = "ceo-card-order";
-function loadCardOrder() {
-  try { return JSON.parse(localStorage.getItem(CARD_ORDER_KEY)) || []; } catch { return []; }
-}
-function saveCardOrder() {
-  const g = document.querySelector(".agents-grid");
-  if (!g) return;
-  const gridNames = Array.from(g.querySelectorAll(".agent-card"))
-    .map(c => c.querySelector(".agent-name")?.textContent)
-    .filter(Boolean);
-  const minNames = new Set(
-    Array.from(minimizedBar.querySelectorAll(".agent-card"))
-      .map(c => c.querySelector(".agent-name")?.textContent)
-      .filter(Boolean)
-  );
-  if (minNames.size === 0) {
-    localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(gridNames));
-    return;
-  }
-  // Merge minimized cards back at their previous saved positions.
-  // Walk previous order: emit grid cards in current DOM order,
-  // and re-insert minimized cards at their old relative positions.
-  const prevOrder = loadCardOrder();
-  const gridSet = new Set(gridNames);
-  const result = [];
-  let gridIdx = 0;
-  for (const name of prevOrder) {
-    if (minNames.has(name)) {
-      result.push(name); // minimized: keep at previous position
-      minNames.delete(name);
-    } else if (gridSet.has(name)) {
-      // Slot for a grid card — emit next grid card in current DOM order
-      if (gridIdx < gridNames.length) result.push(gridNames[gridIdx++]);
-    }
-  }
-  // Append remaining grid cards (new cards not in previous order)
-  while (gridIdx < gridNames.length) result.push(gridNames[gridIdx++]);
-  // Append any minimized cards not in previous order
-  for (const name of minNames) result.push(name);
-  localStorage.setItem(CARD_ORDER_KEY, JSON.stringify(result));
-}
+// --- Card layout/order/persistence moved to js/cards.js ---
 
 // --- Dismiss status (persisted in localStorage, shared across devices) ---
 const DISMISS_KEY = "ceo-dismissed-status";
@@ -619,44 +500,6 @@ function clearDismiss(name) {
   const d = loadDismissed();
   delete d[name];
   localStorage.setItem(DISMISS_KEY, JSON.stringify(d));
-}
-
-function removeLayout(name) {
-  // Remove from both keys so kill always cleans up
-  for (const key of [LAYOUT_KEY_DESKTOP, LAYOUT_KEY_MOBILE]) {
-    try {
-      const layouts = JSON.parse(localStorage.getItem(key)) || {};
-      delete layouts[name];
-      localStorage.setItem(key, JSON.stringify(layouts));
-    } catch {}
-  }
-}
-
-function applyLayout(name, card) {
-  const layouts = loadLayouts();
-  const layout = layouts[name];
-  if (!layout) return;
-  // Column span (1x, 2x, 3x) — desktop only
-  if (!isMobile()) {
-    if (layout.span === 2) card.classList.add("span-2");
-    if (layout.span === 3) card.classList.add("span-3");
-  }
-  // Height
-  if (layout.height) {
-    card.style.height = layout.height;
-  }
-  // Header color — sanitize to prevent CSS injection from localStorage
-  if (layout.headerColor) {
-    const color = safeHex(layout.headerColor);
-    const h = card.querySelector(".card-header");
-    if (h) {
-      h.style.background = `linear-gradient(135deg, ${color}38 0%, ${color}20 100%)`;
-      h.style.borderBottom = `1px solid ${color}50`;
-    }
-  }
-  // Note: minimized state is now server-side, applied separately in addAgentCard
-  // Terminal restore disabled — terminals are only opened by user interaction
-  // (prevents spawning new tmux sessions on every reload)
 }
 
 // --- Dashboard Status Dot ---
@@ -686,120 +529,7 @@ function updateDashboardDot() {
   updateTabNotifications();
 }
 
-// --- Card Reordering (favorites first, FLIP animation) ---
-
-function reorderCards() {
-  const cards = Array.from(grid.querySelectorAll(".agent-card"));
-  if (cards.length <= 1) { scheduleMasonry(); return; }
-
-  // FIRST: record current positions
-  const firstRects = new Map();
-  cards.forEach(card => firstRects.set(card, card.getBoundingClientRect()));
-
-  const beforeOrder = cards.map(c => c.querySelector(".agent-name")?.textContent || "?");
-
-  // Sort: use saved order if available, then favorites first, then creation order
-  const savedOrder = loadCardOrder();
-  cards.sort((a, b) => {
-    const aName = a.querySelector(".agent-name")?.textContent || "";
-    const bName = b.querySelector(".agent-name")?.textContent || "";
-    const aFav = a.classList.contains("favorited") ? 0 : 1;
-    const bFav = b.classList.contains("favorited") ? 0 : 1;
-
-    // If both in saved order, use that order
-    const aIdx = savedOrder.indexOf(aName);
-    const bIdx = savedOrder.indexOf(bName);
-    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-
-    // Saved-order cards come before unsaved (new cards go to end)
-    if (aIdx !== -1 && bIdx === -1) return -1;
-    if (aIdx === -1 && bIdx !== -1) return 1;
-
-    // Neither in saved order: favorites first, then preserve DOM order
-    return aFav - bFav;
-  });
-
-  const afterOrder = cards.map(c => c.querySelector(".agent-name")?.textContent || "?");
-
-  // Check if order actually changed — skip DOM moves if already correct
-  const currentOrder = Array.from(grid.querySelectorAll(".agent-card"));
-  let orderChanged = cards.length !== currentOrder.length;
-  if (!orderChanged) {
-    for (let i = 0; i < cards.length; i++) {
-      if (cards[i] !== currentOrder[i]) { orderChanged = true; break; }
-    }
-  }
-
-  if (orderChanged) {
-    // Find which cards moved
-    const movedCards = [];
-    for (let i = 0; i < afterOrder.length; i++) {
-      if (beforeOrder[i] !== afterOrder[i]) movedCards.push(`${beforeOrder[i]}->${afterOrder[i]}`);
-    }
-    _focusLog("reorder", `cards moved: ${movedCards.join(", ") || "none"} | savedOrder has ${savedOrder.length} entries`);
-    // Save focused element + cursor position before DOM moves (appendChild causes blur)
-    const focused = document.activeElement;
-    const focusedInGrid = focused && grid.contains(focused);
-    const cursorStart = focusedInGrid ? focused.selectionStart : null;
-    const cursorEnd = focusedInGrid ? focused.selectionEnd : null;
-
-    // Save terminal scroll positions before DOM moves (appendChild can reset scrollTop)
-    const scrollPositions = new Map();
-    for (const card of cards) {
-      const t = card.querySelector(".terminal");
-      if (t) scrollPositions.set(t, t.scrollTop);
-    }
-
-    // Re-append in sorted order (moves DOM nodes without recreating)
-    for (const card of cards) {
-      grid.appendChild(card);
-    }
-
-    // Restore terminal scroll positions displaced by DOM re-append
-    for (const [t, pos] of scrollPositions) {
-      if (!t._userScrolledUp) {
-        t.scrollTop = t.scrollHeight;
-      } else {
-        t.scrollTop = pos;
-      }
-    }
-
-    // Restore focus stolen by DOM re-append
-    if (focusedInGrid && focused !== document.activeElement) {
-      const agent = _getAgentName(focused);
-      const nowDesc = document.activeElement ? (document.activeElement.id || document.activeElement.tagName) : "null";
-      _focusLog("reorder-restore", `DOM reorder stole focus from [${agent}], now on ${nowDesc}`, { guard: "reorderCards" });
-      focused.focus({ preventScroll: true });
-      if (cursorStart != null) {
-        try { focused.setSelectionRange(cursorStart, cursorEnd); } catch {}
-      }
-    }
-    }
-
-  // INVERT + PLAY: animate from old position to new
-  cards.forEach(card => {
-    const first = firstRects.get(card);
-    const last = card.getBoundingClientRect();
-    const deltaX = first.left - last.left;
-    const deltaY = first.top - last.top;
-    if (deltaX === 0 && deltaY === 0) return;
-
-    card.style.transform = `translate(${deltaX}px, ${deltaY}px)`;
-    card.style.transition = "none";
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        card.style.transition = "transform 0.3s ease";
-        card.style.transform = "";
-        card.addEventListener("transitionend", function cleanup() {
-          card.style.transition = "";
-          card.removeEventListener("transitionend", cleanup);
-        });
-      });
-    });
-  });
-  scheduleMasonry();
-}
+// --- Card reordering moved to js/cards.js ---
 
 // --- WebSocket ---
 
@@ -807,6 +537,25 @@ let ws;
 let reconnectTimer;
 let _knownVersion = null; // tracks hot-reload version; if it changes on reconnect, reload
 let _reloadingPage = false; // set true when reload is triggered — suppresses hotkeys during transition
+let _pendingReload = false; // true if a reload was blocked by active game
+
+// Safe reload — blocks if a game is active, refunds wager, defers reload
+function _safeReload() {
+  if (_activeGame && _arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
+    // Game is active — save wager for refund and defer reload
+    const savedWager = localStorage.getItem("ceo-active-wager");
+    if (savedWager) {
+      // Wager will be refunded on next load
+      localStorage.setItem("ceo-refund-wager", savedWager);
+    }
+    _pendingReload = true;
+    // Show a non-blocking warning on the arcade
+    _showArcadeAlert("DASHBOARD", "update pending — finish your game");
+    return false; // don't reload yet
+  }
+  location.reload();
+  return true;
+}
 
 // Build reload-persist state (used by hot-reload, server-restart, and manual restart)
 // Merge live state with previously saved localStorage state —
@@ -988,7 +737,7 @@ function connect() {
       if (_knownVersion === null) {
         _knownVersion = data.version;
       } else if (data.version !== _knownVersion && !_updateErrorShowing) {
-        location.reload();
+        _safeReload();
       }
     }).catch(() => {});
     // Check for dashboard updates
@@ -1082,7 +831,8 @@ function connect() {
       _focusLog("reload-save", `saving state: drafts=${Object.keys(_rs.drafts||{}).length}, focusedAgent=${_rs.focusedAgent||"none"}, cursor=${_rs.focusCursorStart}-${_rs.focusCursorEnd}, modal=${!!_rs.modal}`);
       _flushFocusLog();
       sessionStorage.setItem("ceo-reload-state", JSON.stringify(_rs));
-      location.reload();
+      if (!_safeReload()) return;
+      _reloadingPage = true;
       return;
     }
 
@@ -1099,7 +849,7 @@ function connect() {
           .then((data) => {
             // Only reload once the NEW server is up (different version = new process)
             if (_knownVersion && data.version === _knownVersion) throw new Error("same server");
-            location.reload();
+            _safeReload();
           })
           .catch(() => setTimeout(pollUntilReady, 500));
       };
@@ -1154,6 +904,16 @@ function connect() {
       return;
     }
 
+    if (msg.type === "bankroll-earn") {
+      _handleBankrollEarn(msg);
+      return;
+    }
+
+    if (msg.type === "file-overlaps") {
+      _updateOverlapBanners(msg.overlaps || []);
+      return;
+    }
+
     if (msg.type === "todo-update") {
       if (typeof handleTodoUpdate === "function") handleTodoUpdate(msg.data);
       // Refresh agent todo refs on all cards
@@ -1179,7 +939,11 @@ function connect() {
         if (s.type !== "terminal") {
           addAgentCard(s.name, s.workdir, s.branch, s.isWorktree, s.favorite, s.minimized);
           const a = agents.get(s.name);
-          if (a) a.autoRename = s.autoRename || false;
+          if (a) {
+            a.autoRename = s.autoRename || false;
+            a.chain = s.chain || null;
+            _updateChainIndicator(s.name, s.chain);
+          }
         }
       }
       for (const s of msg.sessions) {
@@ -1248,6 +1012,10 @@ function connect() {
         agent.terminal._wheelGraceUntil = Date.now() + 1500;
       }
       updateTerminal(agent.terminal, msg.lines);
+      // Forward output to split view if open
+      if (typeof SplitView !== "undefined" && SplitView.isOpen()) {
+        SplitView.onOutput(msg.session, agent.terminal.innerHTML);
+      }
       // Track that this agent has received its first output (for page loader)
       if (isFirstContent && !_loaderDismissed) {
         _agentsWithContent.add(msg.session);
@@ -1266,6 +1034,12 @@ function connect() {
         updateBranchDisplay(agent.card, msg.branch, msg.isWorktree);
         // Also update embedded terminal header if open
         updateTerminalHeader(agent.card, undefined, msg.branch, msg.isWorktree, undefined);
+      }
+      // Quick diff badge
+      if (msg.diffFiles && msg.diffFiles.length > 0) {
+        _showDiffBadge(msg.session, msg.diffFiles);
+      } else if (msg.status === "working") {
+        _clearDiffBadge(msg.session);
       }
     }
 
@@ -1327,6 +1101,17 @@ function connect() {
       // else: initiating client already renamed locally — nothing to do
     }
 
+    // Chain fired notification
+    if (msg.type === "chain-fired") {
+      console.log(`[chain] ${msg.from} → ${msg.to}`);
+      // Flash the target card briefly
+      const targetAgent = agents.get(msg.to);
+      if (targetAgent?.card) {
+        targetAgent.card.classList.add("chain-target-flash");
+        setTimeout(() => targetAgent.card.classList.remove("chain-target-flash"), 2000);
+      }
+    }
+
     // Live input sync from another client
     if (msg.type === "input-sync") {
       const agent = agents.get(msg.session);
@@ -1379,7 +1164,84 @@ function requestRefresh(session) {
 
 function scheduleRefresh(session) {
   for (const ms of [500, 1000, 2000, 3000, 5000]) {
-    setTimeout(() => requestRefresh(session), ms);
+    PollingManager.registerTimeout(`refresh-${session}-${ms}`, () => requestRefresh(session), ms, session);
+  }
+}
+
+// --- Chain Indicator ---
+
+function _updateChainIndicator(agentName, chain) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  let indicator = agent.card.querySelector(".chain-indicator");
+  if (!chain || (Array.isArray(chain) && chain.length === 0)) {
+    if (indicator) indicator.remove();
+    return;
+  }
+  if (!indicator) {
+    indicator = document.createElement("span");
+    indicator.className = "chain-indicator";
+    const header = agent.card.querySelector(".card-header-left");
+    if (header) header.appendChild(indicator);
+  }
+  // Support both legacy single object and new array format
+  const targets = Array.isArray(chain) ? chain : [chain];
+  indicator.innerHTML = targets.map(t =>
+    `<span class="chain-arrow">\u2192</span> ${escapeHtml(t.next)}`
+  ).join(' ');
+  indicator.title = targets.map(t => `${t.next}: ${t.condition}\n${t.prompt}`).join('\n---\n');
+}
+
+async function _openChainDialog(agentName) {
+  const agent = agents.get(agentName);
+  const existing = agent?.chain;
+  // Normalize existing to array
+  const existingTargets = existing ? (Array.isArray(existing) ? existing : [existing]) : [];
+
+  // Collect targets in a loop
+  const targets = [];
+  let targetIdx = 0;
+  while (true) {
+    const def = existingTargets[targetIdx] || {};
+    const suffix = targets.length > 0 ? ` (target #${targets.length + 1}, leave empty to finish)` : "";
+    const nextAgent = prompt(`Chain to agent${suffix}:`, def.next || "");
+    if (nextAgent === null) {
+      if (targets.length === 0) return; // cancelled entirely
+      break; // done adding targets
+    }
+    if (!nextAgent) {
+      if (targets.length === 0) {
+        // Remove chain
+        try {
+          await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, { method: "DELETE" });
+          if (agent) agent.chain = null;
+          _updateChainIndicator(agentName, null);
+        } catch {}
+        return;
+      }
+      break; // done adding targets
+    }
+    const chainPrompt = prompt("Prompt to send (use {branch} and {workdir} as variables):", def.prompt || "");
+    if (!chainPrompt) { if (targets.length === 0) return; break; }
+    const condition = prompt("Condition (always, when-idle, branch-has-changes):", def.condition || "always") || "always";
+    targets.push({ next: nextAgent, prompt: chainPrompt, condition });
+    targetIdx++;
+    if (!confirm("Add another chain target?")) break;
+  }
+
+  if (targets.length === 0) return;
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(agentName)}/chain`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targets }),
+    });
+    if (res.ok) {
+      if (agent) agent.chain = targets;
+      _updateChainIndicator(agentName, targets);
+    }
+  } catch (err) {
+    console.error("[chain] Failed to set chain:", err);
   }
 }
 
@@ -1466,6 +1328,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
               <button class="more-menu-item" data-action="save-memory">Save Memory</button>
               <button class="more-menu-item" data-action="update-memory">Update Memory</button>
               <button class="more-menu-item more-menu-danger" data-action="clear-memory">Clear Memory</button>
+              <button class="more-menu-item" data-action="set-chain">Set Chain</button>
               <button class="more-menu-item" data-action="dismiss-status" style="display:none;">Dismiss Status</button>
               <button class="more-menu-item" data-action="restart">Restart Claude</button>
             </div>
@@ -1480,6 +1343,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       <div class="card-subheader">
         <span class="workdir-link" title="Click to change workspace">${escapeHtml(shortPath(workdir))}</span>
         <span class="branch-info"></span>
+        <span class="agent-earnings" title="Session earnings">$0</span>
       </div>
     </div>
     <div class="terminal">
@@ -2246,6 +2110,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       } catch {}
     }
 
+    if (action === "set-chain") {
+      _openChainDialog(name);
+      return;
+    }
+
     if (action === "dismiss-status") {
       const agent = agents.get(name);
       if (agent) {
@@ -2405,11 +2274,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       // If click event doesn't fire (long-press suppression), auto-clear the flag
       setTimeout(() => { skipNextClick = false; }, 100);
       // Auto-reset after 5s if not clicked
-      fireResetTimer = setTimeout(() => {
+      fireResetTimer = PollingManager.registerTimeout(`fire-reset-${name}`, () => {
         fireActive = false;
         killBtn.classList.remove("fire-mode");
         killBtn.innerHTML = "\u00d7";
-      }, 5000);
+      }, 5000, name);
     }
   });
   killBtn.addEventListener("mouseleave", () => {
@@ -2425,6 +2294,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   let killArmed = false;
   let killTimer = null;
   const doKill = async (cleanWorktree = false) => {
+    PollingManager.clearByOwner(name);
     const qs = cleanWorktree ? "?cleanWorktree=true" : "";
     await fetch(`/api/sessions/${name}${qs}`, { method: "DELETE" });
     // Also kill the embedded terminal tmux session if it exists
@@ -2518,6 +2388,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       document.getElementById("fire-confirm").addEventListener("click", async () => {
         const reason = reasonEl.value.trim();
         cleanup();
+        PollingManager.clearByOwner(name);
         // Remove card immediately — agent runs in background
         try {
           await fetch(`/api/sessions/${encodeURIComponent(name)}/fire`, {
@@ -2561,11 +2432,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       killArmed = true;
       killBtn.classList.add("armed");
       killBtn.textContent = "KILL";
-      killTimer = setTimeout(() => {
+      killTimer = PollingManager.registerTimeout(`kill-arm-${name}`, () => {
         killArmed = false;
         killBtn.classList.remove("armed");
         killBtn.innerHTML = "\u00d7";
-      }, 2000);
+      }, 2000, name);
       return;
     }
     clearTimeout(killTimer);
@@ -3127,7 +2998,7 @@ function openAgentTerminal(agentName, card, restoreHeight) {
   console.log("[terminal-open]", agentName, { wrapperH, sectionH, newCardH, newSpan, scrollH: card.scrollHeight });
   requestAnimationFrame(() => _updateGripOffset(card));
   saveLayout(agentName, { terminalOpen: true, terminalHeight: termH });
-  if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+  cancelMasonry();
   masonryLayout();
   requestAnimationFrame(() => masonryLayout());
   setTimeout(masonryLayout, 150);
@@ -3304,7 +3175,7 @@ function openAgentTerminal(agentName, card, restoreHeight) {
         if (agent?._termFitAddon) try { agent._termFitAddon.fit(); } catch {}
         _updateGripOffset(card);
         saveLayout(agentName, { terminalHeight: container.offsetHeight, height: card.style.height });
-        if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+        cancelMasonry();
         masonryLayout();
       };
       document.addEventListener("mousemove", onMove);
@@ -3329,7 +3200,7 @@ function closeAgentTerminal(agentName, card) {
   }
   _updateGripOffset(card);
   saveLayout(agentName, { terminalOpen: false, height: card.style.height });
-  if (_masonryTimer) { cancelAnimationFrame(_masonryTimer); _masonryTimer = null; }
+  cancelMasonry();
   masonryLayout();
   requestAnimationFrame(() => { masonryLayout(); });
   setTimeout(masonryLayout, 100);
@@ -3426,6 +3297,7 @@ function addTerminalCard(name, workdir) {
     const agentEntry = agents.get(name);
     if (agentEntry?.resizeObserver) agentEntry.resizeObserver.disconnect();
     term.dispose();
+    PollingManager.clearByOwner(name);
     card.remove();
     agents.delete(name);
     // Clear terminalOpen on parent agent so it doesn't re-open on reload
@@ -3726,7 +3598,16 @@ function updateStatus(agent, status, promptType) {
     agent._waitGen = (agent._waitGen || 0) + 1;
   }
 
+  const prevStatus = agent.status;
   agent.status = status;
+
+  // Alert in game arcade when agent finishes working (ready for your next prompt)
+  const doneWorking = prevStatus === "working" && status !== "working";
+  if (doneWorking && _activeGame) {
+    const alertLabel = status === "waiting" ? "needs input" : status === "asking" ? "has a question" : "ready for you";
+    _showArcadeAlert(name, alertLabel);
+  }
+
   const badge = agent.card.querySelector(".status-badge");
   const labels = { working: "working", waiting: "needs input", asking: "has question", idle: "" };
 
@@ -3895,15 +3776,56 @@ function updateBranchDisplay(card, branch, isWorktree) {
   el.className = isWorktree ? "branch-info worktree" : "branch-info";
 }
 
+// --- Quick Diff Badge ---
+
+function _showDiffBadge(agentName, files) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  let badge = agent.card.querySelector(".diff-badge");
+  if (!badge) {
+    badge = document.createElement("span");
+    badge.className = "diff-badge";
+    const headerLeft = agent.card.querySelector(".card-header-left");
+    if (headerLeft) headerLeft.appendChild(badge);
+  }
+  badge.textContent = files.length + " file" + (files.length > 1 ? "s" : "") + " changed";
+  badge.title = files.map(f => f.file).join("\n");
+  badge.onclick = () => {
+    if (typeof OpsPanel !== "undefined") OpsPanel.open("diffs", agentName);
+  };
+}
+
+function _clearDiffBadge(agentName) {
+  const agent = agents.get(agentName);
+  if (!agent?.card) return;
+  const badge = agent.card.querySelector(".diff-badge");
+  if (badge) badge.remove();
+}
+
 // --- Token Usage Display ---
 
-// Claude Opus 4 pricing per 1M tokens
-const TOKEN_PRICES = {
-  input: 15,          // $15/M input
-  output: 75,         // $75/M output
-  cacheCreation: 18.75, // $18.75/M cache write
-  cacheRead: 1.50,    // $1.50/M cache read
+// Claude API pricing per 1M tokens, keyed by model prefix
+// https://docs.anthropic.com/en/docs/about-claude/pricing
+const MODEL_PRICING = {
+  "claude-opus-4-6":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-5":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-1":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-opus-4-0":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-sonnet-4-6": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-5": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-0": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-haiku-4-5":  { input: 1,    output: 5,    cacheCreation: 1.25,  cacheRead: 0.10 },
+  "claude-haiku-3-5":  { input: 0.80, output: 4,    cacheCreation: 1,     cacheRead: 0.08 },
 };
+const DEFAULT_PRICING = MODEL_PRICING["claude-opus-4-6"];
+
+function _getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (model.startsWith(prefix)) return pricing;
+  }
+  return DEFAULT_PRICING;
+}
 
 let _tokenShowDollars = localStorage.getItem("ceo-token-show-dollars") === "true";
 
@@ -3912,11 +3834,12 @@ function formatTokenCount(n) {
   return n.toLocaleString("en-US");
 }
 
-function usageToDollars(u) {
-  return ((u.input || 0) * TOKEN_PRICES.input
-    + (u.output || 0) * TOKEN_PRICES.output
-    + (u.cacheCreation || 0) * TOKEN_PRICES.cacheCreation
-    + (u.cacheRead || 0) * TOKEN_PRICES.cacheRead) / 1_000_000;
+function usageToDollars(u, model) {
+  const p = _getPricing(model);
+  return ((u.input || 0) * p.input
+    + (u.output || 0) * p.output
+    + (u.cacheCreation || 0) * p.cacheCreation
+    + (u.cacheRead || 0) * p.cacheRead) / 1_000_000;
 }
 
 function formatDollars(n) {
@@ -3936,8 +3859,8 @@ function sumUsage(u) {
   return (u.input || 0) + (u.output || 0);
 }
 
-function formatUsageValue(u) {
-  if (_tokenShowDollars) return formatDollars(usageToDollars(u));
+function formatUsageValue(u, model) {
+  if (_tokenShowDollars) return formatDollars(usageToDollars(u, model));
   return formatTokenCount(sumUsage(u));
 }
 
@@ -4024,10 +3947,50 @@ function rollTokenValue(el, newText) {
   }
 }
 
-function usageTooltip(label, u) {
+function usageTooltip(label, u, model) {
   const tokens = `In: ${formatTokenCount(u.input || 0)} | Out: ${formatTokenCount(u.output || 0)} | Cache write: ${formatTokenCount(u.cacheCreation || 0)} | Cache read: ${formatTokenCount(u.cacheRead || 0)}`;
-  const dollars = formatDollars(usageToDollars(u));
+  const dollars = formatDollars(usageToDollars(u, model));
   return `${label} — ${tokens}\nCost: ${dollars}`;
+}
+
+function _updateOverlapBanners(overlaps) {
+  // Clear all existing banners
+  document.querySelectorAll(".overlap-banner").forEach(b => b.remove());
+
+  if (overlaps.length === 0) return;
+
+  // Build a map: agentName -> [{ file, otherAgents }]
+  const agentOverlaps = new Map();
+  for (const { file, agents: overlapAgents } of overlaps) {
+    for (const name of overlapAgents) {
+      if (!agentOverlaps.has(name)) agentOverlaps.set(name, []);
+      const others = overlapAgents.filter(a => a !== name);
+      agentOverlaps.get(name).push({ file, others });
+    }
+  }
+
+  // Render banners on affected cards
+  for (const [name, files] of agentOverlaps) {
+    const agent = agents.get(name);
+    if (!agent?.card) continue;
+
+    const banner = document.createElement("div");
+    banner.className = "overlap-banner";
+
+    const fileCount = files.length;
+    const otherAgents = [...new Set(files.flatMap(f => f.others))];
+    banner.innerHTML = `<span class="overlap-banner-icon">\u26A0</span> ` +
+      `${fileCount} shared file${fileCount > 1 ? "s" : ""} with ${otherAgents.join(", ")}`;
+    banner.title = files.map(f => f.file.split("/").pop() + " (" + f.others.join(", ") + ")").join("\n");
+
+    // Insert after the card header (before terminal)
+    const header = agent.card.querySelector(".card-header");
+    if (header && header.nextSibling) {
+      header.parentNode.insertBefore(banner, header.nextSibling);
+    } else {
+      agent.card.prepend(banner);
+    }
+  }
 }
 
 function updateTokenUsageDisplay(msg) {
@@ -4042,6 +4005,37 @@ function updateTokenUsageDisplay(msg) {
   localStorage.setItem("ceo-token-usage", JSON.stringify(stored));
 
   updateHeaderTokenTotals(stored);
+
+  // Update budget progress bar if budget info is present
+  if (payload._budgets) _updateBudgetBar(payload._budgets);
+}
+
+function _updateBudgetBar(budgetInfo) {
+  const bar = document.getElementById("budget-progress-bar");
+  const barFill = document.getElementById("budget-progress-fill");
+  const barLabel = document.getElementById("budget-progress-label");
+  if (!bar || !budgetInfo?.config?.dailyDollars) {
+    if (bar) bar.style.display = "none";
+    return;
+  }
+
+  const { dailyDollars, warningPercent = 80 } = budgetInfo.config;
+  const spent = budgetInfo.todayDollars || 0;
+  const pct = Math.min(100, (spent / dailyDollars) * 100);
+
+  bar.style.display = "";
+  bar.title = `Daily budget: $${spent.toFixed(2)} of $${dailyDollars} spent (${pct.toFixed(1)}%)`;
+  barFill.style.width = pct + "%";
+  barLabel.textContent = `$${spent.toFixed(2)} / $${dailyDollars}`;
+
+  // Color: green < warning, yellow at warning, red at 100%
+  if (pct >= 100) {
+    barFill.style.background = "#ef4444";
+  } else if (pct >= warningPercent) {
+    barFill.style.background = "#fbbf24";
+  } else {
+    barFill.style.background = "var(--accent, #4ade80)";
+  }
 }
 
 let _lastKnownAllTimeTokens = 0;
@@ -4052,13 +4046,24 @@ function updateHeaderTokenTotals(stored) {
   const allAgents = stored.agents || {};
   const dailyData = stored.daily || {};
 
-  // All time total
+  // All time total — compute per-agent dollars using each agent's detected model
   const allTime = { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+  let allTimeDollars = 0;
+  // Detect dominant model for daily/monthly aggregate pricing
+  const modelCounts = {};
   for (const data of Object.values(allAgents)) {
     allTime.input += data.input || 0;
     allTime.output += data.output || 0;
     allTime.cacheCreation += data.cacheCreation || 0;
     allTime.cacheRead += data.cacheRead || 0;
+    allTimeDollars += usageToDollars(data, data.model);
+    if (data.model) modelCounts[data.model] = (modelCounts[data.model] || 0) + (data.output || 0);
+  }
+  // Use most-used model (by output tokens) for daily/monthly aggregates
+  let dominantModel = null;
+  let maxOutput = 0;
+  for (const [m, count] of Object.entries(modelCounts)) {
+    if (count > maxOutput) { maxOutput = count; dominantModel = m; }
   }
 
   // Today
@@ -4085,18 +4090,19 @@ function updateHeaderTokenTotals(stored) {
   const allTimeSum = sumUsage(allTime);
 
   // Store dollar values for the ticker
+  // All-time uses precise per-agent pricing; today/month use dominant model
   _dollarSnapshots.prev = _dollarSnapshots.current || null;
   _dollarSnapshots.current = {
-    today: usageToDollars(todayUsage),
-    month: usageToDollars(monthUsage),
-    allTime: usageToDollars(allTime),
+    today: usageToDollars(todayUsage, dominantModel),
+    month: usageToDollars(monthUsage, dominantModel),
+    allTime: allTimeDollars,
     time: Date.now(),
   };
 
   // Store tooltips
-  if (elTotal) elTotal.title = usageTooltip("All time", allTime);
-  if (elMonth) elMonth.title = usageTooltip("This month", monthUsage);
-  if (elToday) elToday.title = usageTooltip("Today", todayUsage);
+  if (elTotal) elTotal.title = usageTooltip("All time", allTime, dominantModel);
+  if (elMonth) elMonth.title = usageTooltip("This month", monthUsage, dominantModel);
+  if (elToday) elToday.title = usageTooltip("Today", todayUsage, dominantModel);
 
   if (_tokenShowDollars) {
     // In dollar mode, the ticker handles rendering
@@ -4272,7 +4278,7 @@ async function saveAgentDoc(agentName, docName, content, renderedEl, editArea) {
 }
 
 function startDocPolling() {
-  setInterval(async () => {
+  PollingManager.register("doc-polling", async () => {
     for (const [name, agent] of agents) {
       const section = agent.card.querySelector(".agent-doc-section");
       if (!section) continue;
@@ -4301,7 +4307,7 @@ function startDocPolling() {
         }
       } catch {}
     }
-    }, 8000);
+  }, 8000);
 }
 
 // --- Slash Command Autocomplete ---
@@ -4411,8 +4417,77 @@ function setupAutocomplete(input, card) {
 
 // --- Keyboard shortcuts ---
 
+let _helpOverlay = null;
+function _toggleHelpOverlay() {
+  if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
+    _helpOverlay.classList.add("hidden");
+    return;
+  }
+  if (!_helpOverlay) {
+    _helpOverlay = document.createElement("div");
+    _helpOverlay.id = "help-overlay";
+    _helpOverlay.className = "command-palette-overlay";
+    const K = (key, desc) => `<kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">${key}</kbd><span>${desc}</span>`;
+    _helpOverlay.innerHTML = `
+      <div class="command-palette" style="max-width:480px">
+        <div style="padding:20px 24px 8px;font-size:16px;font-weight:600">Keyboard Shortcuts</div>
+        <div style="padding:8px 24px 20px;font-size:13px;line-height:2.2">
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center">
+            ${K("Cmd+K", "Command Palette")}
+            ${K("Cmd+F", "Search Agent Output")}
+            ${K("N", "New Agent")}
+            ${K("T", "Terminal")}
+            ${K("F", "Files")}
+            ${K("S", "Settings")}
+            ${K("B", "Bookmarks")}
+            ${K("D", "Todos")}
+            ${K("G", "Workflow Canvas")}
+            ${K("L", "Activity Timeline")}
+            ${K("O", "Operations")}
+            ${K("C", "CEO Prompt")}
+            ${K("R", "Restart")}
+            ${K("!", "Bug Report")}
+            ${K("@", "Arcade")}
+            ${K("W", "Wallet")}
+            ${K("/", "Focus First Card")}
+            ${K("1-9", "Focus Card N")}
+            ${K("?", "This Help")}
+            ${K("Esc", "Close / Back")}
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(_helpOverlay);
+    _helpOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _helpOverlay) _helpOverlay.classList.add("hidden");
+    });
+  }
+  _helpOverlay.classList.remove("hidden");
+}
+
 document.addEventListener("keydown", (e) => {
   let inInput = e.target.matches("input, textarea, [contenteditable]");
+
+  // Cmd+F / Ctrl+F: search agent output (when focused on a card)
+  if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+    const card = e.target.closest(".agent-card");
+    if (card && typeof OutputSearch !== "undefined") {
+      e.preventDefault();
+      OutputSearch.openForCard(card);
+      return;
+    }
+    // Let browser Cmd+F through if not on a card
+  }
+
+  // Cmd+K / Ctrl+K: Command Palette
+  if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+    e.preventDefault();
+    if (typeof CommandPalette !== "undefined") {
+      CommandPalette.isOpen() ? CommandPalette.close() : CommandPalette.open();
+    }
+    return;
+  }
+
   // Suppress hotkeys while page loader is showing or reload is in flight
   // BUT allow typing in inputs (user may have focus restored before loader finishes)
   if (!_loaderDismissed || _reloadingPage) { if (!inInput) return; }
@@ -4451,8 +4526,13 @@ document.addEventListener("keydown", (e) => {
   const bugSuccessOverlay = document.getElementById("bug-success-overlay");
   const modalOpen = !modalOverlay.classList.contains("hidden") || !wsModalOverlay.classList.contains("hidden") || (todoSettingsOverlay && !todoSettingsOverlay.classList.contains("hidden")) || (_diffOverlay && !_diffOverlay.classList.contains("hidden")) || (bugReportOverlay && !bugReportOverlay.classList.contains("hidden")) || (bugSuccessOverlay && !bugSuccessOverlay.classList.contains("hidden"));
 
-  // Escape: layered dismiss (fullscreen → modals → file editor → files panel → shell → agent tmux)
+  // Escape: layered dismiss (split view → fullscreen → modals → file editor → files panel → shell → agent tmux)
   if (e.key === "Escape") {
+    if (typeof SplitView !== "undefined" && SplitView.isOpen()) {
+      e.preventDefault();
+      SplitView.close();
+      return;
+    }
     const fullscreenCard = document.querySelector(".agent-card.fullscreen");
     if (fullscreenCard) {
       e.preventDefault();
@@ -4466,6 +4546,26 @@ document.addEventListener("keydown", (e) => {
     if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
       e.preventDefault();
       closeDiffModal();
+      return;
+    }
+    if (_walletOverlay && !_walletOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _closeWallet();
+      return;
+    }
+    if (_arcadeOverlay && !_arcadeOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _closeArcade();
+      return;
+    }
+    if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _helpOverlay.classList.add("hidden");
+      return;
+    }
+    if (typeof CommandPalette !== "undefined" && CommandPalette.isOpen()) {
+      e.preventDefault();
+      CommandPalette.close();
       return;
     }
     if (!modalOverlay.classList.contains("hidden")) {
@@ -4513,6 +4613,24 @@ document.addEventListener("keydown", (e) => {
       showAgentsView();
       return;
     }
+    // Activity timeline panel
+    if (typeof ActivityTimeline !== "undefined" && ActivityTimeline.isOpen()) {
+      e.preventDefault();
+      ActivityTimeline.close();
+      return;
+    }
+    // Dependency graph panel
+    if (typeof DependencyGraph !== "undefined" && DependencyGraph.isOpen()) {
+      e.preventDefault();
+      DependencyGraph.close();
+      return;
+    }
+    // Operations panel
+    if (typeof OpsPanel !== "undefined" && OpsPanel.isOpen()) {
+      e.preventDefault();
+      OpsPanel.close();
+      return;
+    }
     // Bookmarks panel
     if (_bmPanel && _bmPanel.classList.contains("visible")) {
       e.preventDefault();
@@ -4545,7 +4663,7 @@ document.addEventListener("keydown", (e) => {
       document.getElementById("shell-header").focus();
       return;
     }
-    // If typing in a card input, just blur
+    // If typing in a card input, just return
     if (inInput && !inShell && !inFilesPanel) return;
     // Agent card: send Escape to tmux
     const card = e.target.closest(".agent-card");
@@ -4558,6 +4676,7 @@ document.addEventListener("keydown", (e) => {
     }
     return;
   }
+
 
   // Modifier keys — never hijack browser shortcuts
   if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -4591,9 +4710,30 @@ document.addEventListener("keydown", (e) => {
     if (!settingsPanel.classList.contains("visible")) settingsBtn.focus();
     return;
   }
+  if (key === "g" && !inInput) {
+    e.preventDefault();
+    if (typeof DependencyGraph !== "undefined") DependencyGraph.toggle();
+    return;
+  }
+  if (key === "l" && !inInput) {
+    e.preventDefault();
+    if (typeof ActivityTimeline !== "undefined") ActivityTimeline.toggle();
+    return;
+  }
+  if (key === "o" && !inInput) {
+    e.preventDefault();
+    if (typeof OpsPanel !== "undefined") OpsPanel.toggle();
+    return;
+  }
 
   // Remaining hotkeys — skip if typing in any input
   if (inInput) return;
+
+  if (key === "?") {
+    e.preventDefault();
+    _toggleHelpOverlay();
+    return;
+  }
 
   if (key === "d") {
     e.preventDefault();
@@ -4608,6 +4748,16 @@ document.addEventListener("keydown", (e) => {
   if (key === "!") {
     e.preventDefault();
     document.getElementById("bug-report-btn").click();
+    return;
+  }
+  if (key === "@") {
+    e.preventDefault();
+    _openArcade();
+    return;
+  }
+  if (key === "w") {
+    e.preventDefault();
+    _openWallet();
     return;
   }
   if (key === "n") {
@@ -4647,11 +4797,462 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// --- Wallet Panel (W hotkey) ---
+let _walletOverlay = null;
+
+function _openWallet() {
+  if (!_walletOverlay) {
+    _walletOverlay = document.createElement("div");
+    _walletOverlay.id = "wallet-overlay";
+    _walletOverlay.className = "command-palette-overlay";
+    _walletOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _walletOverlay) _closeWallet();
+    });
+    document.body.appendChild(_walletOverlay);
+  }
+  _walletOverlay.classList.remove("hidden");
+  _walletOverlay.innerHTML = '<div class="wallet-panel"><div class="wallet-loading">Loading...</div></div>';
+  fetch("/api/bankroll/stats").then(r => r.json()).then(_renderWallet).catch(() => {
+    _walletOverlay.innerHTML = '<div class="wallet-panel"><div class="wallet-loading">Failed to load wallet</div></div>';
+  });
+}
+
+function _closeWallet() {
+  if (_walletOverlay) _walletOverlay.classList.add("hidden");
+}
+
+function _renderWallet(stats) {
+  const pnlColor = stats.gamingPnl >= 0 ? "#4ade80" : "#ef4444";
+  const pnlSign = stats.gamingPnl >= 0 ? "+" : "";
+  const ltColor = stats.lifetimePnl >= 0 ? "#4ade80" : "#ef4444";
+  const ltSign = stats.lifetimePnl >= 0 ? "+" : "";
+  const fmt = (n) => "$" + Math.abs(n).toLocaleString("en-US");
+  // Today's earnings from the chart data
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayEarned = (stats.earningsByDay || {})[todayStr] || 0;
+
+  // Recent earnings by day (last 7 days)
+  const days = Object.entries(stats.earningsByDay || {}).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 7);
+  const maxDay = Math.max(1, ...days.map(d => d[1]));
+
+  _walletOverlay.innerHTML = `
+    <div class="wallet-panel">
+      <div class="wallet-header">
+        <span>Wallet</span>
+        <button class="wallet-close" onclick="_closeWallet()">&times;</button>
+      </div>
+
+      <div class="wallet-balance">
+        <div class="wallet-balance-label">BALANCE</div>
+        <div class="wallet-balance-amount">${fmt(stats.balance)}</div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">LIFETIME P&L</div>
+        <div class="wallet-pnl" style="color:${ltColor}">${ltSign}${fmt(stats.lifetimePnl)}</div>
+      </div>
+
+      <div class="wallet-grid">
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">EARNED (WORK)</div>
+          <div class="wallet-stat-value" style="color:#4ade80">${fmt(stats.totalEarned)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">GAMING P&L</div>
+          <div class="wallet-stat-value" style="color:${pnlColor}">${pnlSign}${fmt(stats.gamingPnl)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">WAGERED</div>
+          <div class="wallet-stat-value">${fmt(stats.totalWagered)}</div>
+        </div>
+        <div class="wallet-stat">
+          <div class="wallet-stat-label">WON</div>
+          <div class="wallet-stat-value">${fmt(stats.totalWon)}</div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">WORK BREAKDOWN</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Tasks completed</span><span>${stats.breakdown.taskComplete} &times; ~$50-200</span></div>
+          <div class="wallet-row"><span>Commits</span><span>${stats.breakdown.commits} &times; $150</span></div>
+          <div class="wallet-row"><span>File edits</span><span>${stats.breakdown.fileEdits || 0} &times; $25</span></div>
+          <div class="wallet-row"><span>Test passes</span><span>${stats.breakdown.testPasses || 0} &times; ~$10-100</span></div>
+          <div class="wallet-row"><span>Docs saved</span><span>${stats.breakdown.docSaves} &times; $50</span></div>
+          <div class="wallet-row"><span>Agent cleanups</span><span>${stats.breakdown.agentCleanups} &times; $25</span></div>
+          <div class="wallet-row"><span>Daily seeds</span><span>${stats.breakdown.dailySeeds} &times; $500</span></div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">GAMING</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Games played</span><span>${stats.gaming.played}</span></div>
+          <div class="wallet-row"><span>Games won</span><span>${stats.gaming.won}</span></div>
+          <div class="wallet-row"><span>Win rate</span><span>${stats.gaming.winRate}%</span></div>
+        </div>
+      </div>
+
+      <div class="wallet-section">
+        <div class="wallet-section-title">DAILY EARNINGS — $${todayEarned.toLocaleString()} today</div>
+        ${days.length > 0 ? '<div class="wallet-chart">' + days.map(([day, amount]) => {
+          const pct = Math.max(4, (amount / maxDay) * 100);
+          const label = day.slice(5); // MM-DD
+          return '<div class="wallet-chart-bar"><div class="wallet-bar-fill" style="height:' + pct + '%"></div><div class="wallet-bar-label">' + label + '</div></div>';
+        }).join("") + '</div>' : ''}
+      </div>
+
+      <div class="wallet-section wallet-help">
+        <div class="wallet-section-title">HOW TO EARN</div>
+        <div class="wallet-breakdown">
+          <div class="wallet-row"><span>Agent completes a task</span><span class="wallet-earn">+$100</span></div>
+          <div class="wallet-row"><span>Agent makes a commit</span><span class="wallet-earn">+$200</span></div>
+          <div class="wallet-row"><span>Agent saves a document</span><span class="wallet-earn">+$50</span></div>
+          <div class="wallet-row"><span>Kill/cleanup an agent</span><span class="wallet-earn">+$25</span></div>
+          <div class="wallet-row"><span>Daily login bonus</span><span class="wallet-earn">+$500</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// --- Games Arcade ---
+// To add a game: put the HTML file in public/, add an entry here
+const _games = [
+  { id: "block-drop", name: "Block Drop", subtitle: "ULTRA CHAOS", src: "game.html", icon: "\uD83C\uDFAE", color: "#e94560" },
+  { id: "blackjack", name: "Blackjack", subtitle: "DOUBLE DECK", src: "blackjack.html", icon: "\uD83C\uDCA1", color: "#1a5c2a" },
+  { id: "baccarat", name: "Baccarat", subtitle: "PUNTO BANCO", src: "baccarat.html", icon: "\uD83C\uDCCF", color: "#1a237e" },
+  { id: "mines", name: "Mines", subtitle: "RISK & REWARD", src: "mines.html", icon: "\uD83D\uDCA3", color: "#37474f" },
+];
+let _arcadeOverlay = null;
+let _arcadeModal = null;
+let _activeGame = null; // { id, game, iframe }
+let _pauseLayer = null; // overlay that sits on top of iframe when paused
+
+function _openArcade() {
+  if (!_arcadeOverlay) {
+    _arcadeOverlay = document.createElement("div");
+    _arcadeOverlay.id = "arcade-overlay";
+    _arcadeOverlay.className = "command-palette-overlay";
+    _arcadeModal = document.createElement("div");
+    _arcadeModal.className = "game-modal";
+    _arcadeOverlay.appendChild(_arcadeModal);
+    document.body.appendChild(_arcadeOverlay);
+    _arcadeOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _arcadeOverlay) _closeArcade();
+    });
+  }
+  _arcadeOverlay.classList.remove("hidden");
+  if (_activeGame) {
+    // Show the modal with iframe + pause layer on top
+    _arcadeModal.style.height = "";
+    _arcadeModal.style.maxHeight = "";
+    _showPauseLayer();
+  } else {
+    _arcadeShowPicker();
+  }
+}
+
+function _closeArcade() {
+  if (_activeGame) {
+    try { _activeGame.iframe.contentWindow?.postMessage("ceo-pause", "*"); } catch {}
+  }
+  _arcadeOverlay?.classList.add("hidden");
+  // If a reload was deferred, trigger it now
+  if (_pendingReload && !_activeGame) {
+    _pendingReload = false;
+    setTimeout(() => location.reload(), 500);
+  }
+}
+
+function _arcadeShowPicker() {
+  // Destroy any active game
+  _activeGame = null;
+  localStorage.removeItem("ceo-active-wager");
+  if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
+  _arcadeModal.style.height = "auto";
+  _arcadeModal.style.maxHeight = "85vh";
+  _arcadeModal.innerHTML = `
+    <div class="game-modal-header">
+      <span>Arcade</span>
+      <button class="game-modal-close">&times;</button>
+    </div>
+    <div class="game-picker">${_games.map(g => `
+      <div class="game-app" data-game="${g.id}">
+        <div class="game-app-icon" style="background:${g.color}">${g.icon}</div>
+        <div class="game-app-name">${g.name}</div>
+        <div class="game-app-sub">${g.subtitle}</div>
+      </div>
+    `).join("")}</div>
+  `;
+  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+  _arcadeModal.querySelectorAll(".game-app").forEach(el => {
+    el.addEventListener("click", () => {
+      const game = _games.find(g => g.id === el.dataset.game);
+      if (game) _arcadeLaunch(game);
+    });
+  });
+}
+
+function _arcadeLaunch(game) {
+  _arcadeModal.style.height = "";
+  _arcadeModal.style.maxHeight = "";
+  _arcadeModal.innerHTML = `
+    <div class="game-modal-header">
+      <span>${game.name} — ${game.subtitle}</span>
+      <button class="game-modal-close" title="Pause & minimize">&times;</button>
+    </div>
+    <iframe src="${game.src}" class="game-iframe"></iframe>
+  `;
+  const iframe = _arcadeModal.querySelector("iframe");
+  _activeGame = { id: game.id, game, iframe };
+  if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
+  _arcadeModal.querySelector(".game-modal-close").addEventListener("click", _closeArcade);
+  // Focus iframe once loaded so keyboard controls work immediately
+  iframe.addEventListener("load", () => { iframe.focus(); });
+}
+
+function _showPauseLayer() {
+  if (!_activeGame) return;
+  const g = _activeGame.game;
+  // Create/update pause layer that sits ON TOP of the iframe
+  if (!_pauseLayer) {
+    _pauseLayer = document.createElement("div");
+    _pauseLayer.className = "game-pause-layer";
+  }
+  _pauseLayer.innerHTML = `
+    <div class="game-app-icon" style="background:${g.color};width:64px;height:64px;font-size:32px;border-radius:16px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px">${g.icon}</div>
+    <div style="font-size:24px;font-weight:700;margin-bottom:4px;color:#eee">PAUSED</div>
+    <div style="font-size:12px;color:#666;margin-bottom:20px">${g.name} — ${g.subtitle}</div>
+    <button class="game-resume-btn">Resume Game</button>
+    <button class="game-quit-btn">Quit to Arcade</button>
+  `;
+  _arcadeModal.appendChild(_pauseLayer);
+  // Update header
+  const headerSpan = _arcadeModal.querySelector(".game-modal-header span");
+  if (headerSpan) headerSpan.textContent = g.name + " — PAUSED";
+  _pauseLayer.querySelector(".game-resume-btn").addEventListener("click", () => {
+    _pauseLayer.remove();
+    const headerSpan2 = _arcadeModal.querySelector(".game-modal-header span");
+    if (headerSpan2) headerSpan2.textContent = g.name + " — " + g.subtitle;
+    try { _activeGame.iframe.contentWindow?.postMessage("ceo-resume", "*"); } catch {}
+    // Focus the iframe so keyboard controls (M for music, P for pause, etc.) work immediately
+    setTimeout(() => { _activeGame?.iframe?.focus(); }, 50);
+  });
+  _pauseLayer.querySelector(".game-quit-btn").addEventListener("click", () => {
+    _pauseLayer.remove();
+    _pauseLayer = null;
+    _arcadeShowPicker();
+  });
+}
+
+// Alert banner when agent finishes working during gameplay
+function _showArcadeAlert(agentName, label) {
+  if (!_arcadeModal) return;
+  // Only show alert if the arcade is currently visible (user is actively gaming)
+  if (_arcadeOverlay?.classList.contains("hidden")) return;
+  // Remove previous alert if any
+  _arcadeModal.querySelectorAll(".arcade-agent-alert").forEach(el => el.remove());
+  const alert = document.createElement("div");
+  alert.className = "arcade-agent-alert";
+  alert.innerHTML = `<span class="arcade-alert-pulse"></span><strong>${agentName.toUpperCase()}</strong> ${label.toUpperCase()} <button class="arcade-alert-go">GO TO AGENT</button>`;
+  alert.querySelector(".arcade-alert-go").addEventListener("click", () => {
+    _closeArcade();
+    const agent = typeof agents !== "undefined" ? agents.get(agentName) : null;
+    if (agent?.card) {
+      agent.card.scrollIntoView({ behavior: "smooth", block: "center" });
+      const inp = agent.card.querySelector(".card-input textarea");
+      if (inp) inp.focus();
+    }
+  });
+  _arcadeModal.appendChild(alert);
+  // Auto-dismiss after 10s
+  setTimeout(() => { if (alert.parentNode) alert.remove(); }, 10000);
+}
+
+// --- Bankroll polling ---
+let _bankrollBalance = 0;
+async function _refreshBankroll() {
+  try {
+    const res = await fetch("/api/bankroll");
+    if (res.ok) {
+      const data = await res.json();
+      _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      // Update per-agent earnings on cards
+      if (data.agentEarnings) {
+        for (const [name, earned] of Object.entries(data.agentEarnings)) {
+          _updateCardEarnings(name, earned);
+        }
+      }
+    }
+  } catch {}
+}
+
+const _EARN_LABELS = {
+  "task-complete": "task",
+  "commit": "commit",
+  "file-edit": "edit",
+  "test-pass": "tests",
+  "doc-save": "doc",
+  "agent-cleanup": "cleanup",
+};
+
+function _handleBankrollEarn(msg) {
+  // Update header balance
+  _bankrollBalance = msg.balance;
+  const el = document.getElementById("bankroll-display");
+  if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+
+  // Update agent card earnings + show inline label
+  if (msg.agent) {
+    const agent = agents.get(msg.agent);
+    if (agent?.card) {
+      const earningsEl = agent.card.querySelector(".agent-earnings");
+      if (earningsEl) {
+        const current = parseInt(earningsEl.dataset.total || "0") || 0;
+        const newTotal = current + msg.amount;
+        earningsEl.dataset.total = newTotal;
+        const label = _EARN_LABELS[msg.reason] || msg.reason;
+        earningsEl.style.display = "";
+        // Reason on left, total on right — reason fades out
+        let reasonSpan = earningsEl.querySelector(".earn-reason");
+        let totalSpan = earningsEl.querySelector(".earn-total");
+        if (!totalSpan) {
+          earningsEl.textContent = "";
+          reasonSpan = document.createElement("span");
+          reasonSpan.className = "earn-reason";
+          totalSpan = document.createElement("span");
+          totalSpan.className = "earn-total";
+          earningsEl.appendChild(reasonSpan);
+          earningsEl.appendChild(totalSpan);
+        }
+        totalSpan.textContent = "$" + newTotal.toLocaleString();
+        reasonSpan.textContent = "+" + msg.amount + " " + label + " ";
+        reasonSpan.style.opacity = "1";
+        clearTimeout(earningsEl._fadeTimer);
+        earningsEl._fadeTimer = setTimeout(() => { reasonSpan.style.opacity = "0"; }, 2000);
+      }
+    }
+  }
+}
+
+function _updateCardEarnings(name, earned) {
+  const agent = agents.get(name);
+  if (!agent?.card) return;
+  const el = agent.card.querySelector(".agent-earnings");
+  if (el && earned > 0) {
+    el.dataset.total = earned;
+    el.textContent = "$" + earned.toLocaleString();
+    el.style.display = "";
+  }
+}
+setInterval(_refreshBankroll, 10000);
+_refreshBankroll();
+
+// Refund orphaned wagers from interrupted games
+(function() {
+  const wager = localStorage.getItem("ceo-active-wager");
+  if (wager) {
+    try {
+      const { amount } = JSON.parse(wager);
+      if (amount > 0) {
+        fetch("/api/bankroll/win", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount }),
+        }).then(() => _refreshBankroll());
+        console.log("[bankroll] Refunded $" + amount + " from interrupted game");
+      }
+    } catch {}
+    localStorage.removeItem("ceo-active-wager");
+  }
+})();
+
+// Click bankroll display to open wallet
+document.getElementById("bankroll-display")?.addEventListener("click", _openWallet);
+
+// --- Bankroll postMessage bridge for game iframes ---
+window.addEventListener("message", (e) => {
+  if (!_activeGame?.iframe?.contentWindow || e.source !== _activeGame.iframe.contentWindow) return;
+  const msg = e.data;
+  if (!msg || typeof msg !== "object") return;
+
+  if (msg.type === "bankroll-check") {
+    e.source.postMessage({ type: "bankroll-balance", balance: _bankrollBalance }, "*");
+  }
+  if (msg.type === "bankroll-wager" && typeof msg.amount === "number") {
+    // Track active wager for refund on unexpected reload
+    localStorage.setItem("ceo-active-wager", JSON.stringify({ amount: msg.amount, timestamp: Date.now() }));
+    fetch("/api/bankroll/wager", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: msg.amount }),
+    }).then(r => r.json()).then(data => {
+      if (data.balance !== undefined) _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      e.source.postMessage({ type: "bankroll-wager-result", success: data.success, balance: _bankrollBalance }, "*");
+    }).catch(() => {
+      e.source.postMessage({ type: "bankroll-wager-result", success: false, balance: _bankrollBalance }, "*");
+    });
+  }
+  if (msg.type === "bankroll-win" && typeof msg.amount === "number") {
+    localStorage.removeItem("ceo-active-wager"); // game settled, no refund needed
+    fetch("/api/bankroll/win", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: msg.amount }),
+    }).then(r => r.json()).then(data => {
+      if (data.balance !== undefined) _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      e.source.postMessage({ type: "bankroll-win-result", balance: _bankrollBalance }, "*");
+    }).catch(() => {});
+  }
+});
+
+document.getElementById("game-btn")?.addEventListener("click", _openArcade);
+
 // --- Init ---
 
 loadSlashCommands();
 startDocPolling();
 startTodoRefsPolling();
+if (typeof CommandPalette !== "undefined") CommandPalette.registerBuiltinActions();
+if (typeof CommandPalette !== "undefined" && typeof DependencyGraph !== "undefined") {
+  CommandPalette.registerAction({
+    id: "dep-graph", category: "Views", label: "Workflow Canvas",
+    keywords: "graph dependencies files overlap agents workflow canvas pipeline",
+    icon: "\u25C9", hint: "G",
+    handler: function() { DependencyGraph.toggle(); },
+  });
+}
+if (typeof CommandPalette !== "undefined" && typeof ActivityTimeline !== "undefined") {
+  CommandPalette.registerAction({
+    id: "activity-timeline", category: "Views", label: "Activity Timeline",
+    keywords: "timeline activity events log history",
+    icon: "\u23F1", hint: "L",
+    handler: function() { ActivityTimeline.toggle(); },
+  });
+}
+if (typeof CommandPalette !== "undefined" && typeof SplitView !== "undefined") {
+  CommandPalette.registerAction({
+    id: "split-view", category: "Views", label: "Focus View",
+    keywords: "split side by side compare focus agents",
+    icon: "\u25A8",
+    handler: () => SplitView.promptAndOpen(),
+  });
+}
+if (typeof CommandPalette !== "undefined" && typeof OpsPanel !== "undefined") {
+  CommandPalette.registerAction({
+    id: "ops-panel", category: "Views", label: "Operations",
+    keywords: "ops prs diffs workspace git pull requests",
+    icon: "\u2699", hint: "O",
+    handler: () => OpsPanel.toggle(),
+  });
+}
 
 // --- Page loader: wait for ALL agents to have terminal content before revealing ---
 let _expectedAgentCount = 0;

@@ -28,6 +28,11 @@ const updateMod = require("./lib/update");
 const { createScrollback, getScrollback, appendScrollback, clearScrollback } = require("./lib/scrollback");
 const terminalCards = require("./lib/terminal-cards");
 const shellPtyMod = require("./lib/shell-pty");
+const diffService = require("./lib/diff-service");
+const fileTracker = require("./lib/file-tracker");
+const activityEvents = require("./lib/activity-events");
+const bankroll = require("./lib/bankroll");
+const prDashboard = require("./lib/pr-dashboard");
 
 // Destructure security
 const {
@@ -237,6 +242,49 @@ function saveTokenUsage(data) {
   fs.writeFileSync(TOKEN_USAGE_FILE, JSON.stringify(data, null, 2));
 }
 
+// Snapshot a killed agent's per-day token contributions into killedDaily
+// Must be called BEFORE the agent is removed from sessions.json
+function snapshotKilledAgentTokens(name) {
+  try {
+    const meta = loadSessionsMeta();
+    const agentInfo = meta[name];
+    const sid = agentInfo?.resumeSessionId;
+    if (!sid) return;
+    const filePath = findJsonlFileForSession(sid);
+    if (!filePath) return;
+    const byDay = parseTokenUsageByDay(filePath);
+    // Also include subagent token usage in the snapshot
+    const subFiles = findSubagentFiles(sid);
+    for (const subFile of subFiles) {
+      try {
+        const subByDay = parseTokenUsageByDay(subFile);
+        for (const [dayKey, dayUsage] of Object.entries(subByDay)) {
+          const existing = byDay[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+          existing.input += dayUsage.input;
+          existing.output += dayUsage.output;
+          existing.cacheCreation += dayUsage.cacheCreation;
+          existing.cacheRead += dayUsage.cacheRead;
+          byDay[dayKey] = existing;
+        }
+      } catch {}
+    }
+    if (Object.keys(byDay).length === 0) return;
+    const tokenData = loadTokenUsage();
+    tokenData.killedDaily = tokenData.killedDaily || {};
+    for (const [dayKey, dayUsage] of Object.entries(byDay)) {
+      const existing = tokenData.killedDaily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+      existing.input += dayUsage.input;
+      existing.output += dayUsage.output;
+      existing.cacheCreation += dayUsage.cacheCreation;
+      existing.cacheRead += dayUsage.cacheRead;
+      tokenData.killedDaily[dayKey] = existing;
+    }
+    saveTokenUsage(tokenData);
+  } catch (e) {
+    console.error(`[token snapshot] Failed to snapshot tokens for killed agent ${name}:`, e.message);
+  }
+}
+
 function findJsonlFileForSession(sessionId) {
   if (!sessionId) return null;
   try {
@@ -252,23 +300,45 @@ function findJsonlFileForSession(sessionId) {
   return null;
 }
 
+function findSubagentFiles(sessionId) {
+  if (!sessionId) return [];
+  const files = [];
+  try {
+    const projectDirs = fs.readdirSync(CLAUDE_DIR);
+    for (const dir of projectDirs) {
+      const subagentDir = path.join(CLAUDE_DIR, dir, sessionId, "subagents");
+      try {
+        const entries = fs.readdirSync(subagentDir);
+        for (const entry of entries) {
+          if (entry.endsWith(".jsonl")) {
+            files.push(path.join(subagentDir, entry));
+          }
+        }
+      } catch {} // subagent dir doesn't exist — fine
+    }
+  } catch {}
+  return files;
+}
+
 function parseTokenUsageFromBytes(buf, byteLength) {
   const str = buf.toString("utf8", 0, byteLength);
   const lines = str.split("\n");
   let input = 0, output = 0, cacheCreation = 0, cacheRead = 0;
+  let model = null;
   for (const line of lines) {
     if (!line || !line.includes('"usage"')) continue;
     try {
       const d = JSON.parse(line);
       const u = d.message?.usage;
       if (!u) continue;
+      if (!model && d.message?.model) model = d.message.model;
       input += u.input_tokens || 0;
       output += u.output_tokens || 0;
       cacheCreation += u.cache_creation_input_tokens || 0;
       cacheRead += u.cache_read_input_tokens || 0;
     } catch {}
   }
-  return { input, output, cacheCreation, cacheRead };
+  return { input, output, cacheCreation, cacheRead, model };
 }
 
 function parseTokenUsageByDay(filePath) {
@@ -320,6 +390,7 @@ function getTokenUsageForSession(sessionId) {
       output: prev.output + delta.output,
       cacheCreation: prev.cacheCreation + delta.cacheCreation,
       cacheRead: prev.cacheRead + delta.cacheRead,
+      model: delta.model || prev.model || null,
     };
     _tokenUsageCache.set(sessionId, { bytesRead: stat.size, usage });
     return usage;
@@ -361,6 +432,7 @@ function syncTokenUsage() {
           output: (prev.output || 0) + delta.output,
           cacheCreation: (prev.cacheCreation || 0) + delta.cacheCreation,
           cacheRead: (prev.cacheRead || 0) + delta.cacheRead,
+          model: usage.model || prev.model || null,
           sessionId,
           _sessionUsage: { ...usage },
         };
@@ -375,6 +447,7 @@ function syncTokenUsage() {
           output: prevTotal.output + usage.output,
           cacheCreation: prevTotal.cacheCreation + usage.cacheCreation,
           cacheRead: prevTotal.cacheRead + usage.cacheRead,
+          model: usage.model || (prev && prev.model) || null,
           sessionId,
           _sessionUsage: { ...usage },
         };
@@ -414,11 +487,46 @@ function syncTokenUsage() {
       existing.cacheRead += dayUsage.cacheRead;
       daily[dayKey] = existing;
     }
+    // Also aggregate subagent JSONL files
+    const subFiles = findSubagentFiles(sid);
+    for (const subFile of subFiles) {
+      let subStat;
+      try { subStat = fs.statSync(subFile); } catch { continue; }
+      const subCacheKey = "sub:" + subFile;
+      const subCacheEntry = _dailyByDayCache.get(subCacheKey);
+      let subByDay;
+      if (subCacheEntry && subCacheEntry.size === subStat.size) {
+        subByDay = subCacheEntry.byDay;
+      } else {
+        subByDay = parseTokenUsageByDay(subFile);
+        _dailyByDayCache.set(subCacheKey, { size: subStat.size, byDay: subByDay });
+        dailyChanged = true;
+      }
+      for (const [dayKey, dayUsage] of Object.entries(subByDay)) {
+        const existing = daily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+        existing.input += dayUsage.input;
+        existing.output += dayUsage.output;
+        existing.cacheCreation += dayUsage.cacheCreation;
+        existing.cacheRead += dayUsage.cacheRead;
+        daily[dayKey] = existing;
+      }
+    }
   }
-  // Merge: JSONL ground truth overwrites, keep historical days from killed agents
-  const mergedDaily = { ...(saved.daily || {}) };
+  // Merge daily: killedDaily (snapshotted at kill time) + live agents' JSONL ground truth
+  const killedDaily = saved.killedDaily || {};
+  const mergedDaily = {};
+  // 1. Start with killed agents' snapshotted contributions
+  for (const [dayKey, kd] of Object.entries(killedDaily)) {
+    mergedDaily[dayKey] = { ...kd };
+  }
+  // 2. Add live agents' JSONL ground truth on top
   for (const [dayKey, dayUsage] of Object.entries(daily)) {
-    mergedDaily[dayKey] = { ...dayUsage };
+    const existing = mergedDaily[dayKey] || { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
+    existing.input += dayUsage.input;
+    existing.output += dayUsage.output;
+    existing.cacheCreation += dayUsage.cacheCreation;
+    existing.cacheRead += dayUsage.cacheRead;
+    mergedDaily[dayKey] = existing;
   }
   // Apply reset offsets (subtract tokens cleared by user)
   const offsets = saved.dailyOffset || {};
@@ -441,8 +549,49 @@ function syncTokenUsage() {
   return saved;
 }
 
+function _todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Claude API pricing per 1M tokens — keyed by model prefix
+const MODEL_PRICING = {
+  "claude-opus-4-6":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-5":   { input: 5,    output: 25,   cacheCreation: 6.25,  cacheRead: 0.50 },
+  "claude-opus-4-1":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-opus-4-0":   { input: 15,   output: 75,   cacheCreation: 18.75, cacheRead: 1.50 },
+  "claude-sonnet-4-6": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-5": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-sonnet-4-0": { input: 3,    output: 15,   cacheCreation: 3.75,  cacheRead: 0.30 },
+  "claude-haiku-4-5":  { input: 1,    output: 5,    cacheCreation: 1.25,  cacheRead: 0.10 },
+  "claude-haiku-3-5":  { input: 0.80, output: 4,    cacheCreation: 1,     cacheRead: 0.08 },
+};
+const DEFAULT_PRICING = MODEL_PRICING["claude-opus-4-6"];
+
+function _getPricing(model) {
+  if (!model) return DEFAULT_PRICING;
+  // Match against known prefixes (handles snapshot dates like claude-opus-4-6-20250514)
+  for (const [prefix, pricing] of Object.entries(MODEL_PRICING)) {
+    if (model.startsWith(prefix)) return pricing;
+  }
+  return DEFAULT_PRICING;
+}
+
+function _computeDollars(usage, model) {
+  const p = _getPricing(model);
+  return ((usage.input || 0) * p.input + (usage.output || 0) * p.output +
+    (usage.cacheCreation || 0) * p.cacheCreation + (usage.cacheRead || 0) * p.cacheRead) / 1000000;
+}
+
 function broadcastTokenUsage() {
   const usage = syncTokenUsage();
+  // Attach budget info if configured
+  if (userConfig.budgets) {
+    usage._budgets = {
+      config: userConfig.budgets,
+      todayDollars: _computeDollars(usage.daily?.[_todayKey()] || {}),
+    };
+  }
   const message = JSON.stringify({ type: "token-usage", usage });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) client.send(message);
@@ -1178,12 +1327,20 @@ app.delete("/api/sessions/:name", async (req, res) => {
     }
   }
 
+  // Bankroll: earn on agent cleanup
+  bankroll.earn(25, "agent-cleanup", name);
+  bankroll.removeAgent(name);
+
+  // Snapshot killed agent's per-day token contributions before removing it
+  snapshotKilledAgentTokens(name);
+
   killSession(name);
   clearWorktreeCache(`${PREFIX}${name}`);
   prevStatuses.delete(`${PREFIX}${name}`);
   _autoRenamed.delete(name);
   _pendingRenamePrefix.delete(name);
   _firingAgents.delete(name);
+  fileTracker.removeAgent(name);
   res.json({ ok: true, worktreeCleaned });
 });
 
@@ -1249,6 +1406,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
   } catch (e) {
     // If we can't send keys, write a basic entry ourselves and kill
     _firingAgents.delete(name);
+    snapshotKilledAgentTokens(name);
     killSession(name);
     clearWorktreeCache(session);
     return res.json({ ok: true, fallback: true });
@@ -1279,6 +1437,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
         }
       } catch {}
       _firingAgents.delete(name);
+      snapshotKilledAgentTokens(name);
       killSession(name);
       clearWorktreeCache(session);
       prevStatuses.delete(session);
@@ -1292,6 +1451,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
       if (!sessions.includes(session)) {
         // Agent already exited (via /exit)
         _firingAgents.delete(name);
+        snapshotKilledAgentTokens(name);
         clearWorktreeCache(session);
         prevStatuses.delete(session);
         _autoRenamed.delete(name);
@@ -1309,6 +1469,7 @@ app.post("/api/sessions/:name/fire", async (req, res) => {
         // Agent is idle = it finished and is waiting at prompt
         if (status === "idle") {
           _firingAgents.delete(name);
+          snapshotKilledAgentTokens(name);
           killSession(name);
           clearWorktreeCache(session);
           prevStatuses.delete(session);
@@ -1513,6 +1674,34 @@ app.get("/api/sessions/:name/diff", async (req, res) => {
   }
 });
 
+// --- Diff Service (stat + full) ---
+
+app.get("/api/sessions/:name/diff-stat", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta()[name];
+  if (!meta) return res.status(404).json({ error: "not found" });
+  const workdir = meta.workdir || DEFAULT_WORKDIR;
+  const git = getGitInfo(workdir);
+  res.json(diffService.getDiffStat(workdir, git?.branch) || { files: [], raw: "" });
+});
+
+app.get("/api/sessions/:name/full-diff", (req, res) => {
+  const { name } = req.params;
+  const { file } = req.query;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta()[name];
+  if (!meta) return res.status(404).json({ error: "not found" });
+  const workdir = meta.workdir || DEFAULT_WORKDIR;
+  const git = getGitInfo(workdir);
+  const diff = diffService.getFullDiff(workdir, git?.branch, file || null);
+  res.json({ diff: diff || "" });
+});
+
+app.get("/api/editor-config", (req, res) => {
+  res.json({ editor: userConfig.editor || "vscode" });
+});
+
 // --- PR URL lookup ---
 
 app.get("/api/sessions/:name/pr-url", async (req, res) => {
@@ -1543,6 +1732,182 @@ app.get("/api/sessions/:name/pr-url", async (req, res) => {
     res.json({ prUrl: result });
   } catch {
     res.json({ prUrl: null });
+  }
+});
+
+// --- Agent Output Search ---
+app.get("/api/sessions/:name/search", (req, res) => {
+  const { name } = req.params;
+  const { q } = req.query;
+  if (!isSafePathSegment(name) || !q || typeof q !== "string") {
+    return res.status(400).json({ error: "invalid params" });
+  }
+  const session = PREFIX + name;
+  try {
+    const output = execSync(
+      `tmux capture-pane -t ${shellQuote(session)} -p -S -50000`,
+      { encoding: "utf8", timeout: 5000 }
+    );
+    const lines = output.split("\n");
+    const matches = [];
+    const query = q.toLowerCase();
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(query)) {
+        matches.push({ line: i, text: lines[i] });
+      }
+    }
+    res.json({ matches, total: matches.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- Agent Chain API ---
+
+app.post("/api/sessions/:name/chain", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const body = req.body || {};
+  const validConditions = ["always", "when-idle", "branch-has-changes"];
+  const meta = loadSessionsMeta();
+  if (!meta[name]) return res.status(404).json({ error: "agent not found" });
+
+  // Support both legacy single-target { next, prompt, condition } and new multi-target { targets: [...] }
+  let targets;
+  if (Array.isArray(body.targets) && body.targets.length > 0) {
+    targets = body.targets;
+  } else if (body.next && body.prompt) {
+    targets = [{ next: body.next, prompt: body.prompt, condition: body.condition }];
+  } else {
+    return res.status(400).json({ error: "targets array or next+prompt required" });
+  }
+
+  meta[name].chain = targets.map(t => ({
+    next: t.next,
+    prompt: t.prompt || "",
+    condition: validConditions.includes(t.condition) ? t.condition : "always",
+  }));
+  saveSessionsMeta(meta);
+  res.json({ success: true });
+});
+
+app.delete("/api/sessions/:name/chain", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  const meta = loadSessionsMeta();
+  if (meta[name]) {
+    delete meta[name].chain;
+    saveSessionsMeta(meta);
+  }
+  res.json({ success: true });
+});
+
+// --- Workflow Batch Launch ---
+
+app.post("/api/workflow/launch", async (req, res) => {
+  const { nodes, connections } = req.body;
+  if (!Array.isArray(nodes) || nodes.length === 0) {
+    return res.status(400).json({ error: "No nodes provided" });
+  }
+
+  const created = [];
+  try {
+    for (const node of nodes) {
+      if (!node.prompt) continue;
+
+      // Generate name if not provided
+      let name = node.name || ("workflow-" + Date.now().toString(36).slice(-4));
+      if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+        name = name.replace(/[^a-zA-Z0-9_-]/g, "-").replace(/-+/g, "-");
+      }
+
+      // Deduplicate name
+      let finalName = name;
+      const currentSessions = listTmuxSessions();
+      if (currentSessions.includes(`${PREFIX}${finalName}`)) {
+        let i = 1;
+        while (currentSessions.includes(`${PREFIX}${finalName}-${i}`)) i++;
+        finalName = `${finalName}-${i}`;
+      }
+
+      const workdir = node.workdir || DEFAULT_WORKDIR;
+      createSession(finalName, workdir, node.prompt);
+
+      if (userConfig.autoRenameAgents) {
+        const meta = loadSessionsMeta();
+        if (meta[finalName]) {
+          meta[finalName].autoRename = true;
+          saveSessionsMeta(meta);
+        }
+      }
+
+      created.push({ id: node.id, name: finalName, workdir: workdir });
+      invalidateTmuxSessionsCache();
+    }
+
+    // Wire chains from connections
+    if (Array.isArray(connections)) {
+      for (const conn of connections) {
+        // Resolve node IDs to agent names
+        const fromCreated = created.find(c => c.id === conn.from);
+        const toCreated = created.find(c => c.id === conn.to);
+
+        // For existing agents, the ID is "existing-<name>"
+        const fromName = fromCreated ? fromCreated.name : (conn.from.startsWith("existing-") ? conn.from.slice(9) : conn.from);
+        const toName = toCreated ? toCreated.name : (conn.to.startsWith("existing-") ? conn.to.slice(9) : conn.to);
+
+        const meta = loadSessionsMeta();
+        if (meta[fromName]) {
+          const existingChain = meta[fromName].chain || [];
+          const targets = Array.isArray(existingChain) ? [...existingChain] : existingChain.next ? [existingChain] : [];
+          const validConditions = ["always", "when-idle", "branch-has-changes"];
+          targets.push({
+            next: toName,
+            prompt: conn.prompt || "",
+            condition: validConditions.includes(conn.condition) ? conn.condition : "always",
+          });
+          meta[fromName].chain = targets;
+          saveSessionsMeta(meta);
+        }
+      }
+    }
+
+    // Push initial output for each created agent
+    for (const c of created) {
+      const sessionName = `${PREFIX}${c.name}`;
+      const pushInitialOutput = () => {
+        try {
+          ensureTmuxServer();
+          const output = capturePane(sessionName);
+          if (!output) return;
+          const prev = prevOutputs.get(sessionName) || "";
+          if (output === prev) return;
+          const pushStatus = detectStatus(output, prev);
+          const filteredOutput = stripCeoPreamble(output);
+          const pushPromptType = pushStatus === "waiting" ? detectPromptType(filteredOutput) : null;
+          const pushPromptOptions = pushPromptType === "question" ? parsePromptOptions(filteredOutput) : null;
+          const message = JSON.stringify({
+            type: "output",
+            session: c.name,
+            lines: filterOutputForDisplay(output.split("\n")),
+            status: pushStatus,
+            promptType: pushPromptType,
+            promptOptions: pushPromptOptions,
+          });
+          prevOutputs.set(sessionName, output);
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) client.send(message);
+          });
+        } catch (e) { /* ignore push errors */ }
+      };
+      for (const ms of [500, 1000, 2000, 3000, 5000]) {
+        setTimeout(pushInitialOutput, ms);
+      }
+    }
+
+    res.json({ success: true, created });
+  } catch (e) {
+    res.status(500).json({ error: e.message, created });
   }
 });
 
@@ -1648,6 +2013,8 @@ app.put("/api/agent-docs/:name/:doc", (req, res) => {
   const filePath = path.join(agentDir, `${req.params.doc}.md`);
   try {
     fs.writeFileSync(filePath, req.body.content || "", "utf8");
+    activityEvents.addEvent({ type: "doc-save", agent: req.params.name, detail: req.params.doc });
+    bankroll.earn(50, "doc-save", req.params.name);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1688,6 +2055,83 @@ app.delete("/api/agent-docs/:name/:doc", (req, res) => {
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
+});
+
+// File tracker endpoints
+app.get("/api/file-overlaps", (req, res) => {
+  res.json(fileTracker.getOverlaps());
+});
+
+app.get("/api/agent-files/:name", (req, res) => {
+  const { name } = req.params;
+  if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
+  res.json(fileTracker.getAgentFiles(name));
+});
+
+app.get("/api/bankroll", (req, res) => {
+  const info = bankroll.getInfo();
+  info.agentEarnings = bankroll.getAllAgentEarnings();
+  res.json(info);
+});
+
+app.get("/api/bankroll/stats", (req, res) => {
+  res.json(bankroll.getStats());
+});
+
+app.post("/api/bankroll/wager", (req, res) => {
+  const { amount } = req.body || {};
+  if (typeof amount !== "number" || amount <= 0) return res.status(400).json({ error: "invalid" });
+  const success = bankroll.wager(amount);
+  res.json({ success, balance: bankroll.getBalance() });
+});
+
+app.post("/api/bankroll/win", (req, res) => {
+  const { amount } = req.body || {};
+  if (typeof amount !== "number" || amount <= 0) return res.status(400).json({ error: "invalid" });
+  bankroll.win(amount);
+  res.json({ balance: bankroll.getBalance() });
+});
+
+app.get("/api/activity", (req, res) => {
+  const since = req.query.since ? parseInt(req.query.since) : 0;
+  const agent = req.query.agent || null;
+  res.json(activityEvents.getEvents(since, agent));
+});
+
+app.get("/api/workspace-status", (req, res) => {
+  const meta = loadSessionsMeta();
+  const workspaces = {};
+  for (const s of meta) {
+    const wd = s.workdir || "unknown";
+    if (!workspaces[wd]) workspaces[wd] = [];
+    const files = fileTracker.getAgentFiles(s.name);
+    workspaces[wd].push({
+      name: s.name,
+      status: s.status || "idle",
+      branch: s.branch || null,
+      files: files
+    });
+  }
+  res.json({ workspaces });
+});
+
+app.get("/api/prs", (req, res) => {
+  const meta = loadSessionsMeta();
+  const agentBranches = [];
+  for (const [name, info] of Object.entries(meta)) {
+    if (info.type === "terminal") continue;
+    try {
+      const wd = info.workdir || DEFAULT_WORKDIR;
+      const git = getGitInfo(wd);
+      if (git?.branch) agentBranches.push({ branch: git.branch, workdir: wd });
+    } catch {}
+  }
+  const workspaces = [...new Set([
+    ...(userConfig.workspaces || []).map(w => w.path || w),
+    DEFAULT_WORKDIR,
+    ...agentBranches.map(a => a.workdir),
+  ])].filter(Boolean);
+  res.json(prDashboard.getPRs(agentBranches, workspaces));
 });
 
 app.get("/api/ceo-md", (req, res) => {
@@ -1760,6 +2204,34 @@ app.post("/api/shell/open-url", (req, res) => {
   const msg = JSON.stringify({ type: "shell-open-url", url });
   wss.clients.forEach((c) => { if (c.readyState === 1) c.send(msg); });
   res.json({ ok: true });
+});
+
+app.post("/api/shell/open-file", (req, res) => {
+  const { path: filePath, command } = req.body || {};
+  if (!filePath || typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  const allowedCommands = ["xed", "subl", "code", "open"];
+  const cmd = allowedCommands.includes(command) ? command : "open";
+  const { execFile } = require("child_process");
+  execFile(cmd, [filePath], { timeout: 5000 }, () => {});
+  res.json({ ok: true });
+});
+
+app.post("/api/read-file", (req, res) => {
+  const { filePath } = req.body || {};
+  if (!filePath || typeof filePath !== "string" || !path.isAbsolute(filePath)) {
+    return res.status(400).json({ error: "Invalid path" });
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (stat.size > 500000) return res.status(413).json({ error: "File too large (>500KB)" });
+    const content = fs.readFileSync(filePath, "utf8");
+    const ext = path.extname(filePath).toLowerCase();
+    res.json({ content, ext, path: filePath, size: stat.size });
+  } catch (e) {
+    res.status(404).json({ error: "File not found" });
+  }
 });
 
 app.post("/api/shell/open-finder", (req, res) => {
@@ -2447,6 +2919,10 @@ app.post("/api/worktrees/delete-all", (req, res) => {
 
 // --- System info ---
 
+app.get("/api/agent-templates", (req, res) => {
+  res.json(userConfig.agentTemplates || []);
+});
+
 app.get("/api/system-info", (req, res) => {
   const info = {};
   try { info.dashboardVersion = execSync("git rev-parse --short HEAD", { cwd: __dirname, encoding: "utf8", timeout: 3000 }).trim(); } catch { info.dashboardVersion = "unknown"; }
@@ -3056,6 +3532,61 @@ async function tryAutoRename(name, output) {
   }
 }
 
+// --- Agent Chain Execution ---
+const _chainExecuted = new Set(); // track chains already fired to prevent re-trigger
+
+function _executeChain(fromAgent, chain, workdir, branch) {
+  // Support both legacy single object { next, prompt, condition } and new array format
+  const targets = Array.isArray(chain) ? chain : [chain];
+
+  for (const target of targets) {
+    const { next, prompt, condition } = target;
+    const chainKey = `${fromAgent}->${next}`;
+
+    // Prevent duplicate execution within same idle cycle
+    if (_chainExecuted.has(chainKey)) continue;
+    _chainExecuted.add(chainKey);
+    setTimeout(() => _chainExecuted.delete(chainKey), 30000); // allow re-trigger after 30s
+
+    // Check condition
+    if (condition === "branch-has-changes") {
+      try {
+        const stat = diffService.getDiffStat(workdir, branch);
+        if (!stat || stat.files.length === 0) {
+          console.log(`[chain] ${fromAgent} → ${next}: skipped (no changes)`);
+          continue;
+        }
+      } catch {
+        console.log(`[chain] ${fromAgent} → ${next}: skipped (diff check failed)`);
+        continue;
+      }
+    }
+
+    // Variable substitution in prompt
+    let finalPrompt = (prompt || "").trim()
+      .replace(/\{branch\}/g, branch || "main")
+      .replace(/\{workdir\}/g, workdir || "");
+
+    // Default prompt if none was configured
+    if (!finalPrompt) {
+      finalPrompt = `Agent "${fromAgent}" has finished its work. You are next in the chain. Continue the workflow.`;
+    }
+
+    // Send to existing agent
+    const session = PREFIX + next;
+    const sessions = listTmuxSessions();
+    if (sessions.includes(session)) {
+      console.log(`[chain] ${fromAgent} → ${next}: sending prompt`);
+      sendKeys(session, finalPrompt);
+      scheduleForceUpdate();
+      // Broadcast chain-fired event
+      _broadcastWs({ type: "chain-fired", from: fromAgent, to: next, prompt: finalPrompt });
+    } else {
+      console.log(`[chain] ${fromAgent} → ${next}: agent not found, skipping`);
+    }
+  }
+}
+
 async function broadcastOutputs() {
   if (wss.clients.size === 0) return;
   if (_broadcastRunning) return;
@@ -3089,17 +3620,65 @@ async function broadcastOutputs() {
         const promptType = status === "waiting" ? detectPromptType(filteredOutput) : null;
         const promptOptions = promptType === "question" ? parsePromptOptions(filteredOutput) : null;
         prevOutputs.set(session, output);
+        const prevFileCount = fileTracker.getAgentFiles(name).length;
+        fileTracker.updateAgentFiles(name, output);
+        const newFiles = fileTracker.getAgentFiles(name);
+        if (newFiles.length > prevFileCount) {
+          const added = newFiles.slice(prevFileCount);
+          for (const f of added.slice(0, 3)) {
+            activityEvents.addEvent({ type: "file-edit", agent: name, detail: f.split("/").pop() });
+          }
+        }
 
         // Track status transitions for auto-rename
         const prevStatus = prevStatuses.get(session);
         prevStatuses.set(session, status);
+
+        // Bankroll: smart output-based work detection
+        let statusTransition = null;
+        if (status === "working" && prevStatus !== "working") {
+          statusTransition = "work-start";
+        } else if (prevStatus === "working" && status !== "working") {
+          statusTransition = "task-complete";
+        }
+        bankroll.detectWork(name, output, statusTransition);
+
+        // Track status changes for activity timeline
+        if (prevStatus && prevStatus !== status) {
+          activityEvents.addEvent({
+            type: "status-change",
+            agent: name,
+            detail: prevStatus + " \u2192 " + status,
+          });
+        }
         // Trigger on any transition to idle (working→idle, waiting→idle, asking→idle)
         if (status === "idle" && prevStatus && prevStatus !== "idle") {
           pendingRenames.push({ name, output });
         }
 
+        // (commit detection now handled by bankroll.detectWork above)
+
         const liveCwd = await getEffectiveCwdAsync(session, output);
+
+        // Chain execution: when agent transitions from working to idle, fire chain
+        if (prevStatus === "working" && status === "idle") {
+          const agentMeta = meta[name];
+          if (agentMeta?.chain) {
+            const chainCwd = liveCwd || agentMeta.workdir;
+            setTimeout(() => _executeChain(name, agentMeta.chain, chainCwd, git?.branch), 2000);
+          }
+        }
         const git = await getCachedGitInfo(liveCwd);
+
+        // Capture diff stat when agent finishes working
+        let diffFiles = null;
+        if (prevStatus === "working" && status !== "working") {
+          try {
+            const stat = diffService.getDiffStat(liveCwd || meta[name]?.workdir, git?.branch);
+            if (stat && stat.files.length > 0) diffFiles = stat.files;
+          } catch {}
+        }
+
         const message = JSON.stringify({
           type: "output",
           session: name,
@@ -3110,6 +3689,7 @@ async function broadcastOutputs() {
           workdir: liveCwd || null,
           branch: git?.branch || null,
           isWorktree: git?.isWorktree || false,
+          diffFiles,
         });
         wss.clients.forEach((client) => {
           if (client.readyState === 1) client.send(message);
@@ -3215,6 +3795,7 @@ wss.on("connection", (ws) => {
           favorite: meta[name]?.favorite || false,
           minimized: meta[name]?.minimized || false,
           type: meta[name]?.type || "agent",
+          chain: meta[name]?.chain || null,
         });
       }
       if (ws.readyState === 1) {
@@ -3245,6 +3826,7 @@ wss.on("connection", (ws) => {
             favorite: fallbackMeta[name]?.favorite || false,
             minimized: fallbackMeta[name]?.minimized || false,
             type: fallbackMeta[name]?.type || "agent",
+            chain: fallbackMeta[name]?.chain || null,
           };
         });
         if (ws.readyState === 1) {
@@ -3465,6 +4047,13 @@ setInterval(() => { broadcastOutputs(); }, POLL_INTERVAL);
 // Token usage sync — every 5s
 setInterval(broadcastTokenUsage, 5000);
 
+// Broadcast file overlaps every 15s
+setInterval(() => {
+  const overlaps = fileTracker.getOverlaps();
+  const msg = JSON.stringify({ type: "file-overlaps", overlaps: overlaps.length > 0 ? overlaps : [] });
+  wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
+}, 15000);
+
 // --- Start ---
 
 // Caffeinate
@@ -3515,6 +4104,11 @@ server.listen(PORT, BIND_HOST, () => {
   startShellInfoPolling();
   restoreSessions(detectClaudeSessionIdForAgent);
   _tokenUsageTotals = loadTokenUsage();
+  bankroll.checkDailySeed();
+  // Broadcast earn events to all clients in real-time
+  bankroll.onEarn((amount, reason, agentName) => {
+    _broadcastWs({ type: "bankroll-earn", amount, reason, agent: agentName || null, balance: bankroll.getBalance() });
+  });
   // Auto-rebuild native app if binary is stale (main.swift changed since last compile)
   {
     const nativeAppDir = getNativeAppDir();

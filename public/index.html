@@ -103,6 +103,10 @@
         <span class="token-usage-item"><span class="token-usage-label">Month</span><span id="token-usage-month" class="token-usage-value">—</span></span>
         <span class="token-usage-item"><span class="token-usage-label">All Time</span><span id="token-usage-total" class="token-usage-value">—</span></span>
       </div>
+      <div id="budget-progress-bar" class="budget-bar" style="display:none">
+        <div id="budget-progress-fill" class="budget-bar-fill"></div>
+        <span id="budget-progress-label" class="budget-bar-label"></span>
+      </div>
     </div>
     <div class="header-right">
       <span id="update-wrapper" class="update-wrapper" style="display:none">
@@ -110,6 +114,8 @@
         <div id="update-tooltip" class="update-tooltip"></div>
       </span>
       <nav id="dock-bar" class="dock-bar">
+        <span id="bankroll-display" class="bankroll-display" title="Dashboard Bankroll">$0</span>
+        <button id="game-btn" class="dock-item" tabindex="0" title="Arcade (@)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="5" height="5" rx=".5"/><rect x="9" y="5" width="5" height="5" rx=".5"/><rect x="4" y="9" width="5" height="5" rx=".5"/></svg><span class="dock-label">Arcade</span><kbd>@</kbd></button>
         <button id="bug-report-btn" class="dock-item" tabindex="0" title="Bug Report (!)"><svg class="dock-icon dock-icon-lg" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="9.5" r="4"/><path d="M6 6.5C6 5.4 6.9 4.5 8 4.5s2 .9 2 2"/><path d="M4 8H1.5M12 8h2.5M4.5 12l-2 1.5M11.5 12l2 1.5M4.5 7l-2-1.5M11.5 7l2-1.5"/></svg><span class="dock-label">Bug</span><kbd>!</kbd></button>
         <button id="restart-server-btn" class="dock-item" tabindex="0" title="Refresh (R)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.3-4"/><path d="M13.5 8a5.5 5.5 0 0 1-9.3 4"/><path d="M11.5 1.5v3h3"/><path d="M4.5 14.5v-3h-3"/></svg><span class="dock-label">Refresh</span><kbd>R</kbd></button>
         <button id="settings-btn" class="dock-item" tabindex="0" title="Settings (S)"><svg class="dock-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M2.7 2.7l1.1 1.1M12.2 12.2l1.1 1.1M13.3 2.7l-1.1 1.1M3.8 12.2l-1.1 1.1"/></svg><span class="dock-label">Settings</span><kbd>S</kbd></button>
@@ -196,6 +202,29 @@
             <div class="drop-hint">Drop images or videos here</div>
           </div>
         </label>
+        <details class="chain-config" id="chain-config">
+          <summary>Chain after completion</summary>
+          <div id="chain-targets-container">
+            <div class="chain-fields" data-chain-target="0">
+              <label>Then send to agent:
+                <select class="chain-next-select" id="chain-next-select">
+                  <option value="">None</option>
+                </select>
+              </label>
+              <label>With prompt:
+                <textarea class="chain-prompt" id="chain-prompt" placeholder="Review changes on {branch}..." rows="2"></textarea>
+              </label>
+              <label>Condition:
+                <select class="chain-condition" id="chain-condition">
+                  <option value="always">Always</option>
+                  <option value="when-idle">When idle</option>
+                  <option value="branch-has-changes">When branch has changes</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <button type="button" class="chain-add-target-btn" id="chain-add-target-btn">+ Add another target</button>
+        </details>
         <div class="modal-actions">
           <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
           <button type="submit" class="btn-primary">Create</button>
@@ -776,11 +805,20 @@
   <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js" integrity="sha384-suTk5GfzCaPxAJRzhqzQQvM81UskMll+stLgqXpay997ORTnMRm1IAJi143VfhXU" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/diff2html@3.4.48/bundles/js/diff2html.min.js" integrity="sha384-1tVmtFdzvhqVP3vQWJmKYvD0uTtR0r+FhlLWw+vG6F/vNDS7yegNMNNHRS12fSyR" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js" crossorigin="anonymous"></script>
+  <script src="js/polling-manager.js?v=20260306a"></script>
+  <script src="js/constants.js?v=20260306a"></script>
   <script src="js/theme.js?v=20260305e"></script>
   <script src="js/modals.js?v=20260305e"></script>
   <script src="js/todos.js?v=20260305e"></script>
   <script src="js/settings.js?v=20260306a"></script>
   <script src="js/shell.js?v=20260305e"></script>
-  <script src="app.js?v=20260305f"></script>
+  <script src="js/command-palette.js?v=20260306a"></script>
+  <script src="js/split-view.js?v=20260306a"></script>
+  <script src="js/output-search.js?v=20260306a"></script>
+  <script src="js/cards.js?v=20260306a"></script>
+  <script src="js/dependency-graph.js?v=20260306a"></script>
+  <script src="js/activity-timeline.js?v=20260306b"></script>
+  <script src="js/operations-panel.js?v=20260307a"></script>
+  <script src="app.js?v=20260306b"></script>
 </body>
 </html>
