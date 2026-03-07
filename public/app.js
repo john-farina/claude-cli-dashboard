@@ -467,6 +467,7 @@ popoutChannel.onmessage = (event) => {
   }
   if (msg.type === "kill-agent") {
     poppedOutAgents.delete(msg.agent);
+    PollingManager.clearByOwner(msg.agent);
     const agent = agents.get(msg.agent);
     if (agent) {
       agent.card.remove();
@@ -1112,7 +1113,7 @@ function requestRefresh(session) {
 
 function scheduleRefresh(session) {
   for (const ms of [500, 1000, 2000, 3000, 5000]) {
-    setTimeout(() => requestRefresh(session), ms);
+    PollingManager.registerTimeout(`refresh-${session}-${ms}`, () => requestRefresh(session), ms, session);
   }
 }
 
@@ -2138,11 +2139,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       // If click event doesn't fire (long-press suppression), auto-clear the flag
       setTimeout(() => { skipNextClick = false; }, 100);
       // Auto-reset after 5s if not clicked
-      fireResetTimer = setTimeout(() => {
+      fireResetTimer = PollingManager.registerTimeout(`fire-reset-${name}`, () => {
         fireActive = false;
         killBtn.classList.remove("fire-mode");
         killBtn.innerHTML = "\u00d7";
-      }, 5000);
+      }, 5000, name);
     }
   });
   killBtn.addEventListener("mouseleave", () => {
@@ -2158,6 +2159,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
   let killArmed = false;
   let killTimer = null;
   const doKill = async (cleanWorktree = false) => {
+    PollingManager.clearByOwner(name);
     const qs = cleanWorktree ? "?cleanWorktree=true" : "";
     await fetch(`/api/sessions/${name}${qs}`, { method: "DELETE" });
     // Also kill the embedded terminal tmux session if it exists
@@ -2251,6 +2253,7 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       document.getElementById("fire-confirm").addEventListener("click", async () => {
         const reason = reasonEl.value.trim();
         cleanup();
+        PollingManager.clearByOwner(name);
         // Remove card immediately — agent runs in background
         try {
           await fetch(`/api/sessions/${encodeURIComponent(name)}/fire`, {
@@ -2294,11 +2297,11 @@ function addAgentCard(name_, workdir, branch, isWorktree, favorite, minimized) {
       killArmed = true;
       killBtn.classList.add("armed");
       killBtn.textContent = "KILL";
-      killTimer = setTimeout(() => {
+      killTimer = PollingManager.registerTimeout(`kill-arm-${name}`, () => {
         killArmed = false;
         killBtn.classList.remove("armed");
         killBtn.innerHTML = "\u00d7";
-      }, 2000);
+      }, 2000, name);
       return;
     }
     clearTimeout(killTimer);
@@ -3159,6 +3162,7 @@ function addTerminalCard(name, workdir) {
     const agentEntry = agents.get(name);
     if (agentEntry?.resizeObserver) agentEntry.resizeObserver.disconnect();
     term.dispose();
+    PollingManager.clearByOwner(name);
     card.remove();
     agents.delete(name);
     // Clear terminalOpen on parent agent so it doesn't re-open on reload
@@ -4005,7 +4009,7 @@ async function saveAgentDoc(agentName, docName, content, renderedEl, editArea) {
 }
 
 function startDocPolling() {
-  setInterval(async () => {
+  PollingManager.register("doc-polling", async () => {
     for (const [name, agent] of agents) {
       const section = agent.card.querySelector(".agent-doc-section");
       if (!section) continue;
@@ -4034,7 +4038,7 @@ function startDocPolling() {
         }
       } catch {}
     }
-    }, 8000);
+  }, 8000);
 }
 
 // --- Slash Command Autocomplete ---
