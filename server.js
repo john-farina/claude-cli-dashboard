@@ -30,6 +30,7 @@ const terminalCards = require("./lib/terminal-cards");
 const shellPtyMod = require("./lib/shell-pty");
 const fileTracker = require("./lib/file-tracker");
 const activityEvents = require("./lib/activity-events");
+const bankroll = require("./lib/bankroll");
 
 // Destructure security
 const {
@@ -1296,6 +1297,10 @@ app.delete("/api/sessions/:name", async (req, res) => {
     }
   }
 
+  // Bankroll: earn on agent cleanup
+  bankroll.earn(25, "agent-cleanup", name);
+  bankroll.removeAgent(name);
+
   // Snapshot killed agent's per-day token contributions before removing it
   snapshotKilledAgentTokens(name);
 
@@ -1802,6 +1807,7 @@ app.put("/api/agent-docs/:name/:doc", (req, res) => {
   try {
     fs.writeFileSync(filePath, req.body.content || "", "utf8");
     activityEvents.addEvent({ type: "doc-save", agent: req.params.name, detail: req.params.doc });
+    bankroll.earn(50, "doc-save", req.params.name);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1853,6 +1859,24 @@ app.get("/api/agent-files/:name", (req, res) => {
   const { name } = req.params;
   if (!isSafePathSegment(name)) return res.status(400).json({ error: "invalid" });
   res.json(fileTracker.getAgentFiles(name));
+});
+
+app.get("/api/bankroll", (req, res) => {
+  res.json(bankroll.getInfo());
+});
+
+app.post("/api/bankroll/wager", (req, res) => {
+  const { amount } = req.body || {};
+  if (typeof amount !== "number" || amount <= 0) return res.status(400).json({ error: "invalid" });
+  const success = bankroll.wager(amount);
+  res.json({ success, balance: bankroll.getBalance() });
+});
+
+app.post("/api/bankroll/win", (req, res) => {
+  const { amount } = req.body || {};
+  if (typeof amount !== "number" || amount <= 0) return res.status(400).json({ error: "invalid" });
+  bankroll.win(amount);
+  res.json({ balance: bankroll.getBalance() });
 });
 
 app.get("/api/activity", (req, res) => {
@@ -3278,6 +3302,15 @@ async function broadcastOutputs() {
         const prevStatus = prevStatuses.get(session);
         prevStatuses.set(session, status);
 
+        // Bankroll: mark working start
+        if (status === "working" && prevStatus !== "working") {
+          bankroll.markWorking(name);
+        }
+        // Bankroll: earn on task complete (working -> not working)
+        if (prevStatus === "working" && status !== "working") {
+          bankroll.earn(100, "task-complete", name);
+        }
+
         // Track status changes for activity timeline
         if (prevStatus && prevStatus !== status) {
           activityEvents.addEvent({
@@ -3289,6 +3322,11 @@ async function broadcastOutputs() {
         // Trigger on any transition to idle (working→idle, waiting→idle, asking→idle)
         if (status === "idle" && prevStatus && prevStatus !== "idle") {
           pendingRenames.push({ name, output });
+        }
+
+        // Bankroll: detect commits in output
+        if (/\[[\w\s-]+\s+[0-9a-f]{7,10}\]/.test(output)) {
+          bankroll.earn(200, "commit", name);
         }
 
         const liveCwd = await getEffectiveCwdAsync(session, output);
@@ -3715,6 +3753,7 @@ server.listen(PORT, BIND_HOST, () => {
   startShellInfoPolling();
   restoreSessions(detectClaudeSessionIdForAgent);
   _tokenUsageTotals = loadTokenUsage();
+  bankroll.checkDailySeed();
   // Auto-rebuild native app if binary is stale (main.swift changed since last compile)
   {
     const nativeAppDir = getNativeAppDir();
