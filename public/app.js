@@ -831,7 +831,8 @@ function connect() {
       _focusLog("reload-save", `saving state: drafts=${Object.keys(_rs.drafts||{}).length}, focusedAgent=${_rs.focusedAgent||"none"}, cursor=${_rs.focusCursorStart}-${_rs.focusCursorEnd}, modal=${!!_rs.modal}`);
       _flushFocusLog();
       sessionStorage.setItem("ceo-reload-state", JSON.stringify(_rs));
-      location.reload();
+      if (!_safeReload()) return;
+      _reloadingPage = true;
       return;
     }
 
@@ -848,7 +849,7 @@ function connect() {
           .then((data) => {
             // Only reload once the NEW server is up (different version = new process)
             if (_knownVersion && data.version === _knownVersion) throw new Error("same server");
-            location.reload();
+            _safeReload();
           })
           .catch(() => setTimeout(pollUntilReady, 500));
       };
@@ -4957,11 +4958,17 @@ function _closeArcade() {
     try { _activeGame.iframe.contentWindow?.postMessage("ceo-pause", "*"); } catch {}
   }
   _arcadeOverlay?.classList.add("hidden");
+  // If a reload was deferred, trigger it now
+  if (_pendingReload && !_activeGame) {
+    _pendingReload = false;
+    setTimeout(() => location.reload(), 500);
+  }
 }
 
 function _arcadeShowPicker() {
   // Destroy any active game
   _activeGame = null;
+  localStorage.removeItem("ceo-active-wager");
   if (_pauseLayer) { _pauseLayer.remove(); _pauseLayer = null; }
   _arcadeModal.style.height = "auto";
   _arcadeModal.style.maxHeight = "85vh";
@@ -5143,6 +5150,26 @@ function _updateCardEarnings(name, earned) {
 }
 setInterval(_refreshBankroll, 10000);
 _refreshBankroll();
+
+// Refund orphaned wagers from interrupted games
+(function() {
+  const wager = localStorage.getItem("ceo-active-wager");
+  if (wager) {
+    try {
+      const { amount } = JSON.parse(wager);
+      if (amount > 0) {
+        fetch("/api/bankroll/win", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ amount }),
+        }).then(() => _refreshBankroll());
+        console.log("[bankroll] Refunded $" + amount + " from interrupted game");
+      }
+    } catch {}
+    localStorage.removeItem("ceo-active-wager");
+  }
+})();
+
 // Click bankroll display to open wallet
 document.getElementById("bankroll-display")?.addEventListener("click", _openWallet);
 
@@ -5156,6 +5183,8 @@ window.addEventListener("message", (e) => {
     e.source.postMessage({ type: "bankroll-balance", balance: _bankrollBalance }, "*");
   }
   if (msg.type === "bankroll-wager" && typeof msg.amount === "number") {
+    // Track active wager for refund on unexpected reload
+    localStorage.setItem("ceo-active-wager", JSON.stringify({ amount: msg.amount, timestamp: Date.now() }));
     fetch("/api/bankroll/wager", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -5170,6 +5199,7 @@ window.addEventListener("message", (e) => {
     });
   }
   if (msg.type === "bankroll-win" && typeof msg.amount === "number") {
+    localStorage.removeItem("ceo-active-wager"); // game settled, no refund needed
     fetch("/api/bankroll/win", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
