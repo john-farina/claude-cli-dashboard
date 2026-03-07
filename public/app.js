@@ -5079,44 +5079,38 @@ function _handleBankrollEarn(msg) {
   const el = document.getElementById("bankroll-display");
   if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
 
-  // Update agent card earnings + show floating popup
+  // Update agent card earnings + show inline label
   if (msg.agent) {
-    const agent = agents.find(a => a.name === msg.agent);
+    const agent = agents.get(msg.agent);
     if (agent?.card) {
-      // Update earnings counter
       const earningsEl = agent.card.querySelector(".agent-earnings");
       if (earningsEl) {
-        const current = parseInt(earningsEl.textContent.replace(/[$,]/g, "")) || 0;
+        const current = parseInt(earningsEl.dataset.total || "0") || 0;
         const newTotal = current + msg.amount;
+        earningsEl.dataset.total = newTotal;
+        const label = _EARN_LABELS[msg.reason] || msg.reason;
+        // Show total + brief flash of what just earned
         earningsEl.textContent = "$" + newTotal.toLocaleString();
         earningsEl.style.display = "";
-      }
-
-      // Floating "+$X reason" popup
-      const popup = document.createElement("div");
-      popup.className = "earn-popup";
-      const label = _EARN_LABELS[msg.reason] || msg.reason;
-      popup.textContent = "+$" + msg.amount + " " + label;
-      const header = agent.card.querySelector(".card-subheader");
-      if (header) {
-        header.style.position = "relative";
-        popup.style.cssText = "position:absolute;right:8px;top:-2px;color:#4ade80;font-size:11px;font-weight:bold;pointer-events:none;opacity:1;transition:all 0.8s ease;z-index:5;text-shadow:0 0 6px rgba(74,222,128,0.4);";
-        header.appendChild(popup);
-        requestAnimationFrame(() => {
-          popup.style.opacity = "0";
-          popup.style.transform = "translateY(-18px)";
-        });
-        setTimeout(() => popup.remove(), 900);
+        // Briefly show the reason next to the amount
+        const reasonSpan = earningsEl.querySelector(".earn-reason") || document.createElement("span");
+        reasonSpan.className = "earn-reason";
+        reasonSpan.textContent = " +" + msg.amount + " " + label;
+        if (!reasonSpan.parentNode) earningsEl.appendChild(reasonSpan);
+        reasonSpan.style.opacity = "1";
+        clearTimeout(earningsEl._fadeTimer);
+        earningsEl._fadeTimer = setTimeout(() => { reasonSpan.style.opacity = "0"; }, 2000);
       }
     }
   }
 }
 
 function _updateCardEarnings(name, earned) {
-  const agent = agents.find(a => a.name === name);
+  const agent = agents.get(name);
   if (!agent?.card) return;
   const el = agent.card.querySelector(".agent-earnings");
   if (el && earned > 0) {
+    el.dataset.total = earned;
     el.textContent = "$" + earned.toLocaleString();
     el.style.display = "";
   }
