@@ -6644,3 +6644,11 @@ header .btn-primary kbd {
   cursor: pointer; font-weight: 600;
 }
 .arcade-alert-go:hover { background: rgba(255,255,255,0.3); }
+
+/* --- Bankroll Display --- */
+.bankroll-display {
+  font-family: var(--font-mono, monospace); font-size: 13px; font-weight: 700;
+  color: #c9a84c; padding: 4px 10px; border-radius: 6px;
+  background: rgba(201, 168, 76, 0.1); border: 1px solid rgba(201, 168, 76, 0.2);
+  cursor: default; white-space: nowrap; display: inline-flex; align-items: center;
+}

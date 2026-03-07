@@ -4735,6 +4735,59 @@ function _showArcadeAlert(agentName, label) {
   setTimeout(() => { if (alert.parentNode) alert.remove(); }, 10000);
 }
 
+// --- Bankroll polling ---
+let _bankrollBalance = 0;
+async function _refreshBankroll() {
+  try {
+    const res = await fetch("/api/bankroll");
+    if (res.ok) {
+      const data = await res.json();
+      _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+    }
+  } catch {}
+}
+setInterval(_refreshBankroll, 10000);
+_refreshBankroll();
+
+// --- Bankroll postMessage bridge for game iframes ---
+window.addEventListener("message", (e) => {
+  if (!_activeGame?.iframe?.contentWindow || e.source !== _activeGame.iframe.contentWindow) return;
+  const msg = e.data;
+  if (!msg || typeof msg !== "object") return;
+
+  if (msg.type === "bankroll-check") {
+    e.source.postMessage({ type: "bankroll-balance", balance: _bankrollBalance }, "*");
+  }
+  if (msg.type === "bankroll-wager" && typeof msg.amount === "number") {
+    fetch("/api/bankroll/wager", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: msg.amount }),
+    }).then(r => r.json()).then(data => {
+      if (data.balance !== undefined) _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      e.source.postMessage({ type: "bankroll-wager-result", success: data.success, balance: _bankrollBalance }, "*");
+    }).catch(() => {
+      e.source.postMessage({ type: "bankroll-wager-result", success: false, balance: _bankrollBalance }, "*");
+    });
+  }
+  if (msg.type === "bankroll-win" && typeof msg.amount === "number") {
+    fetch("/api/bankroll/win", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ amount: msg.amount }),
+    }).then(r => r.json()).then(data => {
+      if (data.balance !== undefined) _bankrollBalance = data.balance;
+      const el = document.getElementById("bankroll-display");
+      if (el) el.textContent = "$" + _bankrollBalance.toLocaleString();
+      e.source.postMessage({ type: "bankroll-win-result", balance: _bankrollBalance }, "*");
+    }).catch(() => {});
+  }
+});
+
 document.getElementById("game-btn")?.addEventListener("click", _openArcade);
 
 // --- Init ---
