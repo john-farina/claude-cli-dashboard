@@ -3824,6 +3824,37 @@ function updateTokenUsageDisplay(msg) {
   localStorage.setItem("ceo-token-usage", JSON.stringify(stored));
 
   updateHeaderTokenTotals(stored);
+
+  // Update budget progress bar if budget info is present
+  if (payload._budgets) _updateBudgetBar(payload._budgets);
+}
+
+function _updateBudgetBar(budgetInfo) {
+  const bar = document.getElementById("budget-progress-bar");
+  const barFill = document.getElementById("budget-progress-fill");
+  const barLabel = document.getElementById("budget-progress-label");
+  if (!bar || !budgetInfo?.config?.dailyDollars) {
+    if (bar) bar.style.display = "none";
+    return;
+  }
+
+  const { dailyDollars, warningPercent = 80 } = budgetInfo.config;
+  const spent = budgetInfo.todayDollars || 0;
+  const pct = Math.min(100, (spent / dailyDollars) * 100);
+
+  bar.style.display = "";
+  bar.title = `Daily budget: $${spent.toFixed(2)} of $${dailyDollars} spent (${pct.toFixed(1)}%)`;
+  barFill.style.width = pct + "%";
+  barLabel.textContent = `$${spent.toFixed(2)} / $${dailyDollars}`;
+
+  // Color: green < warning, yellow at warning, red at 100%
+  if (pct >= 100) {
+    barFill.style.background = "#ef4444";
+  } else if (pct >= warningPercent) {
+    barFill.style.background = "#fbbf24";
+  } else {
+    barFill.style.background = "var(--accent, #4ade80)";
+  }
 }
 
 let _lastKnownAllTimeTokens = 0;

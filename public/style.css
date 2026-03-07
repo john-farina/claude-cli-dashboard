@@ -1184,6 +1184,39 @@ header h1 {
   line-height: 1.2em;
   overflow: hidden;
 }
+
+/* --- Budget Progress Bar --- */
+.budget-bar {
+  position: relative;
+  height: 18px;
+  width: 140px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 9px;
+  overflow: hidden;
+  margin-left: 12px;
+}
+.budget-bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 9px;
+  transition: width 0.5s ease, background 0.3s;
+  background: var(--accent);
+}
+.budget-bar-label {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 10px;
+  color: var(--text);
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+}
+
 /* Each character slot */
 .troll {
   display: inline-block;

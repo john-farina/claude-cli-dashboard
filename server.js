@@ -481,8 +481,26 @@ function syncTokenUsage() {
   return saved;
 }
 
+function _todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function _computeDollars(usage) {
+  // Same pricing as frontend: $15/M input, $75/M output, $12.50/M cacheCreation, $1.50/M cacheRead
+  return ((usage.input || 0) * 15 + (usage.output || 0) * 75 +
+    (usage.cacheCreation || 0) * 12.5 + (usage.cacheRead || 0) * 1.5) / 1000000;
+}
+
 function broadcastTokenUsage() {
   const usage = syncTokenUsage();
+  // Attach budget info if configured
+  if (userConfig.budgets) {
+    usage._budgets = {
+      config: userConfig.budgets,
+      todayDollars: _computeDollars(usage.daily?.[_todayKey()] || {}),
+    };
+  }
   const message = JSON.stringify({ type: "token-usage", usage });
   wss.clients.forEach((client) => {
     if (client.readyState === 1) client.send(message);

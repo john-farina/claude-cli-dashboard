@@ -10,6 +10,11 @@
   "prLinkStyle": "graphite",
   "title": "CEO Dashboard",
   "bugReportRepo": "john-farina/claude-cli-dashboard",
+  "budgets": {
+    "dailyDollars": 50,
+    "perAgentDollars": 20,
+    "warningPercent": 80
+  },
   "agentTemplates": [
     {
       "name": "Frontend",
