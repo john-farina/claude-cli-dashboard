@@ -3625,10 +3625,12 @@ async function broadcastOutputs() {
 
         // Bankroll: mark working start
         if (status === "working" && prevStatus !== "working") {
+          console.log(`[bankroll-trigger] ${name}: ${prevStatus} -> working (timer started)`);
           bankroll.markWorking(name);
         }
         // Bankroll: earn on task complete (working -> not working)
         if (prevStatus === "working" && status !== "working") {
+          console.log(`[bankroll-trigger] ${name}: working -> ${status} (task-complete attempt)`);
           bankroll.earn(100, "task-complete", name);
         }
 
@@ -3662,6 +3664,7 @@ async function broadcastOutputs() {
             const hash = m.match(/([0-9a-f]{7,10})\]/)?.[1];
             if (hash && !seen.has(hash)) {
               seen.add(hash);
+              console.log(`[bankroll-trigger] commit detected: ${hash} from ${name}`);
               bankroll.earn(200, "commit", name);
             }
           }
