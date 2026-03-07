@@ -744,6 +744,8 @@ function buildReloadState() {
       workdir: getSelectedWorkdir(),
       customWorkdir: document.getElementById("agent-workdir-custom").value,
       selectedWorkdirPath: selectedWorkdirPath,
+      selectedSessionId: selectedSessionId || null,
+      selectedSessionLabel: sessionSelectedLabel ? sessionSelectedLabel.textContent : null,
     };
     // Save modal attachments
     if (modalPendingAttachments.length > 0) {
@@ -4283,6 +4285,16 @@ function _applyRestoredState(state) {
   // 6. Restore new-agent modal state if it was open
   if (state.modal) {
     modalOverlay.classList.remove("hidden");
+    if (state.modal.selectedSessionId) {
+      selectedSessionId = state.modal.selectedSessionId;
+      // Restore the "Resuming" UI state — hide prompt, show selected info
+      if (state.modal.selectedSessionLabel) {
+        sessionSelectedLabel.textContent = state.modal.selectedSessionLabel;
+      }
+      sessionSelectedInfo.classList.remove("hidden");
+      promptLabel.style.display = "none";
+    }
+    fetchClaudeSessions();
     document.getElementById("agent-name").value = state.modal.name || "";
     document.getElementById("agent-prompt").value = state.modal.prompt || "";
     if (state.modal.selectedWorkdirPath) {
