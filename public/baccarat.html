@@ -942,13 +942,15 @@ function clearResult() {
 function selectBetArea(area) {
   if (gameState !== 'betting') return;
   if (selectedArea === area) {
-    // Deselect
     selectedArea = null;
   } else {
+    // Clear all other bets — only one area allowed
+    bets = { player: { amount: 0, chips: [] }, banker: { amount: 0, chips: [] }, tie: { amount: 0, chips: [] } };
     selectedArea = area;
   }
   renderBetAreas();
   renderChipRack();
+  renderActionButtons();
 }
 
 function addChip(denom) {
