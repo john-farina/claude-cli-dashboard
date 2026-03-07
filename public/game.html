@@ -599,10 +599,15 @@ function drawParticles(){
       if(p.size>3){fxCtx.globalAlpha=p.life*0.3;fxCtx.beginPath();fxCtx.arc(p.x,p.y,p.size*p.life*1.8,0,6.28);fxCtx.fill();}}
   }
 
+  // Restore the gravity-flip transform before drawing text (text should always be right-side-up)
+  fxCtx.restore();
+  fxCtx.save();fxCtx.translate(FX_PAD,FX_PAD);
+
   // Text popups with outline + glow + wobble
   for(const t of textPopups){
     fxCtx.globalAlpha=Math.min(1,t.life*1.5);
-    fxCtx.save();fxCtx.translate(t.x+Math.sin(t.wobble)*3*t.scale,t.y);
+    const ty = gravityFlipped ? (BH - t.y) : t.y;
+    fxCtx.save();fxCtx.translate(t.x+Math.sin(t.wobble)*3*t.scale,ty);
     const s=t.scale*(1+Math.sin(t.wobble*2)*0.05); // breathing
     fxCtx.scale(s,s);
     fxCtx.font=`bold ${t.size}px 'Segoe UI',system-ui,sans-serif`;fxCtx.textAlign='center';
