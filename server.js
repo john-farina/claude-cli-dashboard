@@ -1592,6 +1592,33 @@ app.get("/api/sessions/:name/pr-url", async (req, res) => {
   }
 });
 
+// --- Agent Output Search ---
+app.get("/api/sessions/:name/search", (req, res) => {
+  const { name } = req.params;
+  const { q } = req.query;
+  if (!isSafePathSegment(name) || !q || typeof q !== "string") {
+    return res.status(400).json({ error: "invalid params" });
+  }
+  const session = PREFIX + name;
+  try {
+    const output = execSync(
+      `tmux capture-pane -t ${shellQuote(session)} -p -S -50000`,
+      { encoding: "utf8", timeout: 5000 }
+    );
+    const lines = output.split("\n");
+    const matches = [];
+    const query = q.toLowerCase();
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(query)) {
+        matches.push({ line: i, text: lines[i] });
+      }
+    }
+    res.json({ matches, total: matches.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- .claude File Browser API ---
 
 app.get("/api/claude-files", (req, res) => {

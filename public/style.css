@@ -6426,3 +6426,24 @@ header .btn-primary kbd {
   justify-content: center; font-weight: 700; font-size: 12px;
   background: rgba(var(--accent-rgb, 201,168,76), 0.15); color: var(--accent);
 }
+
+/* --- Output Search --- */
+.output-search-bar {
+  display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border, #333);
+}
+.output-search-bar.hidden { display: none; }
+.output-search-bar input {
+  flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border, #333);
+  border-radius: 6px; padding: 6px 10px; font-size: 13px; font-family: var(--font-mono, monospace);
+  outline: none; min-width: 0;
+}
+.output-search-bar input:focus { border-color: var(--accent); }
+.output-search-count { font-size: 12px; color: var(--text-dim); white-space: nowrap; min-width: 70px; }
+.output-search-bar button {
+  background: none; border: none; color: var(--text-dim); cursor: pointer;
+  font-size: 14px; padding: 4px 6px; border-radius: 4px;
+}
+.output-search-bar button:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.output-search-highlight { background: rgba(255, 200, 50, 0.3); border-radius: 2px; }
+.output-search-highlight.current { background: rgba(255, 200, 50, 0.7); color: #000; }

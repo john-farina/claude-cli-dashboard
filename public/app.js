@@ -4189,6 +4189,17 @@ function _toggleHelpOverlay() {
 document.addEventListener("keydown", (e) => {
   let inInput = e.target.matches("input, textarea, [contenteditable]");
 
+  // Cmd+F / Ctrl+F: search agent output (when focused on a card)
+  if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+    const card = e.target.closest(".agent-card");
+    if (card && typeof OutputSearch !== "undefined") {
+      e.preventDefault();
+      OutputSearch.openForCard(card);
+      return;
+    }
+    // Let browser Cmd+F through if not on a card
+  }
+
   // Cmd+K / Ctrl+K: Command Palette
   if ((e.metaKey || e.ctrlKey) && e.key === "k") {
     e.preventDefault();
