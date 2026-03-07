@@ -4411,6 +4411,48 @@ function setupAutocomplete(input, card) {
 
 // --- Keyboard shortcuts ---
 
+let _helpOverlay = null;
+function _toggleHelpOverlay() {
+  if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
+    _helpOverlay.classList.add("hidden");
+    return;
+  }
+  if (!_helpOverlay) {
+    _helpOverlay = document.createElement("div");
+    _helpOverlay.id = "help-overlay";
+    _helpOverlay.className = "command-palette-overlay";
+    _helpOverlay.innerHTML = `
+      <div class="command-palette" style="max-width:480px">
+        <div style="padding:20px 24px 8px;font-size:16px;font-weight:600">Keyboard Shortcuts</div>
+        <div style="padding:8px 24px 20px;font-size:13px;line-height:2.2">
+          <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 16px;align-items:center">
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Cmd+K</kbd><span>Command Palette</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">N</kbd><span>New Agent</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">T</kbd><span>Terminal</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">F</kbd><span>Files</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">S</kbd><span>Settings</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">B</kbd><span>Bookmarks</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">D</kbd><span>Todos</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">C</kbd><span>CEO Prompt</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">R</kbd><span>Restart</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">!</kbd><span>Bug Report</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">/</kbd><span>Focus First Card</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">1-9</kbd><span>Focus Card N</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">j/k</kbd><span>Navigate Cards</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">?</kbd><span>This Help</span>
+            <kbd style="background:rgba(255,255,255,0.06);padding:2px 8px;border-radius:4px;font-size:11px;font-family:var(--font-mono,monospace);text-align:center">Esc</kbd><span>Close / Back</span>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(_helpOverlay);
+    _helpOverlay.addEventListener("mousedown", (e) => {
+      if (e.target === _helpOverlay) _helpOverlay.classList.add("hidden");
+    });
+  }
+  _helpOverlay.classList.remove("hidden");
+}
+
 document.addEventListener("keydown", (e) => {
   let inInput = e.target.matches("input, textarea, [contenteditable]");
 
@@ -4476,6 +4518,16 @@ document.addEventListener("keydown", (e) => {
     if (_diffOverlay && !_diffOverlay.classList.contains("hidden")) {
       e.preventDefault();
       closeDiffModal();
+      return;
+    }
+    if (_helpOverlay && !_helpOverlay.classList.contains("hidden")) {
+      e.preventDefault();
+      _helpOverlay.classList.add("hidden");
+      return;
+    }
+    if (typeof CommandPalette !== "undefined" && CommandPalette.isOpen()) {
+      e.preventDefault();
+      CommandPalette.close();
       return;
     }
     if (!modalOverlay.classList.contains("hidden")) {
@@ -4604,6 +4656,32 @@ document.addEventListener("keydown", (e) => {
 
   // Remaining hotkeys — skip if typing in any input
   if (inInput) return;
+
+  // j/k: navigate between agent cards
+  if (key === "j" || key === "k") {
+    e.preventDefault();
+    const cards = [...grid.querySelectorAll(".agent-card:not(.minimized)")];
+    if (cards.length === 0) return;
+    const focused = document.activeElement?.closest(".agent-card");
+    let idx = focused ? cards.indexOf(focused) : -1;
+    if (key === "j") {
+      idx = idx < cards.length - 1 ? idx + 1 : 0;
+    } else {
+      idx = idx > 0 ? idx - 1 : cards.length - 1;
+    }
+    const target = cards[idx];
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      const inp = target.querySelector(".card-input textarea");
+      if (inp) inp.focus({ preventScroll: true });
+    }
+    return;
+  }
+  if (key === "?") {
+    e.preventDefault();
+    _toggleHelpOverlay();
+    return;
+  }
 
   if (key === "d") {
     e.preventDefault();
