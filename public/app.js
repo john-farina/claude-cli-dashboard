@@ -4594,6 +4594,7 @@ document.addEventListener("keydown", (e) => {
 // To add a game: put the HTML file in public/, add an entry here
 const _games = [
   { id: "block-drop", name: "Block Drop", subtitle: "ULTRA CHAOS", src: "game.html", icon: "\uD83C\uDFAE", color: "#e94560" },
+  { id: "blackjack", name: "Blackjack", subtitle: "DOUBLE DECK", src: "blackjack.html", icon: "\uD83C\uDCA1", color: "#1a5c2a" },
 ];
 let _arcadeOverlay = null;
 let _arcadeModal = null;
